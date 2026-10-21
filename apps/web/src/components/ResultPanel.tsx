@@ -2,9 +2,11 @@ import type { CaseResult, ProblemMode, RunResult, TestCase } from '@codetest/sha
 
 export type RunState =
   | { kind: 'idle' }
-  | { kind: 'running' }
+  | { kind: 'running'; submit: boolean }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode };
+  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode }
+  /** 제출 후 채점: 입력·기댓값은 보여 주지 않는다 */
+  | { kind: 'graded'; result: RunResult; score: number };
 
 const label: Record<CaseResult['status'], string> = {
   pass: '통과',
@@ -45,17 +47,12 @@ function Code({ children }: { children: React.ReactNode }) {
 export function ResultPanel({ state }: { state: RunState }) {
   if (state.kind === 'idle')
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
-  if (state.kind === 'running') return <p className="animate-pulse p-4 text-[13px] text-dim">실행 중…</p>;
+  if (state.kind === 'running') return <p className="animate-pulse p-4 text-[13px] text-dim">{state.submit ? '채점 중…' : '실행 중…'}</p>;
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
+  if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
+  if (state.kind === 'graded') return <Graded result={state.result} score={state.score} />;
 
   const { result, cases, mode } = state;
-  if (!result.compile.ok)
-    return (
-      <div className="p-4">
-        <p className="mb-2 text-[13px] font-bold text-bad">컴파일 에러</p>
-        <pre className="overflow-x-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-bad/90">{result.compile.output.trim()}</pre>
-      </div>
-    );
 
   const graded = result.results.filter((r) => r.status === 'pass' || r.status === 'fail' || r.status === 'error' || r.status === 'timeout');
   const passed = result.results.filter((r) => r.status === 'pass').length;
@@ -117,6 +114,65 @@ export function ResultPanel({ state }: { state: RunState }) {
           </span>
         </p>
       )}
+    </div>
+  );
+}
+
+function CompileError({ output }: { output: string }) {
+  return (
+    <div className="p-4">
+      <p className="mb-2 text-[13px] font-bold text-bad">컴파일 에러</p>
+      <pre className="overflow-x-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-bad/90">{output.trim()}</pre>
+    </div>
+  );
+}
+
+const gradedLabel: Record<CaseResult['status'], string> = {
+  pass: '통과',
+  fail: '실패',
+  done: '통과',
+  error: '실패 (런타임 에러)',
+  timeout: '실패 (시간 초과)',
+  skipped: '실패 (시간 초과)',
+};
+
+/** 기존 채점 결과 형식: 테스트별 통과/실패와 시간·메모리, 마지막에 점수 */
+function Graded({ result, score }: { result: RunResult; score: number }) {
+  const passed = result.results.filter((r) => r.status === 'pass').length;
+  return (
+    <div className="p-4 font-mono text-[12.5px] leading-[1.9]">
+      <p className="mb-1 font-sans text-[13px] font-bold">정확성 테스트</p>
+      <ul>
+        {result.results.map((r, i) => {
+          const ok = r.status === 'pass';
+          return (
+            <li key={r.id} className="flex flex-wrap gap-x-2">
+              <span className="w-[72px] text-faint">테스트 {i + 1} 〉</span>
+              <span className={ok ? 'text-ok' : 'text-bad'}>
+                {ok ? '✓ ' : '✗ '}
+                {gradedLabel[r.status]}
+              </span>
+              {r.status !== 'skipped' && (
+                <span className="text-faint">
+                  ({r.timeMs.toFixed(2)}ms, {r.memoryMb.toFixed(1)}MB)
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-3 border-t border-line pt-3 font-sans text-[13px]">
+        <p className="font-bold">채점 결과</p>
+        <p>
+          정확성: <b>{score.toFixed(1)}</b>
+        </p>
+        <p>
+          합계: <b className={score === 100 ? 'text-ok' : 'text-bad'}>{score.toFixed(1)}</b> / 100.0
+          <span className="ml-2 text-[12px] text-faint">
+            ({result.results.length}개 중 {passed}개 통과)
+          </span>
+        </p>
+      </div>
     </div>
   );
 }

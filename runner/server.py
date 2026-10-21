@@ -29,7 +29,7 @@ COMPILE_TIMEOUT_S = 30.0
 JAVA_XMX = os.environ.get("JAVA_XMX", "512m")
 PY_AS_LIMIT = int(os.environ.get("PY_AS_LIMIT_MB", "1024")) * 1024 * 1024
 OUTPUT_LIMIT = 64 * 1024
-MAX_CASES = 30
+MAX_CASES = 40
 # Cloudflare 응답 제한(100초) 안에 끝나도록 요청 전체 예산을 둔다.
 TOTAL_BUDGET_S = float(os.environ.get("TOTAL_BUDGET_S", "80"))
 MAX_CODE = 200 * 1024

@@ -1,5 +1,16 @@
 import { z } from 'zod';
-import { Problem, ProblemSummary, RunResult, Runtime, Session, type ProblemInput, type RunRequest } from '@codetest/shared';
+import {
+  Collection,
+  Folder,
+  Problem,
+  ProblemSummary,
+  RunResult,
+  Runtime,
+  Session,
+  type CollectionInput,
+  type ProblemInput,
+  type RunRequest,
+} from '@codetest/shared';
 
 export class ApiError extends Error {
   constructor(
@@ -54,9 +65,21 @@ export const api = {
   problems: () => request(z.array(ProblemSummary), '/api/problems'),
   problem: (id: string) => request(Problem, `/api/problems/${encodeURIComponent(id)}`),
   createProblem: (p: ProblemInput) => request(Problem, '/api/problems', json('POST', p)),
-  saveProblem: (id: string, p: ProblemInput) => request(Problem, `/api/problems/${encodeURIComponent(id)}`, json('PUT', p)),
+  /** keepalive: 페이지를 떠나는 중에도 요청을 끝까지 보낸다(본문 64KB 이하일 때만 브라우저가 허용). */
+  saveProblem: (id: string, p: ProblemInput, opts: { keepalive?: boolean } = {}) =>
+    request(Problem, `/api/problems/${encodeURIComponent(id)}`, { ...json('PUT', p), keepalive: opts.keepalive }),
   deleteProblem: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/problems/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   run: (r: RunRequest) => request(RunResult, '/api/run', json('POST', r)),
+  folders: () => request(z.array(Folder), '/api/folders'),
+  createFolder: (name: string) => request(Folder, '/api/folders', json('POST', { name })),
+  renameFolder: (id: string, name: string) => request(Folder, `/api/folders/${encodeURIComponent(id)}`, json('PUT', { name })),
+  deleteFolder: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  collections: () => request(z.array(Collection), '/api/collections'),
+  createCollection: (c: CollectionInput) => request(Collection, '/api/collections', json('POST', c)),
+  updateCollection: (id: string, c: CollectionInput) => request(Collection, `/api/collections/${encodeURIComponent(id)}`, json('PUT', c)),
+  setCollectionItems: (id: string, problemIds: string[]) =>
+    request(Collection, `/api/collections/${encodeURIComponent(id)}/items`, json('PUT', { problemIds })),
+  deleteCollection: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/collections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
 
 export const qk = {
@@ -64,4 +87,6 @@ export const qk = {
   runtime: ['runtime'] as const,
   problems: ['problems'] as const,
   problem: (id: string) => ['problem', id] as const,
+  folders: ['folders'] as const,
+  collections: ['collections'] as const,
 };

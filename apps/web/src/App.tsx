@@ -2,20 +2,10 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Language, ProblemMode, Session } from '@codetest/shared';
 import { ApiError, api, qk } from './lib/api.ts';
+import { useRoute, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
+import { Home } from './components/Home.tsx';
 import { Workspace, blankProblem } from './components/Workspace.tsx';
-
-/** #/p/<id> 형태의 아주 작은 라우터 */
-function useHashId(): [string | null, (id: string | null) => void] {
-  const read = () => /^#\/p\/([\w-]+)$/.exec(location.hash)?.[1] ?? null;
-  const [id, setId] = useState(read);
-  useEffect(() => {
-    const h = () => setId(read());
-    window.addEventListener('hashchange', h);
-    return () => window.removeEventListener('hashchange', h);
-  }, []);
-  return [id, (next) => (location.hash = next ? `#/p/${next}` : '')];
-}
 
 export function App() {
   const session = useQuery({ queryKey: qk.session, queryFn: api.session, staleTime: Infinity });
@@ -34,17 +24,14 @@ export function App() {
 
 function Shell() {
   const qc = useQueryClient();
-  const [id, setId] = useHashId();
-  const [listOpen, setListOpen] = useState(false);
+  const [route, go] = useRoute();
   const [creating, setCreating] = useState(false);
-  const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
   const runtime = useQuery({ queryKey: qk.runtime, queryFn: api.runtime, staleTime: 60_000 });
-
-  // 선택된 문제가 없으면 가장 최근 문제를 연다
+  // 홈에서 마지막으로 보던 범위. 문제를 닫으면 그 범위로 돌아간다.
+  const [lastScope, setLastScope] = useState<Scope>(route.kind === 'home' ? route.scope : { kind: 'all' });
   useEffect(() => {
-    if (!id && problems.data?.[0]) setId(problems.data[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, problems.data]);
+    if (route.kind === 'home') setLastScope(route.scope);
+  }, [route]);
 
   const logout = useMutation({
     mutationFn: api.logout,
@@ -59,16 +46,20 @@ function Shell() {
   return (
     <div className="flex h-full flex-col bg-ink">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-[#0f1922] px-3 sm:px-4">
-        <a href="#" className="flex items-center gap-2" onClick={(e) => (e.preventDefault(), setListOpen(true))}>
+        <a
+          href="#/"
+          className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-raised"
+          title="문제 선택 화면으로"
+          onClick={(e) => (e.preventDefault(), go({ kind: 'home', scope: { kind: 'all' } }))}
+        >
           <img src="/icon.svg" alt="" className="size-6" />
           <span className="font-mono text-[15px] font-bold tracking-tight">codetest</span>
         </a>
-        <button type="button" className="btn-quiet ml-1" onClick={() => setListOpen(true)}>
-          문제 목록
-        </button>
-        <button type="button" className="btn-quiet" onClick={() => setCreating(true)}>
-          + 새 문제
-        </button>
+        {route.kind === 'problem' && (
+          <button type="button" className="btn-quiet ml-1" onClick={() => go({ kind: 'home', scope: lastScope })}>
+            ← 문제 목록
+          </button>
+        )}
         <span className="ml-auto hidden items-center gap-1.5 text-[11.5px] text-faint md:flex" title="실행 환경">
           <span className={`size-1.5 rounded-full ${v?.runner === 'up' ? 'bg-ok' : 'bg-bad'}`} aria-hidden />
           {v?.runner === 'up' ? `Java ${v.versions.java ?? '?'} · Python ${v.versions.python ?? '?'}` : runtime.isPending ? '실행 환경 확인 중' : '실행 서버 연결 안 됨'}
@@ -78,40 +69,24 @@ function Shell() {
         </button>
       </header>
 
-      {id ? (
-        <Workspace problemId={id} onDeleted={() => setId(null)} />
-      ) : problems.isPending ? (
-        <p className="p-6 text-[13px] text-dim">불러오는 중…</p>
+      {route.kind === 'problem' ? (
+        <Workspace problemId={route.id} onDeleted={() => go({ kind: 'home', scope: lastScope })} />
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-          <p className="text-[15px] font-bold">아직 문제가 없어요</p>
-          <p className="text-[13px] text-dim">문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.</p>
-          <button type="button" className="btn-primary mt-2" onClick={() => setCreating(true)}>
-            + 새 문제
-          </button>
-        </div>
-      )}
-
-      {listOpen && (
-        <ProblemDrawer
-          currentId={id}
-          onClose={() => setListOpen(false)}
-          onPick={(pid) => {
-            setId(pid);
-            setListOpen(false);
-          }}
-          onNew={() => {
-            setListOpen(false);
-            setCreating(true);
-          }}
+        <Home
+          scope={route.scope}
+          onScope={(scope) => go({ kind: 'home', scope })}
+          onPick={(id) => go({ kind: 'problem', id })}
+          onNew={() => setCreating(true)}
         />
       )}
+
       {creating && (
         <NewProblemDialog
+          scope={route.kind === 'home' ? route.scope : lastScope}
           onClose={() => setCreating(false)}
           onCreated={(pid) => {
             setCreating(false);
-            setId(pid);
+            go({ kind: 'problem', id: pid });
           }}
         />
       )}
@@ -119,58 +94,26 @@ function Shell() {
   );
 }
 
-function ProblemDrawer({ currentId, onClose, onPick, onNew }: { currentId: string | null; onClose: () => void; onPick: (id: string) => void; onNew: () => void }) {
-  const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
-  const [filter, setFilter] = useState('');
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
-  const list = (problems.data ?? []).filter((p) => p.title.toLowerCase().includes(filter.trim().toLowerCase()));
-  return (
-    <div className="fixed inset-0 z-40 flex" role="dialog" aria-modal="true" aria-label="문제 목록">
-      <div className="flex h-full w-full max-w-sm flex-col border-r border-line bg-panel shadow-2xl">
-        <div className="flex items-center gap-2 border-b border-line p-3">
-          <input className="field font-sans" placeholder="문제 검색" value={filter} onChange={(e) => setFilter(e.target.value)} autoFocus />
-          <button type="button" className="btn-primary" onClick={onNew}>
-            + 새 문제
-          </button>
-        </div>
-        <ul className="min-h-0 flex-1 overflow-y-auto p-2">
-          {problems.isPending && <li className="p-3 text-[13px] text-dim">불러오는 중…</li>}
-          {problems.isSuccess && list.length === 0 && <li className="p-3 text-[13px] text-faint">문제가 없어요</li>}
-          {list.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => onPick(p.id)}
-                className={`flex w-full flex-col items-start gap-0.5 rounded-md px-3 py-2.5 text-left hover:bg-raised ${p.id === currentId ? 'bg-raised' : ''}`}
-              >
-                <span className="text-[14px] font-semibold">{p.title}</span>
-                <span className="text-[11.5px] text-faint">
-                  {p.language === 'java' ? 'Java' : 'Python3'} · {p.mode === 'function' ? 'solution 함수' : '표준 입출력'} · {new Date(p.updatedAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" aria-label="닫기" className="flex-1 bg-black/50" onClick={onClose} />
-    </div>
-  );
-}
-
-function NewProblemDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+/** 새 문제: 보던 폴더를 기본값으로 하고, 컬렉션을 보던 중이면 그 컬렉션 끝에 넣는다. */
+function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose: () => void; onCreated: (id: string) => void }) {
   const qc = useQueryClient();
+  const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
+  const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<ProblemMode>('function');
   const [language, setLanguage] = useState<Language>('java');
+  const [folderId, setFolderId] = useState<string | null>(scope.kind === 'folder' ? scope.id : null);
+  const collection = scope.kind === 'collection' ? collections.data?.find((c) => c.id === scope.id) : undefined;
   const create = useMutation({
-    mutationFn: () => api.createProblem(blankProblem(title.trim() || '새 문제', mode, language)),
+    mutationFn: async () => {
+      const p = await api.createProblem(blankProblem(title.trim() || '새 문제', mode, language, folderId));
+      if (collection) await api.setCollectionItems(collection.id, [...collection.problemIds, p.id]);
+      return p;
+    },
     onSuccess: (p) => {
       qc.setQueryData(qk.problem(p.id), p);
       void qc.invalidateQueries({ queryKey: qk.problems });
+      void qc.invalidateQueries({ queryKey: qk.collections });
       onCreated(p.id);
     },
   });
@@ -205,6 +148,26 @@ function NewProblemDialog({ onClose, onCreated }: { onClose: () => void; onCreat
             ))}
           </div>
         </fieldset>
+        <label className="mt-4 flex flex-col gap-1.5">
+          <span className="text-[12px] font-bold text-dim">폴더</span>
+          <select
+            value={folderId ?? ''}
+            onChange={(e) => setFolderId(e.target.value || null)}
+            className="h-[34px] rounded-md border border-line-strong bg-raised px-2 text-[13px] outline-none focus:border-accent"
+          >
+            <option value="">폴더 없음</option>
+            {folders.data?.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {collection && (
+          <p className="mt-2 text-[12px] text-faint">
+            <span className="text-sky">◆</span> "{collection.name}" 컬렉션 끝에 추가돼요.
+          </p>
+        )}
         <label className="mt-4 flex flex-col gap-1.5">
           <span className="text-[12px] font-bold text-dim">언어</span>
           <select

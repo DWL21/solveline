@@ -4,6 +4,11 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
 import {
+  Collection,
+  CollectionInput,
+  CollectionItemsInput,
+  Folder,
+  FolderInput,
   LoginRequest,
   Problem,
   ProblemInput,
@@ -15,14 +20,14 @@ import {
   SESSION_COOKIE,
 } from '@codetest/shared';
 import type { Config } from './config.ts';
-import { ProblemStore, type Db } from './db.ts';
+import { CollectionStore, FolderStore, ProblemStore, StoreError, type Db } from './db.ts';
 import { passwordMatches } from './auth/password.ts';
 import { RateLimiter } from './auth/rate-limit.ts';
 import { SessionStore } from './auth/sessions.ts';
 import { CaseInputError, RunnerError, type RunnerClient } from './runner.ts';
 import { log, redact } from './redact.ts';
 
-type Status = 400 | 401 | 404 | 429 | 500 | 502 | 503;
+type Status = 400 | 401 | 404 | 409 | 429 | 500 | 502 | 503;
 
 export type AppDeps = {
   config: Config;
@@ -60,6 +65,8 @@ export function createApp(deps: AppDeps) {
   const now = deps.now ?? Date.now;
   const sessions = new SessionStore(db, config.sessionTtlMs);
   const problems = new ProblemStore(db);
+  const folders = new FolderStore(db);
+  const collections = new CollectionStore(db);
   // 비밀번호 대입 방지: IP별 분당 5회, 전체 시간당 60회
   const loginLimit = new RateLimiter(5, 60_000);
   const loginGlobalLimit = new RateLimiter(60, 3600_000);
@@ -70,6 +77,7 @@ export function createApp(deps: AppDeps) {
   app.use('*', secureHeaders());
   app.use('/api/*', cors({ origin: config.webOrigin, credentials: true, allowMethods: ['GET', 'POST', 'PUT', 'DELETE'], allowHeaders: ['content-type'] }));
   app.onError((err, c) => {
+    if (err instanceof StoreError) return fail(c, err.code === 'duplicate_name' ? 409 : 400, err.code, err.message);
     log.error(`[api] ${c.req.path}`, err);
     return fail(c, 500, 'internal', '요청을 처리하지 못했습니다.');
   });
@@ -156,6 +164,53 @@ export function createApp(deps: AppDeps) {
 
   app.delete('/api/problems/:id', (c) =>
     problems.delete(c.req.param('id')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.'),
+  );
+
+  // ─── 폴더 ───
+  app.get('/api/folders', (c) => ok(c, z.array(Folder), folders.list()));
+
+  app.post('/api/folders', async (c) => {
+    const body = await readJson(c, FolderInput);
+    if (!body) return fail(c, 400, 'invalid_request', '폴더 이름이 필요합니다.');
+    return ok(c, Folder, folders.create(body.name));
+  });
+
+  app.put('/api/folders/:id', async (c) => {
+    const body = await readJson(c, FolderInput);
+    if (!body) return fail(c, 400, 'invalid_request', '폴더 이름이 필요합니다.');
+    const f = folders.rename(c.req.param('id'), body.name);
+    return f ? ok(c, Folder, f) : fail(c, 404, 'not_found', '없는 폴더입니다.');
+  });
+
+  app.delete('/api/folders/:id', (c) =>
+    folders.delete(c.req.param('id')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 폴더입니다.'),
+  );
+
+  // ─── 컬렉션 ───
+  app.get('/api/collections', (c) => ok(c, z.array(Collection), collections.list()));
+
+  app.post('/api/collections', async (c) => {
+    const body = await readJson(c, CollectionInput);
+    if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
+    return ok(c, Collection, collections.create(body));
+  });
+
+  app.put('/api/collections/:id', async (c) => {
+    const body = await readJson(c, CollectionInput);
+    if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
+    const col = collections.update(c.req.param('id'), body);
+    return col ? ok(c, Collection, col) : fail(c, 404, 'not_found', '없는 컬렉션입니다.');
+  });
+
+  app.put('/api/collections/:id/items', async (c) => {
+    const body = await readJson(c, CollectionItemsInput);
+    if (!body) return fail(c, 400, 'invalid_request', 'problemIds 배열이 필요합니다.');
+    const col = collections.setItems(c.req.param('id'), body.problemIds);
+    return col ? ok(c, Collection, col) : fail(c, 404, 'not_found', '없는 컬렉션입니다.');
+  });
+
+  app.delete('/api/collections/:id', (c) =>
+    collections.delete(c.req.param('id')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 컬렉션입니다.'),
   );
 
   app.post('/api/run', async (c) => {

@@ -32,12 +32,14 @@ function login(s: ReturnType<typeof setup>, password = PASSWORD) {
 
 const problem: ProblemInput = {
   title: '두 수의 합',
+  folderId: null,
   description: '',
   mode: 'function',
   params: ['numbers'],
-  cases: [{ id: 'a', args: ['[1, 2]'], stdin: '', expected: '3' }],
+  cases: [{ id: 'a', args: ['[1, 2]'], stdin: '', expected: '3', hidden: false }],
   language: 'python',
   code: { java: templateFor('java', 'function'), python: templateFor('python', 'function') },
+  lastSubmission: null,
 };
 
 describe('인증', () => {
@@ -99,9 +101,70 @@ describe('문제·실행', () => {
   it('잘못된 입력값은 400으로 알린다', async () => {
     const s = setup();
     const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
-    const body: RunRequest = { language: 'python', mode: 'function', code: 'x', cases: [{ id: 'a', args: ['[1, 2'], stdin: '', expected: '3' }] };
+    const body: RunRequest = { language: 'python', mode: 'function', code: 'x', cases: [{ id: 'a', args: ['[1, 2'], stdin: '', expected: '3', hidden: false }] };
     const res = await s.app.request('/api/run', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(res.status).toBe(400);
+  });
+});
+
+async function authed() {
+  const s = setup();
+  const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await s.app.request(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, body: (await res.json()) as { data: any; error?: { code: string } } }; // eslint-disable-line @typescript-eslint/no-explicit-any -- 테스트 응답 파싱
+  };
+  return call;
+}
+
+describe('제출 결과', () => {
+  it('마지막 제출 결과를 저장하고 목록에 보여 준다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    expect(p.lastSubmission).toBeNull();
+    const sub = { score: 80, passed: 8, total: 10, language: 'java', at: '2026-10-22T00:00:00.000Z' };
+    await call('PUT', '/api/problems/' + p.id, { ...problem, lastSubmission: sub });
+    expect((await call('GET', '/api/problems')).body.data[0].lastSubmission).toEqual(sub);
+  });
+});
+
+describe('폴더', () => {
+  it('문제를 폴더에 넣고, 폴더를 지우면 문제는 폴더 없음으로 남는다', async () => {
+    const call = await authed();
+    const f = (await call('POST', '/api/folders', { name: '그래프' })).body.data;
+    expect((await call('POST', '/api/folders', { name: '그래프' })).status).toBe(409);
+    const p = (await call('POST', '/api/problems', { ...problem, folderId: f.id })).body.data;
+    expect(p.folderId).toBe(f.id);
+    expect((await call('GET', '/api/problems')).body.data[0].folderId).toBe(f.id);
+    expect((await call('PUT', '/api/folders/' + f.id, { name: '그래프 탐색' })).body.data.name).toBe('그래프 탐색');
+    expect((await call('DELETE', '/api/folders/' + f.id)).status).toBe(200);
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.folderId).toBeNull();
+  });
+
+  it('없는 폴더로는 저장할 수 없다', async () => {
+    const call = await authed();
+    const res = await call('POST', '/api/problems', { ...problem, folderId: 'nope' });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('folder_not_found');
+  });
+});
+
+describe('컬렉션', () => {
+  it('한 문제가 여러 컬렉션에 순서대로 들어가고, 컬렉션을 지워도 문제는 남는다', async () => {
+    const call = await authed();
+    const a = (await call('POST', '/api/problems', { ...problem, title: 'A' })).body.data;
+    const b = (await call('POST', '/api/problems', { ...problem, title: 'B' })).body.data;
+    const c1 = (await call('POST', '/api/collections', { name: '세트 1' })).body.data;
+    const c2 = (await call('POST', '/api/collections', { name: '세트 2', description: '복습' })).body.data;
+    expect((await call('PUT', `/api/collections/${c1.id}/items`, { problemIds: [b.id, a.id, b.id] })).body.data.problemIds).toEqual([b.id, a.id]);
+    await call('PUT', `/api/collections/${c2.id}/items`, { problemIds: [a.id] });
+    const list = (await call('GET', '/api/collections')).body.data;
+    expect(list.map((c: { problemIds: string[] }) => c.problemIds)).toEqual([[b.id, a.id], [a.id]]);
+    expect((await call('PUT', `/api/collections/${c1.id}/items`, { problemIds: ['nope'] })).status).toBe(400);
+    await call('DELETE', '/api/problems/' + b.id);
+    expect((await call('GET', '/api/collections')).body.data[0].problemIds).toEqual([a.id]);
+    expect((await call('DELETE', '/api/collections/' + c2.id)).status).toBe(200);
+    expect((await call('GET', '/api/problems/' + a.id)).status).toBe(200);
   });
 });
 
@@ -114,7 +177,7 @@ describe('입력값 파싱', () => {
   });
 
   it('빈 기댓값은 비교하지 않는다(null)', () => {
-    const cases = toRunnerCases({ language: 'java', mode: 'function', code: '', cases: [{ id: 'a', args: ['1'], stdin: '', expected: ' ' }] });
+    const cases = toRunnerCases({ language: 'java', mode: 'function', code: '', cases: [{ id: 'a', args: ['1'], stdin: '', expected: ' ', hidden: false }] });
     expect(cases[0]).toEqual({ args: [1], expected: null });
   });
 });

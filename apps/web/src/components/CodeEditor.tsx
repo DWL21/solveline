@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
-import { Compartment, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
 import { indentWithTab } from '@codemirror/commands';
 import { indentUnit } from '@codemirror/language';
@@ -20,6 +20,9 @@ const navy = EditorView.theme(
 );
 
 const langExt = (l: Language) => (l === 'java' ? java() : python());
+
+/** 바깥 값으로 문서를 바꾼 트랜잭션. 사용자의 편집이 아니므로 onChange를 부르지 않는다. */
+const external = Annotation.define<boolean>();
 
 /** 문서 단위 에디터. docKey가 바뀌면(문제·언어 전환) 내용을 통째로 교체한다. */
 export function CodeEditor({
@@ -58,7 +61,7 @@ export function CodeEditor({
           oneDark,
           navy,
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) cb.current.onChange(u.state.doc.toString());
+            if (u.docChanged && !u.transactions.some((t) => t.annotation(external))) cb.current.onChange(u.state.doc.toString());
           }),
         ],
       }),
@@ -72,9 +75,11 @@ export function CodeEditor({
   useEffect(() => {
     const v = view.current;
     if (!v) return;
+    const same = v.state.doc.toString() === value;
     v.dispatch({
-      changes: { from: 0, to: v.state.doc.length, insert: value },
+      changes: same ? undefined : { from: 0, to: v.state.doc.length, insert: value },
       effects: lang.current.reconfigure(langExt(language)),
+      annotations: external.of(true),
     });
     // docKey가 바뀔 때만 외부 값을 밀어 넣는다 (타이핑 중 덮어쓰지 않게)
     // eslint-disable-next-line react-hooks/exhaustive-deps
