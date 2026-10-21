@@ -27,6 +27,8 @@ const migrations: string[] = [
      updated_at TEXT NOT NULL
    );
    CREATE INDEX problems_updated ON problems(updated_at);`,
+  // 개인키 로그인 제거 (#9)
+  `DROP TABLE IF EXISTS auth_nonces;`,
 ];
 
 /** dataDir가 ':memory:'면 메모리 DB (테스트용) */

@@ -2,11 +2,9 @@ import { Hono, type Context } from 'hono';
 import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
-import type { KeyObject } from 'node:crypto';
 import { z } from 'zod';
 import {
-  AUTH_MESSAGE_PREFIX,
-  Challenge,
+  LoginRequest,
   Problem,
   ProblemInput,
   ProblemSummary,
@@ -15,14 +13,12 @@ import {
   Runtime,
   Session,
   SESSION_COOKIE,
-  VerifyRequest,
 } from '@codetest/shared';
 import type { Config } from './config.ts';
 import { ProblemStore, type Db } from './db.ts';
-import { NonceStore } from './auth/nonces.ts';
+import { passwordMatches } from './auth/password.ts';
 import { RateLimiter } from './auth/rate-limit.ts';
 import { SessionStore } from './auth/sessions.ts';
-import { parsePublicKey, verifySignature } from './auth/signature.ts';
 import { CaseInputError, RunnerError, type RunnerClient } from './runner.ts';
 import { log, redact } from './redact.ts';
 
@@ -32,7 +28,6 @@ export type AppDeps = {
   config: Config;
   db: Db;
   runner: Pick<RunnerClient, 'run' | 'runtime'>;
-  nonces?: NonceStore;
   now?: () => number;
 };
 
@@ -63,14 +58,12 @@ const clientIp = (c: Context) =>
 export function createApp(deps: AppDeps) {
   const { config, db, runner } = deps;
   const now = deps.now ?? Date.now;
-  const nonces = deps.nonces ?? new NonceStore(db);
   const sessions = new SessionStore(db, config.sessionTtlMs);
   const problems = new ProblemStore(db);
-  const challengeLimit = new RateLimiter(20, 60_000);
-  const verifyLimit = new RateLimiter(10, 60_000);
+  // 비밀번호 대입 방지: IP별 분당 5회, 전체 시간당 60회
+  const loginLimit = new RateLimiter(5, 60_000);
+  const loginGlobalLimit = new RateLimiter(60, 3600_000);
   const runLimit = new RateLimiter(30, 60_000);
-  let publicKey: KeyObject | null = null;
-  if (config.accessPublicKey) publicKey = parsePublicKey(config.accessPublicKey);
 
   const app = new Hono();
 
@@ -92,32 +85,18 @@ export function createApp(deps: AppDeps) {
     return expiresAt === null ? null : { id, expiresAt };
   };
 
-  app.post('/api/auth/challenge', (c) => {
-    const retry = challengeLimit.hit(clientIp(c), now());
+  app.post('/api/auth/login', async (c) => {
+    const retry = loginLimit.hit(clientIp(c), now()) || loginGlobalLimit.hit('all', now());
     if (retry) {
       c.header('Retry-After', String(retry));
-      return fail(c, 429, 'rate_limited', '요청이 너무 많습니다. 잠시 후 다시 시도하세요.');
+      return fail(c, 429, 'rate_limited', '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.');
     }
-    const { nonce, expiresAt } = nonces.issue(now());
-    return ok(c, Challenge, { nonce, expiresAt: new Date(expiresAt).toISOString() });
-  });
-
-  app.post('/api/auth/verify', async (c) => {
-    const retry = verifyLimit.hit(clientIp(c), now());
-    if (retry) {
-      c.header('Retry-After', String(retry));
-      return fail(c, 429, 'rate_limited', '요청이 너무 많습니다. 잠시 후 다시 시도하세요.');
-    }
-    if (!publicKey) return fail(c, 503, 'auth_not_configured', '서버에 공개키(ACCESS_PUBLIC_KEY)가 설정되지 않았습니다.');
-    const body = await readJson(c, VerifyRequest);
-    if (!body) return fail(c, 400, 'invalid_request', 'nonce와 signature가 필요합니다.');
-    // nonce는 서명 검증 전에 소비한다 → 실패해도 같은 nonce로 다시 시도할 수 없다.
-    const consumed = nonces.consume(body.nonce, now());
-    if (consumed === 'expired') return fail(c, 401, 'nonce_expired', '로그인 요청이 만료되었습니다. 다시 시도하세요.');
-    if (consumed === 'unknown') return fail(c, 401, 'nonce_invalid', '유효하지 않거나 이미 사용된 로그인 요청입니다.');
-    if (!verifySignature(publicKey, AUTH_MESSAGE_PREFIX + body.nonce, body.signature)) {
-      log.warn(`[auth] 서명 검증 실패 ip=${clientIp(c)}`);
-      return fail(c, 401, 'invalid_signature', '서명이 올바르지 않습니다. 등록된 개인키인지 확인하세요.');
+    if (!config.accessPassword) return fail(c, 503, 'auth_not_configured', '서버에 비밀번호(ACCESS_PASSWORD)가 설정되지 않았습니다.');
+    const body = await readJson(c, LoginRequest);
+    if (!body) return fail(c, 400, 'invalid_request', '비밀번호가 필요합니다.');
+    if (!passwordMatches(config.accessPassword, body.password)) {
+      log.warn(`[auth] 비밀번호 불일치 ip=${clientIp(c)}`);
+      return fail(c, 401, 'invalid_password', '비밀번호가 올바르지 않습니다.');
     }
     const s = sessions.create(now());
     await setSignedCookie(c, SESSION_COOKIE, s.id, config.sessionSecret, {

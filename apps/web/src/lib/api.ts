@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Challenge, Problem, ProblemSummary, RunResult, Runtime, Session, type ProblemInput, type RunRequest } from '@codetest/shared';
+import { Problem, ProblemSummary, RunResult, Runtime, Session, type ProblemInput, type RunRequest } from '@codetest/shared';
 
 export class ApiError extends Error {
   constructor(
@@ -48,8 +48,7 @@ const json = (method: string, body?: unknown): RequestInit => ({ method, body: J
 
 export const api = {
   session: () => request(Session, '/api/auth/session'),
-  challenge: () => request(Challenge, '/api/auth/challenge', json('POST')),
-  verify: (nonce: string, signature: string) => request(Session, '/api/auth/verify', json('POST', { nonce, signature })),
+  login: (password: string) => request(Session, '/api/auth/login', json('POST', { password })),
   logout: () => request(Session, '/api/auth/logout', json('POST')),
   runtime: () => request(Runtime, '/api/runtime'),
   problems: () => request(z.array(ProblemSummary), '/api/problems'),

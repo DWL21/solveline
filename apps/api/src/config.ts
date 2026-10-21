@@ -26,7 +26,7 @@ const EnvSchema = z.object({
   PORT: positiveNumber(8787),
   DATA_DIR: optionalString,
   RUNNER_URL: optionalString,
-  ACCESS_PUBLIC_KEY: optionalString,
+  ACCESS_PASSWORD: optionalString,
   SESSION_SECRET: optionalString,
   SESSION_TTL_DAYS: positiveNumber(30),
   WEB_ORIGIN: optionalString,
@@ -37,7 +37,8 @@ export type Config = {
   dataDir: string;
   production: boolean;
   runnerUrl: string;
-  accessPublicKey: string | null;
+  /** 로그인 비밀번호. 없으면 로그인할 수 없다. */
+  accessPassword: string | null;
   sessionSecret: string;
   sessionTtlMs: number;
   webOrigin: string;
@@ -60,6 +61,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   if (production && !e.SESSION_SECRET) throw new ConfigError('운영 환경에는 SESSION_SECRET이 필요합니다.');
   if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
+  if (production && !e.ACCESS_PASSWORD) throw new ConfigError('운영 환경에는 ACCESS_PASSWORD가 필요합니다.');
+  if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
 
   let host = '';
   try {
@@ -74,7 +77,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dataDir: resolve(e.DATA_DIR ?? './data'),
     production,
     runnerUrl: (e.RUNNER_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, ''),
-    accessPublicKey: e.ACCESS_PUBLIC_KEY ?? null,
+    accessPassword: e.ACCESS_PASSWORD ?? null,
     // 개발 편의: 비밀이 없으면 프로세스마다 임의 값 (재시작하면 세션이 무효화된다)
     sessionSecret: e.SESSION_SECRET ?? cryptoRandom(),
     sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3600_000,

@@ -1,15 +1,14 @@
-import { generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { AUTH_MESSAGE_PREFIX, templateFor, type ProblemInput, type RunRequest } from '@codetest/shared';
+import { templateFor, type ProblemInput, type RunRequest } from '@codetest/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { openDb } from '../src/db.ts';
 import { CaseInputError, parseLiteral, toRunnerCases } from '../src/runner.ts';
 
+const PASSWORD = 'test-password-0123456789abcdef';
+
 function setup() {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  const x = publicKey.export({ format: 'jwk' }).x!;
-  const config = loadConfig({ ACCESS_PUBLIC_KEY: x, SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' });
+  const config = loadConfig({ ACCESS_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' });
   const calls: RunRequest[] = [];
   const runner = {
     run: async (req: RunRequest) => {
@@ -20,16 +19,14 @@ function setup() {
     runtime: async () => ({ runner: 'up' as const, versions: { java: '17', python: '3.8' } }),
   };
   const app = createApp({ config, db: openDb(':memory:'), runner });
-  return { app, privateKey, calls };
+  return { app, calls };
 }
 
-async function login(s: ReturnType<typeof setup>, key = s.privateKey) {
-  const ch = (await (await s.app.request('/api/auth/challenge', { method: 'POST' })).json()) as { data: { nonce: string } };
-  const signature = sign(null, Buffer.from(AUTH_MESSAGE_PREFIX + ch.data.nonce), key).toString('base64url');
-  return s.app.request('/api/auth/verify', {
+function login(s: ReturnType<typeof setup>, password = PASSWORD) {
+  return s.app.request('/api/auth/login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ nonce: ch.data.nonce, signature }),
+    body: JSON.stringify({ password }),
   });
 }
 
@@ -51,20 +48,33 @@ describe('인증', () => {
     expect((await app.request('/api/health')).status).toBe(200);
   });
 
-  it('등록되지 않은 키의 서명은 거부한다', async () => {
+  it('틀린 비밀번호는 거부하고 세션을 주지 않는다', async () => {
     const s = setup();
-    const other = generateKeyPairSync('ed25519').privateKey;
-    expect((await login(s, other)).status).toBe(401);
+    const res = await login(s, 'wrong-password');
+    expect(res.status).toBe(401);
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 
-  it('nonce는 한 번만 쓸 수 있다', async () => {
+  it('IP별로 로그인 시도를 제한한다', async () => {
     const s = setup();
-    const ch = (await (await s.app.request('/api/auth/challenge', { method: 'POST' })).json()) as { data: { nonce: string } };
-    const signature = sign(null, Buffer.from(AUTH_MESSAGE_PREFIX + ch.data.nonce), s.privateKey).toString('base64url');
-    const req = () =>
-      s.app.request('/api/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nonce: ch.data.nonce, signature }) });
-    expect((await req()).status).toBe(200);
-    expect((await req()).status).toBe(401);
+    for (let i = 0; i < 5; i++) expect((await login(s, 'wrong')).status).toBe(401);
+    expect((await login(s)).status).toBe(429);
+  });
+
+  it('로그아웃하면 세션이 무효가 된다', async () => {
+    const s = setup();
+    const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
+    expect((await s.app.request('/api/problems', { headers: { cookie } })).status).toBe(200);
+    await s.app.request('/api/auth/logout', { method: 'POST', headers: { cookie } });
+    expect((await s.app.request('/api/problems', { headers: { cookie } })).status).toBe(401);
+  });
+});
+
+describe('설정', () => {
+  it('운영 환경은 비밀번호가 없거나 짧으면 시작하지 않는다', () => {
+    const base = { NODE_ENV: 'production', SESSION_SECRET: 'x'.repeat(40) };
+    expect(() => loadConfig(base)).toThrow(/ACCESS_PASSWORD/);
+    expect(() => loadConfig({ ...base, ACCESS_PASSWORD: 'short' })).toThrow(/24자/);
   });
 });
 

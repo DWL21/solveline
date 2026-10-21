@@ -9,7 +9,6 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
-    "check": "pnpm typecheck && pnpm test && pnpm build",
-    "keygen": "node scripts/keygen.mjs"
+    "check": "pnpm typecheck && pnpm test && pnpm build"
   }
 }

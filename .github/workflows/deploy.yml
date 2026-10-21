@@ -25,12 +25,12 @@ jobs:
         # 공개 저장소: 서버에 필요한 값만 이름으로 넘긴다(비밀 전체를 꺼내지 않는다). 값은 출력하지 않는다.
         # 새 환경 변수는 apps/api/.env.example, 여기 env, 아래 KEYS에 함께 추가한다.
         env:
-          ACCESS_PUBLIC_KEY: ${{ vars.ACCESS_PUBLIC_KEY }}
           SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS }}
+          ACCESS_PASSWORD: ${{ secrets.ACCESS_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
-          KEYS="ACCESS_PUBLIC_KEY SESSION_SECRET SESSION_TTL_DAYS"
-          REQUIRED="ACCESS_PUBLIC_KEY SESSION_SECRET"
+          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS"
+          REQUIRED="ACCESS_PASSWORD SESSION_SECRET"
           for k in $REQUIRED; do
             [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }
           done

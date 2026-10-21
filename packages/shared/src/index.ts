@@ -3,17 +3,10 @@ import { z } from 'zod';
 /** API 계약. api·web이 함께 쓴다. 성공 `{ data }`, 실패 `{ error: { code, message } }`. */
 
 export const SESSION_COOKIE = 'codetest_session';
-/** 서명 대상 = 접두사 + nonce. 다른 서비스용 서명과 섞이지 않게 한다. */
-export const AUTH_MESSAGE_PREFIX = 'codetest-login:v1:';
 
-export const Challenge = z.object({ nonce: z.string(), expiresAt: z.string() });
-export type Challenge = z.infer<typeof Challenge>;
-
-export const VerifyRequest = z.object({
-  nonce: z.string().min(1).max(200),
-  signature: z.string().min(1).max(200),
-});
-export type VerifyRequest = z.infer<typeof VerifyRequest>;
+/** 비밀번호 로그인. 값은 GitHub Environment secret(ACCESS_PASSWORD)에만 있다. */
+export const LoginRequest = z.object({ password: z.string().min(1).max(256) });
+export type LoginRequest = z.infer<typeof LoginRequest>;
 
 export const Session = z.object({ authenticated: z.boolean(), expiresAt: z.string().nullable() });
 export type Session = z.infer<typeof Session>;

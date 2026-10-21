@@ -7,7 +7,8 @@ import { log, registerSecret } from './redact.ts';
 
 const config = loadConfig();
 registerSecret(config.sessionSecret);
-if (!config.accessPublicKey) log.warn('[config] ACCESS_PUBLIC_KEY가 없어 로그인할 수 없습니다.');
+registerSecret(config.accessPassword);
+if (!config.accessPassword) log.warn('[config] ACCESS_PASSWORD가 없어 로그인할 수 없습니다.');
 
 const db = openDb(config.dataDir);
 const app = createApp({ config, db, runner: new RunnerClient(config.runnerUrl) });

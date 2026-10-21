@@ -4,19 +4,19 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Java-OpenJDK%2017-e76f00" alt="OpenJDK 17">
   <img src="https://img.shields.io/badge/Python-3.8-3776ab" alt="Python 3.8">
-  <img src="https://img.shields.io/badge/access-private%20key%20only-21242e" alt="Private key only">
+  <img src="https://img.shields.io/badge/access-password%20only-21242e" alt="Password only">
 </p>
 
 ---
 
-**서비스**: <a href="https://codetest.simplyimg.com">https://codetest.simplyimg.com</a> (개인키 보유자 전용)
+**서비스**: <a href="https://codetest.simplyimg.com">https://codetest.simplyimg.com</a> (비밀번호 보유자 전용)
 
 **문서**: [`AGENTS.md`](AGENTS.md) · [`packages/shared/src/index.ts`](packages/shared/src/index.ts) (API 계약) · [`docs/decisions`](docs/decisions)
 
 ---
 
 기존 코딩 테스트 화면처럼 문제 설명·코드 에디터·실행 결과를 한 화면에 두고, 같은 계열의 Java·Python 환경에서 코드를 실행하는 개인용 웹 IDE입니다.
-인터넷에 배포하지만 **내 개인키를 가진 기기에서만** 열 수 있습니다.
+인터넷에 배포하지만 **비밀번호를 아는 사람만** 열 수 있습니다.
 
 주요 특징:
 
@@ -25,7 +25,7 @@
 * **기존식 결과**: 테스트별 통과·실패, 실행 시간·메모리, `print`/`System.out` 출력, 런타임 에러, 시간 초과(10초).
 * **문제 저장**: 문제 설명·테스트 케이스·언어별 코드를 서버에 자동 저장.
 * **격리 실행**: 사용자 코드는 인터넷이 차단된 runner 컨테이너에서 권한을 낮춘 uid로 실행.
-* **개인키 로그인**: 비밀번호 없음. Ed25519 개인키로 서버 nonce에 서명해 세션 발급.
+* **비밀번호 로그인**: 랜덤 비밀번호 하나. 원본은 GitHub Environment secret에만 있고, 시도 횟수를 제한한다.
 
 ## 실행 환경
 
@@ -54,24 +54,21 @@ $ pnpm install
 
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
-| `SESSION_SECRET` | `apps/api/.env` | GitHub → Settings → Environments → `production` → **Secrets** |
-| `ACCESS_PUBLIC_KEY`, `SESSION_TTL_DAYS`(선택) | `apps/api/.env` | 같은 환경의 **Variables** |
-| 접근 개인키 | `~/.codetest/access.key` | 내 기기에만 (서버·저장소에 두지 않음) |
+| `ACCESS_PASSWORD`, `SESSION_SECRET` | `apps/api/.env` | GitHub → Settings → Environments → `production` → **Secrets** |
+| `SESSION_TTL_DAYS`(선택) | `apps/api/.env` | 같은 환경의 **Variables** |
 
 `apps/api/.env`는 gitignore 대상입니다. 변수 목록과 설명은 [`apps/api/.env.example`](apps/api/.env.example)에 있습니다.
 배포 워크플로가 `production` 환경에서 위 값만 이름으로 꺼내 서버 `/etc/codetest/api.env`로 기록합니다. 새 변수는 [`deploy.yml`](.github/workflows/deploy.yml)의 목록에도 추가해야 합니다.
 
 ## Example
 
-### 1. 접근 키 만들기
+### 1. 비밀번호 정하기
 
 ```console
-$ pnpm keygen
-개인키 저장: /Users/me/.codetest/access.key
-ACCESS_PUBLIC_KEY=...
+$ openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
 ```
 
-출력된 `ACCESS_PUBLIC_KEY`를 `apps/api/.env`에 넣습니다.
+출력된 값을 `apps/api/.env`의 `ACCESS_PASSWORD=`에 넣습니다 (24자 이상).
 
 ### 2. 실행
 
@@ -80,7 +77,7 @@ $ pnpm dev:runner   # 다른 터미널에서 계속 실행
 $ pnpm dev
 ```
 
-* 웹: http://localhost:5173 — `access.key` 파일을 선택해 로그인
+* 웹: http://localhost:5173 — `ACCESS_PASSWORD`로 로그인
 * API: http://localhost:8787/api/health
 
 ## API
@@ -89,8 +86,7 @@ $ pnpm dev
 
 | Method | Path | 설명 |
 |---|---|---|
-| `POST` | `/api/auth/challenge` | 로그인 nonce 발급 |
-| `POST` | `/api/auth/verify` | 개인키 서명 검증, 세션 쿠키 발급 |
+| `POST` | `/api/auth/login` | 비밀번호 확인, 세션 쿠키 발급 |
 | `GET` | `/api/auth/session` | 세션 상태 |
 | `POST` | `/api/auth/logout` | 로그아웃 |
 | `GET` | `/api/runtime` | runner 상태와 Java·Python 버전 |

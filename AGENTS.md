@@ -7,13 +7,12 @@
 
 | 경로 | 내용 | 실행 환경 |
 |---|---|---|
-| `apps/api` | Hono REST API, 개인키 인증, 문제 저장(SQLite), runner 프록시 | Node 24 (Docker, pahidc) |
+| `apps/api` | Hono REST API, 비밀번호 인증, 문제 저장(SQLite), runner 프록시 | Node 24 (Docker, pahidc) |
 | `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE | nginx (Docker, pahidc) — API와 같은 출처 |
 | `runner` | 코드 실행 서버(Python 3.8 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 17, Python 3.8) |
 | `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
 | `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 이미지·nginx·배포 | pahidc |
 | `.github/workflows` | CI(`ci.yml`), 배포(`deploy.yml`) | GitHub-hosted / self-hosted(pahidc) |
-| `scripts/keygen.mjs` | 접근 키 생성 | 로컬 |
 | `docs/decisions` | 결정 기록 | — |
 
 ## 작업 흐름 (필수)
@@ -31,10 +30,9 @@
 
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
-| `SESSION_SECRET` | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
-| `ACCESS_PUBLIC_KEY` | `apps/api/.env` | GitHub Environment `production` **variables** (공개키라 비밀 아님) |
+| `ACCESS_PASSWORD` (로그인 비밀번호) | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
+| `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
-| 접근 개인키 | `~/.codetest/access.key` (권한 600) — 사용자 기기에만 | 서버·GitHub에 두지 않음 |
 
 - 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/codetest/api.env`(root, 600)로 기록한다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
 - 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`의 `env:`와 `KEYS`(필수면 `REQUIRED`도)에 함께 추가해야 반영된다.
@@ -67,13 +65,14 @@
 
 ## 접근 제어
 
-단일 사용자 전용. 계정·비밀번호 대신 **Ed25519 개인키 서명**으로 로그인한다 (stock과 같은 방식).
+단일 사용자 전용. **랜덤 비밀번호 하나**로 로그인한다. 원본은 GitHub Environment `production`의 secret `ACCESS_PASSWORD`에만 둔다.
 
-1. `pnpm keygen` → 개인키는 `~/.codetest/access.key`, 공개키를 `ACCESS_PUBLIC_KEY`로 등록
-2. 웹에서 개인키 파일을 선택하면 브라우저가 서버 nonce에 서명 (개인키는 전송하지 않음)
-3. 서버가 공개키로 검증 → HttpOnly·Secure·SameSite=Strict 세션 쿠키 발급
+1. 비밀번호는 24자 이상 랜덤 문자열로 만든다: `openssl rand -base64 24 | tr '+/' '-_' | tr -d '='`
+2. `gh secret set ACCESS_PASSWORD --env production`(표준 입력으로)으로 저장하고, 다음 배포에서 서버 env에 반영된다. 바꾸려면 secret을 갱신하고 `Production deployment`를 다시 실행한다.
+3. `POST /api/auth/login`이 상수 시간 비교로 확인 → HttpOnly·Secure·SameSite=Strict 세션 쿠키 발급. 시도 제한: IP별 분당 5회, 전체 시간당 60회.
+4. 운영에서 `ACCESS_PASSWORD`가 없거나 24자 미만이면 api가 시작하지 않는다.
 
-`/api/health`, `/api/auth/*` 외 모든 API는 세션이 필요하다. 계약은 `packages/shared/src/index.ts`.
+비밀번호를 코드·이슈·PR·로그·Actions 출력에 남기지 않는다. `/api/health`, `/api/auth/*` 외 모든 API는 세션이 필요하다. 계약은 `packages/shared/src/index.ts`.
 
 ## 코드 규칙
 
