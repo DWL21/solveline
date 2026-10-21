@@ -13,4 +13,5 @@ RUN pnpm --filter @codetest/web build
 # 정적 파일 + /api 프록시를 한 출처로 서빙한다.
 FROM nginx:stable-alpine
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
