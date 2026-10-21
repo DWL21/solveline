@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+data/
+.wrangler
+.DS_Store
+.claude/
+# 접근 개인키 — 절대 커밋 금지
+*.key
+*.pem
+keys/
