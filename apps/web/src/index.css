@@ -1,0 +1,79 @@
+@import 'tailwindcss';
+
+/* 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤 */
+@theme {
+  --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-mono: 'JetBrains Mono', 'D2Coding', 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-ink: #0c151c;
+  --color-base: #172334;
+  --color-panel: #1e2a38;
+  --color-raised: #263747;
+  --color-line: #2f4256;
+  --color-line-strong: #3d5468;
+  --color-text: #e6edf3;
+  --color-dim: #98a8b9;
+  --color-faint: #687c90;
+  --color-accent: #0078ff;
+  --color-accent-hover: #2b8cff;
+  --color-sky: #44c4f5;
+  --color-ok: #3ec27d;
+  --color-bad: #ff6b6b;
+  --color-warn: #f5b94a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--color-text);
+  background: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: rgb(0 120 255 / 0.35);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 text-[13px] font-semibold whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  min-height: 34px;
+}
+@utility btn-primary {
+  @apply btn bg-accent text-white hover:bg-accent-hover;
+}
+@utility btn-ghost {
+  @apply btn border border-line-strong bg-raised text-text hover:border-dim;
+}
+@utility btn-quiet {
+  @apply btn text-dim hover:bg-raised hover:text-text;
+}
+@utility field {
+  @apply w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[13px] text-text outline-none placeholder:text-faint focus:border-accent;
+}
+@utility pane-title {
+  @apply flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-[13px] font-bold text-dim;
+}
+
+/* CodeMirror를 패널에 꽉 채운다 */
+.cm-editor {
+  height: 100%;
+  font-size: 14px;
+}
+.cm-editor .cm-scroller {
+  font-family: var(--font-mono);
+  line-height: 1.6;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
