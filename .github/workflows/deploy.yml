@@ -22,21 +22,23 @@ jobs:
         with:
           persist-credentials: false
       - name: Write /etc/codetest/api.env from GitHub Environment
-        # production 환경의 secrets·variables를 모두 env 파일로 기록한다. 값은 출력하지 않는다.
+        # 공개 저장소: 서버에 필요한 값만 이름으로 넘긴다(비밀 전체를 꺼내지 않는다). 값은 출력하지 않는다.
+        # 새 환경 변수는 apps/api/.env.example, 여기 env, 아래 KEYS에 함께 추가한다.
         env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-          VARS_JSON: ${{ toJSON(vars) }}
+          ACCESS_PUBLIC_KEY: ${{ vars.ACCESS_PUBLIC_KEY }}
+          SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
+          KEYS="ACCESS_PUBLIC_KEY SESSION_SECRET SESSION_TTL_DAYS"
+          REQUIRED="ACCESS_PUBLIC_KEY SESSION_SECRET"
+          for k in $REQUIRED; do
+            [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }
+          done
           sudo install -d -m 700 -o root -g root /etc/codetest
-          python3 - <<'PY' | sudo tee /etc/codetest/api.env.new >/dev/null
-          import json, os, re
-          merged = {**json.loads(os.environ["VARS_JSON"] or "{}"), **json.loads(os.environ["SECRETS_JSON"] or "{}")}
-          for k in sorted(merged):
-              if k == "GITHUB_TOKEN" or k.startswith(("ACTIONS_", "RUNNER_")) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", k):
-                  continue
-              v = str(merged[k]).replace("\n", "")
-              print(f"{k}={v}")
-          PY
+          for k in $KEYS; do
+            v="${!k}"
+            if [ -n "$v" ]; then printf '%s=%s\n' "$k" "${v//$'\n'/}"; fi
+          done | sudo tee /etc/codetest/api.env.new >/dev/null
           sudo chmod 600 /etc/codetest/api.env.new
           sudo mv /etc/codetest/api.env.new /etc/codetest/api.env
           echo "env keys: $(sudo cut -d= -f1 /etc/codetest/api.env | tr '\n' ' ')"

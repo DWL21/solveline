@@ -55,11 +55,11 @@ $ pnpm install
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
 | `SESSION_SECRET` | `apps/api/.env` | GitHub → Settings → Environments → `production` → **Secrets** |
-| `ACCESS_PUBLIC_KEY` | `apps/api/.env` | 같은 환경의 **Variables** |
+| `ACCESS_PUBLIC_KEY`, `SESSION_TTL_DAYS`(선택) | `apps/api/.env` | 같은 환경의 **Variables** |
 | 접근 개인키 | `~/.codetest/access.key` | 내 기기에만 (서버·저장소에 두지 않음) |
 
 `apps/api/.env`는 gitignore 대상입니다. 변수 목록과 설명은 [`apps/api/.env.example`](apps/api/.env.example)에 있습니다.
-배포 시 `production` 환경의 secrets·variables가 서버 `/etc/codetest/api.env`로 기록됩니다.
+배포 워크플로가 `production` 환경에서 위 값만 이름으로 꺼내 서버 `/etc/codetest/api.env`로 기록합니다. 새 변수는 [`deploy.yml`](.github/workflows/deploy.yml)의 목록에도 추가해야 합니다.
 
 ## Example
 

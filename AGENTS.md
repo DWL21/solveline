@@ -33,9 +33,11 @@
 |---|---|---|
 | `SESSION_SECRET` | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
 | `ACCESS_PUBLIC_KEY` | `apps/api/.env` | GitHub Environment `production` **variables** (공개키라 비밀 아님) |
+| `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 | 접근 개인키 | `~/.codetest/access.key` (권한 600) — 사용자 기기에만 | 서버·GitHub에 두지 않음 |
 
-- 배포 워크플로가 `production` 환경의 secrets·variables를 **모두** 서버 `/etc/codetest/api.env`(root, 600)로 기록한다. 새 변수는 GitHub에 추가만 하면 다음 배포에 반영된다.
+- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/codetest/api.env`(root, 600)로 기록한다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
+- 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`의 `env:`와 `KEYS`(필수면 `REQUIRED`도)에 함께 추가해야 반영된다.
 - `production` 환경은 `main` 브랜치에서만 쓸 수 있다(deployment branch policy).
 - `.env.example`은 커밋 대상이다. 실제 값을 넣지 않는다.
 - 키·토큰·비밀번호·쿠키·`.env` 내용을 **커밋·PR 본문·이슈·로그·출력에 남기지 않는다.**
