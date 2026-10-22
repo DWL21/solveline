@@ -3,7 +3,7 @@ import { templateFor, type ProblemInput, type RunRequest } from '@codetest/share
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { openDb } from '../src/db.ts';
-import { CaseInputError, parseLiteral, toRunnerCases } from '../src/runner.ts';
+import { CaseInputError, normalizeLiteral, toRunnerCases } from '../src/runner.ts';
 
 const PASSWORD = 'test-password-0123456789abcdef';
 
@@ -169,15 +169,19 @@ describe('컬렉션', () => {
 });
 
 describe('입력값 파싱', () => {
-  it('JSON과 작은따옴표 배열을 받는다', () => {
-    expect(parseLiteral('[[1, 2], [3]]', 'x')).toEqual([[1, 2], [3]]);
-    expect(parseLiteral("['a', 'b']", 'x')).toEqual(['a', 'b']);
-    expect(parseLiteral('"abc"', 'x')).toBe('abc');
-    expect(() => parseLiteral('abc', 'x')).toThrow(CaseInputError);
+  it('JSON과 작은따옴표 배열을 받고, 텍스트 그대로 넘긴다', () => {
+    expect(normalizeLiteral(' [[1, 2], [3]] ', 'x')).toBe('[[1, 2], [3]]');
+    expect(normalizeLiteral("['a', 'b']", 'x')).toBe('["a", "b"]');
+    expect(normalizeLiteral('"abc"', 'x')).toBe('"abc"');
+    expect(() => normalizeLiteral('abc', 'x')).toThrow(CaseInputError);
+  });
+
+  it('2^53을 넘는 정수를 바꾸지 않는다', () => {
+    expect(normalizeLiteral('123456789012345678901', 'x')).toBe('123456789012345678901');
   });
 
   it('빈 기댓값은 비교하지 않는다(null)', () => {
     const cases = toRunnerCases({ language: 'java', mode: 'function', code: '', cases: [{ id: 'a', args: ['1'], stdin: '', expected: ' ', hidden: false }] });
-    expect(cases[0]).toEqual({ args: [1], expected: null });
+    expect(cases[0]).toEqual({ argsJson: ['1'], expectedJson: null });
   });
 });

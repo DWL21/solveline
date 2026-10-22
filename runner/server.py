@@ -308,7 +308,13 @@ def execute(req):
                                     "timeMs": 0, "memoryMb": 0, "actual": None})
                     continue
                 if mode == "function":
-                    results.append(run_function_case(lang, work, c.get("args", []), c.get("expected")))
+                    # api는 JSON 텍스트를 그대로 넘긴다(큰 정수 정밀도 보존). 예전 형식(args/expected 값)도 받는다.
+                    if "argsJson" in c:
+                        args = [json.loads(a) for a in c["argsJson"]]
+                        expected = None if c.get("expectedJson") is None else json.loads(c["expectedJson"])
+                    else:
+                        args, expected = c.get("args", []), c.get("expected")
+                    results.append(run_function_case(lang, work, args, expected))
                 else:
                     results.append(run_stdin_case(lang, code, work, c.get("stdin", ""), c.get("expected")))
             return {"compile": {"ok": True, "output": ""}, "results": results}

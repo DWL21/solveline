@@ -116,6 +116,14 @@ def main():
                         "cases": [{"args": [], "expected": 1}]})
     ok &= check("python syntax error", not r["compile"]["ok"], r)
 
+    big = "123456789012345678901"
+    r = server.execute({"language": "python", "mode": "function", "code": "def solution(x):\n    return x * 10 + 1\n",
+                        "cases": [{"argsJson": ["12345678901234567890"], "expectedJson": big}]})
+    ok &= check("python big int exact", r["results"][0]["status"] == "pass", r)
+    r = server.execute({"language": "java", "mode": "function", "code": "class Solution { long solution(long x) { return x * 10 + 7; } }",
+                        "cases": [{"argsJson": ["900719925474099"], "expectedJson": "9007199254740997"}, {"argsJson": ["900719925474099"], "expectedJson": "9007199254740996"}]})
+    ok &= check("java long beyond 2^53", [x["status"] for x in r["results"]] == ["pass", "fail"], r)
+
     server.RUN_TIMEOUT_S = 2.0
     r = server.execute({"language": "python", "mode": "function", "code": PY_LOOP,
                         "cases": [{"args": [1], "expected": 1}]})

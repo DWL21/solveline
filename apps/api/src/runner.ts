@@ -3,17 +3,23 @@ import type { RunRequest, RunResult, Runtime } from '@codetest/shared';
 export class RunnerError extends Error {}
 export class CaseInputError extends Error {}
 
-/** 기존 입력값 텍스트(JSON 리터럴)를 값으로 바꾼다. 작은따옴표 문자열도 허용한다. */
-export function parseLiteral(text: string, where: string): unknown {
+/**
+ * 기존 입력값 텍스트(JSON 리터럴)의 문법만 확인하고, runner에 넘길 JSON 텍스트를 돌려준다.
+ * 값으로 바꾸지 않는다: JavaScript 숫자는 2^53을 넘는 정수를 정확히 담지 못하므로 해석은 runner(Python)가 한다.
+ * 작은따옴표 문자열(['a', 'b'])은 큰따옴표로 바꿔 준다.
+ */
+export function normalizeLiteral(text: string, where: string): string {
   const t = text.trim();
   if (!t) throw new CaseInputError(`${where}: 값이 비어 있습니다.`);
   try {
-    return JSON.parse(t);
+    JSON.parse(t);
+    return t;
   } catch {
-    // ['a', 'b'] 처럼 작은따옴표를 쓴 경우만 큰따옴표로 바꿔 다시 시도한다.
     if (t.includes("'") && !t.includes('"')) {
+      const fixed = t.replace(/'/g, '"');
       try {
-        return JSON.parse(t.replace(/'/g, '"'));
+        JSON.parse(fixed);
+        return fixed;
       } catch {
         /* 아래에서 오류 */
       }
@@ -22,15 +28,15 @@ export function parseLiteral(text: string, where: string): unknown {
   }
 }
 
-type RunnerCase = { args?: unknown[]; stdin?: string; expected: unknown };
+type RunnerCase = { argsJson?: string[]; stdin?: string; expectedJson?: string | null; expected?: string | null };
 
 export function toRunnerCases(req: RunRequest): RunnerCase[] {
   return req.cases.map((c, i) => {
     const n = i + 1;
     if (req.mode === 'stdin') return { stdin: c.stdin, expected: c.expected.trim() === '' ? null : c.expected };
     return {
-      args: c.args.map((a, j) => parseLiteral(a, `테스트 ${n} 매개변수 ${j + 1}`)),
-      expected: c.expected.trim() === '' ? null : parseLiteral(c.expected, `테스트 ${n} 기댓값`),
+      argsJson: c.args.map((a, j) => normalizeLiteral(a, `테스트 ${n} 매개변수 ${j + 1}`)),
+      expectedJson: c.expected.trim() === '' ? null : normalizeLiteral(c.expected, `테스트 ${n} 기댓값`),
     };
   });
 }
