@@ -30,6 +30,7 @@ type Row = {
   cases: string | null;
   testset_hash: string | null;
   case_ids: string;
+  time_limit_ms: number;
   priority: number;
   status: Submission['status'];
   result: string | null;
@@ -50,6 +51,7 @@ export type NewSubmission = {
   cases: TestCase[] | null;
   testsetHash: string | null;
   caseIds: string[];
+  timeLimitMs: number;
 };
 
 export class SubmissionStore {
@@ -59,10 +61,23 @@ export class SubmissionStore {
     const id = randomUUID();
     this.db
       .prepare(
-        `INSERT INTO submissions (id, problem_id, kind, language, mode, code, cases, testset_hash, case_ids, priority, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+        `INSERT INTO submissions (id, problem_id, kind, language, mode, code, cases, testset_hash, case_ids, time_limit_ms, priority, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
       )
-      .run(id, s.problemId, s.kind, s.language, s.mode, s.code, s.cases ? JSON.stringify(s.cases) : null, s.testsetHash, JSON.stringify(s.caseIds), PRIORITY[s.kind], now.toISOString());
+      .run(
+        id,
+        s.problemId,
+        s.kind,
+        s.language,
+        s.mode,
+        s.code,
+        s.cases ? JSON.stringify(s.cases) : null,
+        s.testsetHash,
+        JSON.stringify(s.caseIds),
+        s.timeLimitMs,
+        PRIORITY[s.kind],
+        now.toISOString(),
+      );
     return id;
   }
 
@@ -184,7 +199,7 @@ export class Dispatcher {
 
   private async execute(job: NonNullable<ReturnType<SubmissionStore['claim']>>, runner: RunnerClient) {
     try {
-      const run: RunJob = { language: job.language, mode: job.mode, code: job.code };
+      const run: RunJob = { language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.time_limit_ms };
       if (job.testset_hash) {
         const hash = job.testset_hash;
         run.testset = { hash, raw: () => this.testsets.raw(hash) };

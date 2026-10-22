@@ -25,7 +25,9 @@ SANDBOX_UID = int(os.environ.get("SANDBOX_UID", "-1"))  # -1이면 낮추지 않
 WORK_ROOT = os.environ.get("WORK_ROOT", tempfile.gettempdir())
 PORT = int(os.environ.get("PORT", "8000"))
 
-RUN_TIMEOUT_S = float(os.environ.get("RUN_TIMEOUT_S", "10"))  # 기존 테스트당 10초
+RUN_TIMEOUT_S = float(os.environ.get("RUN_TIMEOUT_S", "10"))  # 문제가 시간 제한을 정하지 않으면 10초
+# 시간 제한은 solution 호출(입출력형은 실행) 시간 기준이다. 프로세스는 언어별 시작 시간만큼 여유를 두고 종료한다.
+STARTUP_SLACK_S = {"java": 3.0, "python": 1.0}
 COMPILE_TIMEOUT_S = 30.0
 JAVA_XMX = os.environ.get("JAVA_XMX", "512m")
 PY_AS_LIMIT = int(os.environ.get("PY_AS_LIMIT_MB", "1024")) * 1024 * 1024
@@ -276,7 +278,7 @@ def java_cmd(*rest):
             "-Dstdout.encoding=UTF-8", "-cp", "out" + os.pathsep + JAVA_HARNESS_CP] + list(rest)
 
 
-def run_function_case(lang, work, args, expected):
+def run_function_case(lang, work, args, expected, limit_s):
     case_path = os.path.join(work, "case.json")
     result_path = os.path.join(work, "result.json")
     for path in (result_path,):
@@ -285,9 +287,10 @@ def run_function_case(lang, work, args, expected):
     with open(case_path, "w", encoding="utf-8") as f:
         json.dump({"args": args}, f, ensure_ascii=False)
     if lang == "python":
-        p = run_proc([sys.executable, "-I", os.path.join(HARNESS_DIR, "py_harness.py"), work], work, as_limit=PY_AS_LIMIT)
+        p = run_proc([sys.executable, "-I", os.path.join(HARNESS_DIR, "py_harness.py"), work], work, as_limit=PY_AS_LIMIT,
+                     timeout=limit_s + STARTUP_SLACK_S[lang])
     else:
-        p = run_proc(java_cmd("CodetestHarness", work), work)
+        p = run_proc(java_cmd("CodetestHarness", work), work, timeout=limit_s + STARTUP_SLACK_S[lang])
 
     res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
            "memoryMb": round(p.memory_kb / 1024, 1), "actual": None}
@@ -309,17 +312,21 @@ def run_function_case(lang, work, args, expected):
         return res
     res["timeMs"] = r.get("timeMs", res["timeMs"])
     res["actual"] = json.dumps(r["value"], ensure_ascii=False)
+    if res["timeMs"] > limit_s * 1000:
+        res["status"] = "timeout"
+        return res
     res["status"] = "pass" if expected is None or _same(r["value"], expected) else "fail"
     if expected is None:
         res["status"] = "done"
     return res
 
 
-def run_stdin_case(lang, code, work, stdin, expected):
+def run_stdin_case(lang, code, work, stdin, expected, limit_s):
+    timeout = limit_s + STARTUP_SLACK_S[lang]
     if lang == "python":
-        p = run_proc([sys.executable, "solution.py"], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT)
+        p = run_proc([sys.executable, "solution.py"], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout)
     else:
-        p = run_proc(java_cmd(_java_main_class(code)), work, stdin.encode("utf-8"))
+        p = run_proc(java_cmd(_java_main_class(code)), work, stdin.encode("utf-8"), timeout=timeout)
     res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
            "memoryMb": round(p.memory_kb / 1024, 1), "actual": p.stdout}
     if p.status == "timeout":
@@ -348,6 +355,12 @@ def execute(req):
             raise TestsetMissing()
     else:
         cases = req.get("cases") or []
+    try:
+        limit_s = min(float(req.get("timeLimitMs") or RUN_TIMEOUT_S * 1000), RUN_TIMEOUT_S * 1000) / 1000
+    except (TypeError, ValueError):
+        raise ValueError("timeLimitMs 값이 올바르지 않습니다.")
+    if limit_s < 0.1:
+        raise ValueError("timeLimitMs는 100 이상이어야 합니다.")
     if lang not in ("java", "python") or mode not in ("function", "stdin"):
         raise ValueError("language/mode 값이 올바르지 않습니다.")
     if not isinstance(code, str) or len(code) > MAX_CODE:
@@ -376,9 +389,9 @@ def execute(req):
                 if mode == "function":
                     args = [loads_literal(a) for a in c.get("args", [])]
                     expected = loads_literal(exp_text) if exp_text.strip() else None
-                    results.append(run_function_case(lang, work, args, expected))
+                    results.append(run_function_case(lang, work, args, expected, limit_s))
                 else:
-                    results.append(run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None))
+                    results.append(run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None, limit_s))
             return {"compile": {"ok": True, "output": ""}, "results": results}
         finally:
             shutil.rmtree(work, ignore_errors=True)

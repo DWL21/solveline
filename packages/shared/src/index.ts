@@ -88,6 +88,8 @@ export const ProblemInput = z.object({
   description: z.string().max(MAX_TEXT),
   mode: ProblemMode,
   params: z.array(z.string().trim().min(1).max(64)).max(20),
+  /** 케이스당 시간 제한(ms). 함수형은 solution 호출 시간, 입출력형은 실행 시간 기준. */
+  timeLimitMs: z.number().int().min(100).max(10_000).default(10_000),
   cases: z.array(TestCase).max(60),
   language: Language,
   code: z.object({ java: z.string().max(MAX_TEXT), python: z.string().max(MAX_TEXT) }),
@@ -167,6 +169,7 @@ export type Submission = z.infer<typeof Submission>;
 export const RunRequest = z.object({
   language: Language,
   mode: ProblemMode,
+  timeLimitMs: z.number().int().min(100).max(10_000).default(10_000),
   code: z.string().max(MAX_TEXT),
   cases: z.array(TestCase).min(1).max(40),
 });

@@ -245,15 +245,16 @@ export function createApp(deps: AppDeps) {
 
   // ─── 제출 큐 ───
   /** 요청을 검사해 대기열에 넣는다. 오류면 [status, code, message]를 돌려준다. */
-  const enqueue = (req: SubmissionRequest): string | [Status, string, string] => {
+  const enqueue = (req: SubmissionRequest, timeLimitOverride?: number): string | [Status, string, string] => {
     const problem = req.problemId ? problems.get(req.problemId) : null;
     if (req.problemId && !problem) return [404, 'not_found', '없는 문제입니다.'];
+    const timeLimitMs = problem?.timeLimitMs ?? timeLimitOverride ?? 10_000;
     try {
       if (req.kind === 'run') {
         const cases = req.cases.filter((x) => !x.hidden);
         if (!cases.length) return [400, 'no_cases', '실행할 테스트 케이스가 없습니다.'];
         validateCases(req.mode, cases);
-        return submissions.insert({ ...req, cases, testsetHash: null, caseIds: cases.map((x) => x.id) });
+        return submissions.insert({ ...req, cases, testsetHash: null, caseIds: cases.map((x) => x.id), timeLimitMs });
       }
       const ref = problem?.hiddenTestset;
       if (ref) {
@@ -261,11 +262,11 @@ export function createApp(deps: AppDeps) {
         if (!cases) return [500, 'testset_missing', '테스트셋 파일이 없습니다.'];
         if (cases.some((x) => !x.expected.trim())) return [400, 'no_expected', '기댓값이 없는 히든 케이스가 있습니다.'];
         validateCases(req.mode, cases);
-        return submissions.insert({ ...req, cases: null, testsetHash: ref.hash, caseIds: cases.map((x) => x.id) });
+        return submissions.insert({ ...req, cases: null, testsetHash: ref.hash, caseIds: cases.map((x) => x.id), timeLimitMs });
       }
       if (!req.cases.length || req.cases.some((x) => !x.expected.trim())) return [400, 'no_expected', '채점하려면 기댓값이 있는 테스트 케이스가 필요합니다.'];
       validateCases(req.mode, req.cases);
-      return submissions.insert({ ...req, testsetHash: null, caseIds: req.cases.map((x) => x.id) });
+      return submissions.insert({ ...req, testsetHash: null, caseIds: req.cases.map((x) => x.id), timeLimitMs });
     } catch (e) {
       if (e instanceof CaseInputError) return [400, 'invalid_case', e.message];
       throw e;
@@ -302,7 +303,8 @@ export function createApp(deps: AppDeps) {
     if (blocked) return blocked;
     const body = await readJson(c, RunRequest);
     if (!body) return fail(c, 400, 'invalid_request', '실행 요청 형식이 올바르지 않습니다.');
-    const id = enqueue({ problemId: null, kind: 'run', ...body, cases: body.cases.map((x) => ({ ...x, hidden: false })) });
+    const { timeLimitMs, ...rest } = body;
+    const id = enqueue({ problemId: null, kind: 'run', ...rest, cases: body.cases.map((x) => ({ ...x, hidden: false })) }, timeLimitMs);
     if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
     dispatcher.kick();
     const done = await dispatcher.wait(id);

@@ -9,6 +9,36 @@ const byTitle = (a: ProblemSummary, b: ProblemSummary) => a.title.localeCompare(
 const sameScope = (a: Scope, b: Scope) =>
   a.kind === b.kind && (a.kind === 'all' || (a.kind === 'folder' && b.kind === 'folder' && a.id === b.id) || (a.kind === 'collection' && b.kind === 'collection' && a.id === b.id));
 
+/** 범위(전체·폴더·컬렉션)의 문제 목록을 화면과 같은 순서로. "다음 문제"도 이 순서를 따른다. */
+export function scopeList(scope: Scope, all: ProblemSummary[], collections: Collection[]): ProblemSummary[] {
+  if (scope.kind === 'folder') return all.filter((p) => p.folderId === scope.id).sort(byTitle);
+  if (scope.kind === 'collection') {
+    const col = collections.find((c) => c.id === scope.id);
+    if (col) {
+      const byId = new Map(all.map((p) => [p.id, p]));
+      return col.problemIds.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
+    }
+  }
+  return [...all].sort(byTitle);
+}
+
+/** 마지막 제출 결과 표시: 100점이면 초록 ✓, 아니면 점수 */
+export function SolvedMark({ p }: { p: ProblemSummary }) {
+  const sub = p.lastSubmission;
+  if (!sub) return null;
+  if (sub.score === 100)
+    return (
+      <span className="shrink-0 rounded-full bg-ok/15 px-2 py-0.5 text-[11.5px] font-bold text-ok" title={`맞춤 · ${new Date(sub.at).toLocaleString('ko-KR')}`}>
+        ✓ 맞춤
+      </span>
+    );
+  return (
+    <span className="shrink-0 text-[11.5px] font-semibold text-warn" title={`최근 제출 ${sub.score}점`}>
+      △ {sub.score}점
+    </span>
+  );
+}
+
 /** 문제 선택 화면: 왼쪽에 전체·폴더·컬렉션, 오른쪽에 그 범위의 문제 목록. */
 export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope: (s: Scope) => void; onPick: (id: string) => void; onNew: () => void }) {
   const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
@@ -29,17 +59,14 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   if (!problems.data || !folders.data || !collections.data) return <p className="p-6 text-[13px] text-dim">불러오는 중…</p>;
 
   const all = problems.data;
-  const byId = new Map(all.map((p) => [p.id, p]));
   const folder = scope.kind === 'folder' && scope.id ? folders.data.find((f) => f.id === scope.id) : undefined;
   const collection = scope.kind === 'collection' ? collections.data.find((c) => c.id === scope.id) : undefined;
 
   // 지워진 폴더·컬렉션 주소로 들어오면 전체로 보여 준다
   const effective: Scope = (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) ? { kind: 'all' } : scope;
 
-  let list: ProblemSummary[];
-  if (effective.kind === 'folder') list = all.filter((p) => p.folderId === effective.id).sort(byTitle);
-  else if (effective.kind === 'collection' && collection) list = collection.problemIds.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
-  else list = [...all].sort(byTitle);
+  const list = scopeList(effective, all, collections.data);
+  const solved = list.filter((p) => p.lastSubmission?.score === 100).length;
 
   const q = filter.trim().toLowerCase();
   const shown = q ? list.filter((p) => p.title.toLowerCase().includes(q)) : list;
@@ -66,6 +93,11 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               {effective.kind === 'folder' && <span className="mr-1.5 text-warn">▤</span>}
               {title} <span className="text-[14px] font-semibold text-faint">{list.length}</span>
             </h1>
+            {list.length > 0 && (
+              <span className="text-[12px] font-semibold text-ok" title="100점을 받은 문제">
+                ✓ {solved}/{list.length}
+              </span>
+            )}
             {folder && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
@@ -96,9 +128,14 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             <ol className="overflow-hidden rounded-lg border border-line bg-panel">
               {shown.map((p) => (
                 <li key={p.id} className="border-b border-line last:border-b-0">
-                  <button type="button" onClick={() => onPick(p.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-raised">
+                  <button
+                    type="button"
+                    onClick={() => onPick(p.id)}
+                    className={`flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${p.lastSubmission?.score === 100 ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
+                  >
                     {effective.kind === 'collection' && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{list.indexOf(p) + 1}</span>}
-                    <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{p.title}</span>
+                    <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${p.lastSubmission?.score === 100 ? 'text-ok' : ''}`}>{p.title}</span>
+                    <SolvedMark p={p} />
                     {effective.kind !== 'folder' && p.folderId && (
                       <span className="hidden shrink-0 rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-dim sm:inline">{folderName.get(p.folderId)}</span>
                     )}

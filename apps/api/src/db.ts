@@ -74,6 +74,8 @@ const migrations: string[] = [
      finished_at TEXT
    );
    CREATE INDEX submissions_queue ON submissions(status, priority, created_at);`,
+  // 문제별 시간 제한 (#19)
+  `ALTER TABLE submissions ADD COLUMN time_limit_ms INTEGER NOT NULL DEFAULT 10000;`,
 ];
 
 /** 이름 중복·없는 폴더처럼 요청을 고쳐야 하는 오류 */
@@ -116,6 +118,7 @@ type Row = { id: string; title: string; folder_id: string | null; mode: string; 
 type Body = {
   description: string;
   params: string[];
+  timeLimitMs: number;
   /** 보이는 케이스만 */
   cases: TestCase[];
   code: ProblemInput['code'];
@@ -157,6 +160,7 @@ export class ProblemStore {
     return {
       description: b.description ?? '',
       params: b.params ?? [],
+      timeLimitMs: b.timeLimitMs ?? 10_000,
       cases: b.cases ?? [],
       code: b.code ?? { java: '', python: '' },
       lastSubmission: b.lastSubmission ?? null,
@@ -190,6 +194,7 @@ export class ProblemStore {
     return {
       description: input.description,
       params: input.params,
+      timeLimitMs: input.timeLimitMs,
       cases: input.cases.filter((c) => !c.hidden),
       code: input.code,
       lastSubmission: prev?.lastSubmission ?? null,

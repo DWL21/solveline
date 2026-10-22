@@ -138,6 +138,15 @@ def main():
                         "cases": [{"args": ["900719925474099"], "expected": "9007199254740997", "raw": True}, {"args": ["900719925474099"], "expected": "9007199254740996", "raw": True}]})
     ok &= check("java long beyond 2^53", [x["status"] for x in r["results"]] == ["pass", "fail"], r)
 
+    # 문제별 시간 제한: solution 호출 시간 기준(JVM 시작은 빼고)
+    r = run({"language": "python", "mode": "function", "timeLimitMs": 200,
+             "code": "import time\ndef solution(x):\n    t = time.time()\n    while time.time() - t < 0.5:\n        pass\n    return x\n",
+             "cases": [{"args": [1], "expected": 1}]})
+    ok &= check("time limit (python 0.5s > 200ms)", r["results"][0]["status"] == "timeout", r)
+    r = run({"language": "java", "mode": "function", "timeLimitMs": 300, "code": "class Solution { int solution(int x) { return x; } }",
+             "cases": [{"args": [1], "expected": 1}]})
+    ok &= check("time limit excludes JVM startup", r["results"][0]["status"] == "pass", r)
+
     server.RUN_TIMEOUT_S = 2.0
     r = run({"language": "python", "mode": "function", "code": PY_LOOP,
                         "cases": [{"args": [1], "expected": 1}]})
@@ -153,6 +162,11 @@ def main():
     raw = json.dumps([{"id": "h1", "args": ["[1, 2]", "3"], "stdin": "", "expected": "6", "hidden": True}]).encode()
     h = hashlib.sha256(raw).hexdigest()
     req = {"language": "python", "mode": "function", "code": PY_SUM, "testset": h}
+    try:  # 이전 실행이 남긴 캐시를 지우고 시작
+        import os
+        os.remove(server.testset_path(h))
+    except FileNotFoundError:
+        pass
     try:
         server.execute(dict(req))
         ok &= check("testset missing -> 409", False, "no exception")

@@ -43,6 +43,7 @@ export type RunJob = {
   language: RunRequest['language'];
   mode: RunRequest['mode'];
   code: string;
+  timeLimitMs: number;
   /** 요청에 담아 보내는 케이스(코드 실행) */
   cases?: TestCase[];
   /** runner 캐시에서 꺼내 쓰는 테스트셋(제출). raw는 캐시에 없을 때 한 번 올린다. */
@@ -70,7 +71,7 @@ export class RunnerClient {
   }
 
   async run(job: RunJob): Promise<Omit<RunResult, 'results'> & { results: RawResult['results'] }> {
-    const body = JSON.stringify({ language: job.language, mode: job.mode, code: job.code, cases: job.cases, testset: job.testset?.hash });
+    const body = JSON.stringify({ language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.timeLimitMs, cases: job.cases, testset: job.testset?.hash });
     let res = await this.post('/run', body);
     if (res.status === 409 && job.testset) {
       // runner 캐시에 테스트셋이 없다 → 한 번 올리고 다시 실행

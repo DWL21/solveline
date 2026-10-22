@@ -5,7 +5,7 @@ export type RunState =
   /** ahead: 대기열에서 앞에 있는 제출 수(대기 중일 때) */
   | { kind: 'running'; submit: boolean; ahead: number | null }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode }
+  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode; limitMs: number }
   /** 제출 후 채점: 입력·기댓값은 보여 주지 않는다 */
   | { kind: 'graded'; result: RunResult; score: number };
 
@@ -18,7 +18,9 @@ const label: Record<CaseResult['status'], string> = {
   skipped: '건너뜀',
 };
 
-function verdict(r: CaseResult, mode: ProblemMode, expected: string) {
+const seconds = (ms: number) => `${(ms / 1000).toFixed(ms % 1000 ? 1 : 0)}초`;
+
+function verdict(r: CaseResult, mode: ProblemMode, expected: string, limitMs: number) {
   switch (r.status) {
     case 'pass':
       return <span className="text-ok">테스트를 통과하였습니다.</span>;
@@ -31,7 +33,7 @@ function verdict(r: CaseResult, mode: ProblemMode, expected: string) {
     case 'done':
       return <span className="text-dim">실행 결과 〉 {mode === 'function' ? show(r.actual, mode) : '(아래 출력 참고)'}</span>;
     case 'timeout':
-      return <span className="text-warn">실행 시간이 10.0초를 초과하여 실행이 중단되었습니다.</span>;
+      return <span className="text-warn">실행 시간이 제한({seconds(limitMs)})을 초과했습니다.</span>;
     case 'skipped':
       return <span className="text-faint">전체 실행 시간 제한으로 건너뛰었습니다.</span>;
     default:
@@ -45,7 +47,7 @@ function Code({ children }: { children: React.ReactNode }) {
   return <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px] text-text">{children}</code>;
 }
 
-export function ResultPanel({ state }: { state: RunState }) {
+export function ResultPanel({ state, onNext }: { state: RunState; onNext?: () => void }) {
   if (state.kind === 'idle')
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
   if (state.kind === 'running')
@@ -56,9 +58,9 @@ export function ResultPanel({ state }: { state: RunState }) {
     );
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
   if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
-  if (state.kind === 'graded') return <Graded result={state.result} score={state.score} />;
+  if (state.kind === 'graded') return <Graded result={state.result} score={state.score} onNext={onNext} />;
 
-  const { result, cases, mode } = state;
+  const { result, cases, mode, limitMs } = state;
 
   const graded = result.results.filter((r) => r.status === 'pass' || r.status === 'fail' || r.status === 'error' || r.status === 'timeout');
   const passed = result.results.filter((r) => r.status === 'pass').length;
@@ -94,7 +96,7 @@ export function ResultPanel({ state }: { state: RunState }) {
                   </>
                 )}
                 <dt className="text-faint">실행 결과 〉</dt>
-                <dd className="font-sans break-all">{verdict(r, mode, c.expected)}</dd>
+                <dd className="font-sans break-all">{verdict(r, mode, c.expected, limitMs)}</dd>
                 {r.stdout && (
                   <>
                     <dt className="text-faint">출력 〉</dt>
@@ -143,7 +145,7 @@ const gradedLabel: Record<CaseResult['status'], string> = {
 };
 
 /** 기존 채점 결과 형식: 테스트별 통과/실패와 시간·메모리, 마지막에 점수 */
-function Graded({ result, score }: { result: RunResult; score: number }) {
+function Graded({ result, score, onNext }: { result: RunResult; score: number; onNext?: () => void }) {
   const passed = result.results.filter((r) => r.status === 'pass').length;
   return (
     <div className="p-4 font-mono text-[12.5px] leading-[1.9]">
@@ -178,6 +180,18 @@ function Graded({ result, score }: { result: RunResult; score: number }) {
             ({result.results.length}개 중 {passed}개 통과)
           </span>
         </p>
+        {score === 100 && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-ok/40 bg-ok/10 px-3 py-2">
+            <span className="font-bold text-ok">✓ 정답입니다!</span>
+            {onNext ? (
+              <button type="button" className="btn-primary ml-auto" onClick={onNext} autoFocus>
+                다음 문제 →
+              </button>
+            ) : (
+              <span className="ml-auto text-[12px] text-faint">이 목록의 마지막 문제예요</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

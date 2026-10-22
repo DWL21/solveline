@@ -4,7 +4,7 @@ import type { Language, ProblemMode, Session } from '@codetest/shared';
 import { ApiError, api, qk } from './lib/api.ts';
 import { useRoute, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
-import { Home } from './components/Home.tsx';
+import { Home, scopeList } from './components/Home.tsx';
 import { Workspace, blankProblem } from './components/Workspace.tsx';
 
 export function App() {
@@ -42,6 +42,16 @@ function Shell() {
     },
   });
 
+  // 다음 문제: 들어온 목록(마지막으로 본 범위)의 순서에서 현재 문제 바로 뒤
+  const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
+  const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
+  let nextId: string | null = null;
+  if (route.kind === 'problem' && problems.data && collections.data) {
+    const list = scopeList(lastScope, problems.data, collections.data);
+    const i = list.findIndex((p) => p.id === route.id);
+    nextId = i >= 0 ? (list[i + 1]?.id ?? null) : null;
+  }
+
   const v = runtime.data;
   return (
     <div className="flex h-full flex-col bg-ink">
@@ -70,7 +80,11 @@ function Shell() {
       </header>
 
       {route.kind === 'problem' ? (
-        <Workspace problemId={route.id} onDeleted={() => go({ kind: 'home', scope: lastScope })} />
+        <Workspace
+          problemId={route.id}
+          onDeleted={() => go({ kind: 'home', scope: lastScope })}
+          onNext={nextId ? () => go({ kind: 'problem', id: nextId }) : undefined}
+        />
       ) : (
         <Home
           scope={route.scope}

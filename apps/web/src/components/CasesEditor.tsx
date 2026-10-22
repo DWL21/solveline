@@ -138,6 +138,8 @@ export function CasesEditor({
   params,
   cases,
   hidden,
+  timeLimitMs,
+  onTimeLimit,
   onParams,
   onCases,
 }: {
@@ -146,11 +148,14 @@ export function CasesEditor({
   params: string[];
   cases: TestCase[];
   hidden: TestsetRef | null;
+  timeLimitMs: number;
+  onTimeLimit: (ms: number) => void;
   onParams: (p: string[]) => void;
   onCases: (c: TestCase[]) => void;
 }) {
   return (
     <div className="flex flex-col gap-4 p-4">
+      <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />
       {mode === 'function' ? (
         <>
           <label className="flex flex-col gap-1.5">
@@ -188,6 +193,35 @@ export function CasesEditor({
 
       <HiddenCases problemId={problemId} mode={mode} params={params} summary={hidden} />
     </div>
+  );
+}
+
+/** 시간 제한(초). 함수형은 solution 호출 시간, 입출력형은 실행 시간 기준. 0.1~10초. */
+function TimeLimit({ value, onChange }: { value: number; onChange: (ms: number) => void }) {
+  const [text, setText] = useState(String(value / 1000));
+  useEffect(() => setText(String(value / 1000)), [value]);
+  const commit = () => {
+    const sec = Number(text);
+    if (!Number.isFinite(sec)) return setText(String(value / 1000));
+    const ms = Math.round(Math.min(10, Math.max(0.1, sec)) * 1000);
+    setText(String(ms / 1000));
+    if (ms !== value) onChange(ms);
+  };
+  return (
+    <label className="flex flex-wrap items-center gap-2">
+      <span className="text-[12px] font-bold text-dim">시간 제한</span>
+      <input
+        className="field w-20 text-right"
+        inputMode="decimal"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        aria-label="시간 제한(초)"
+      />
+      <span className="text-[12px] text-dim">초</span>
+      <span className="text-[11.5px] text-faint">테스트당, solution 실행 시간 기준 (JVM 시작 제외)</span>
+    </label>
   );
 }
 

@@ -46,6 +46,7 @@ const problem: ProblemInput = {
   description: '',
   mode: 'function',
   params: ['numbers'],
+  timeLimitMs: 10_000,
   cases: [{ id: 'a', args: ['[1, 2]'], stdin: '', expected: '3', hidden: false }],
   language: 'python',
   code: { java: templateFor('java', 'function'), python: templateFor('python', 'function') },
@@ -190,6 +191,16 @@ describe('제출 큐', () => {
     expect(done.result!.results[0]!.actual).toBeNull();
   });
 
+  it('문제의 시간 제한을 runner에 넘긴다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', { ...problem, timeLimitMs: 700 })).body.data;
+    expect(p.timeLimitMs).toBe(700);
+    const res = await call('POST', '/api/submissions', { problemId: p.id, kind: 'run', language: 'java', mode: 'function', code: 'x', cases: problem.cases });
+    await call.s.dispatcher.wait(res.body.data.id);
+    expect(call.s.calls.at(-1)?.timeLimitMs).toBe(700);
+    expect((await call('POST', '/api/problems', { ...problem, timeLimitMs: 50 })).status).toBe(400);
+  });
+
   it('잘못된 리터럴은 대기열에 넣기 전에 400', async () => {
     const call = await authed();
     const res = await call('POST', '/api/submissions', {
@@ -207,7 +218,7 @@ describe('제출 큐', () => {
   it('코드 실행이 제출 채점보다 먼저 꺼내진다', () => {
     const db = openDb(':memory:');
     const store = new SubmissionStore(db);
-    const base = { problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [] };
+    const base = { problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
     const sub = store.insert({ ...base, kind: 'submit' }, new Date('2026-01-01T00:00:00Z'));
     const run = store.insert({ ...base, kind: 'run' }, new Date('2026-01-01T00:00:01Z'));
     expect(store.get(sub)!.ahead).toBe(1);

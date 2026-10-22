@@ -19,6 +19,7 @@ const toInput = (p: Problem): ProblemInput => ({
   description: p.description,
   mode: p.mode,
   params: p.params,
+  timeLimitMs: p.timeLimitMs,
   cases: p.cases,
   language: p.language,
   code: p.code,
@@ -33,6 +34,7 @@ export function blankProblem(title: string, mode: ProblemMode, language: Languag
     description: '',
     mode,
     params,
+    timeLimitMs: 10_000,
     cases: [newCase(params.length)],
     language,
     code: { java: templateFor('java', mode, params), python: templateFor('python', mode, params) },
@@ -43,7 +45,7 @@ export function blankProblem(title: string, mode: ProblemMode, language: Languag
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const languageName = (l: Language) => (l === 'java' ? 'Java' : 'Python3');
 
-export function Workspace({ problemId, onDeleted }: { problemId: string; onDeleted: () => void }) {
+export function Workspace({ problemId, onDeleted, onNext }: { problemId: string; onDeleted: () => void; onNext?: () => void }) {
   const q = useQuery({ queryKey: qk.problem(problemId), queryFn: () => api.problem(problemId), staleTime: Infinity });
 
   if (q.isPending) return <p className="p-6 text-[13px] text-dim">불러오는 중…</p>;
@@ -56,7 +58,7 @@ export function Workspace({ problemId, onDeleted }: { problemId: string; onDelet
         </button>
       </div>
     );
-  return <Editor key={problemId} problem={q.data} onDeleted={onDeleted} />;
+  return <Editor key={problemId} problem={q.data} onDeleted={onDeleted} onNext={onNext} />;
 }
 
 /** 실시간 저장: 짧은 지연 + 이탈 시 즉시. 요청은 순서대로 하나씩 보낸다. */
@@ -128,7 +130,7 @@ function useAutosave(problem: Problem, draft: ProblemInput) {
   return { state, markDirty, retry: () => (markDirty(), flush()) };
 }
 
-function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => void }) {
+function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: () => void; onNext?: () => void }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<ProblemInput>(() => toInput(problem));
   const save = useAutosave(problem, draft);
@@ -167,7 +169,7 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
     onMutate: ({ submit }) => setRun({ kind: 'running', submit, ahead: null }),
     onSuccess: (s, { cases, submit }) => {
       if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
-      if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode });
+      if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs });
       setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
       // 점수는 서버가 기록한다 → 문제·목록을 다시 읽는다
       void qc.invalidateQueries({ queryKey: qk.problem(problem.id) });
@@ -230,6 +232,9 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
           className="min-w-0 flex-1 basis-56 rounded bg-transparent px-1 py-1 text-[15px] font-bold outline-none hover:bg-raised/60 focus:bg-raised"
         />
         <SaveBadge state={save.state} onRetry={save.retry} />
+        <span className="text-[12px] text-faint" title="테스트당 시간 제한 (테스트 케이스 탭에서 변경)">
+          ⏱ {draft.timeLimitMs / 1000}초
+        </span>
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
             {sub.score === 100 ? '✓' : '△'} 최근 제출 {sub.score}점
@@ -298,6 +303,8 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
                 params={draft.params}
                 cases={draft.cases}
                 hidden={problem.hiddenTestset}
+                timeLimitMs={draft.timeLimitMs}
+                onTimeLimit={(timeLimitMs) => patch({ timeLimitMs })}
                 onParams={(params) => patch({ params })}
                 onCases={(cases) => patch({ cases })}
               />
@@ -315,7 +322,7 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
           </div>
           <div className="pane-title border-t">{run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'}</div>
           <div className="min-h-[180px] flex-[2] overflow-y-auto bg-panel lg:min-h-0">
-            <ResultPanel state={run} />
+            <ResultPanel state={run} onNext={onNext} />
           </div>
           <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
             <button type="button" className="btn-ghost" onClick={reset}>
