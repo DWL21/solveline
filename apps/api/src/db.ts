@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { Collection, Folder, Problem, type CollectionInput, type LastSubmission, type ProblemInput, type ProblemSummary, type TestCase, type TestsetRef } from '@codetest/shared';
+import { Collection, EMPTY_TIMER, Folder, Problem, type CollectionInput, type LastSubmission, type ProblemInput, type ProblemSummary, type ProblemTimer, type TestCase, type TestsetRef } from '@codetest/shared';
 import type { TestsetStore } from './testsets.ts';
 
 export type Db = Database.Database;
@@ -150,6 +150,7 @@ type Body = {
   code: ProblemInput['code'];
   lastSubmission: LastSubmission | null;
   hiddenTestset: TestsetRef | null;
+  timer: ProblemTimer;
 };
 
 /**
@@ -164,8 +165,10 @@ export class ProblemStore {
 
   list(): ProblemSummary[] {
     const rows = this.db
-      .prepare("SELECT id, title, folder_id, mode, language, json_extract(body, '$.lastSubmission') AS last_submission, updated_at FROM problems ORDER BY updated_at DESC")
-      .all() as (Row & { last_submission: string | null })[];
+      .prepare(
+        "SELECT id, title, folder_id, mode, language, json_extract(body, '$.lastSubmission') AS last_submission, json_extract(body, '$.timer') AS timer, updated_at FROM problems ORDER BY updated_at DESC",
+      )
+      .all() as (Row & { last_submission: string | null; timer: string | null })[];
     return rows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -173,6 +176,7 @@ export class ProblemStore {
       mode: r.mode as Problem['mode'],
       language: r.language as Problem['language'],
       lastSubmission: r.last_submission ? (JSON.parse(r.last_submission) as Problem['lastSubmission']) : null,
+      timer: r.timer ? (JSON.parse(r.timer) as ProblemTimer) : EMPTY_TIMER,
       updatedAt: r.updated_at,
     }));
   }
@@ -191,6 +195,7 @@ export class ProblemStore {
       code: b.code ?? { java: '', python: '' },
       lastSubmission: b.lastSubmission ?? null,
       hiddenTestset: b.hiddenTestset ?? null,
+      timer: b.timer ?? EMPTY_TIMER,
     };
   }
 
@@ -225,6 +230,7 @@ export class ProblemStore {
       code: input.code,
       lastSubmission: prev?.lastSubmission ?? null,
       hiddenTestset: hidden.length ? this.testsets.put(hidden) : (prev?.hiddenTestset ?? null),
+      timer: prev?.timer ?? EMPTY_TIMER,
     };
   }
 
@@ -268,6 +274,11 @@ export class ProblemStore {
     if (!this.row(id)) return false;
     const ref = cases.length ? this.testsets.put(cases) : null;
     return this.patchBody(id, { hiddenTestset: ref }, now) ? ref : false;
+  }
+
+  /** 풀이 시간 저장. 목록 순서가 바뀌지 않도록 updated_at은 그대로. */
+  setTimer(id: string, timer: ProblemTimer): ProblemTimer | null {
+    return this.patchBody(id, { timer }, null) ? timer : null;
   }
 
   /** 채점 결과로 마지막 제출을 갱신한다(목록 순서가 바뀌지 않도록 updated_at은 그대로). */

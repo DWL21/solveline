@@ -71,6 +71,14 @@ export type Collection = z.infer<typeof Collection>;
 export const CollectionItemsInput = z.object({ problemIds: z.array(z.string().min(1).max(64)).max(1000) });
 export type CollectionItemsInput = z.infer<typeof CollectionItemsInput>;
 
+/** 풀이 시간: 문제 화면이 보이는 동안 누적. solvedMs는 처음 100점을 받은 순간의 누적 시간(초기화하면 null). */
+export const ProblemTimer = z.object({
+  elapsedMs: z.number().int().min(0).max(1_000 * 3600 * 24 * 365),
+  solvedMs: z.number().int().min(0).nullable(),
+});
+export type ProblemTimer = z.infer<typeof ProblemTimer>;
+export const EMPTY_TIMER: ProblemTimer = { elapsedMs: 0, solvedMs: null };
+
 /** 마지막 제출(채점) 결과 */
 export const LastSubmission = z.object({
   score: z.number().int().min(0).max(100),
@@ -109,12 +117,13 @@ export type TestsetRef = z.infer<typeof TestsetRef>;
 export const Problem = ProblemInput.extend({
   id: z.string(),
   hiddenTestset: TestsetRef.nullable(),
+  timer: ProblemTimer,
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type Problem = z.infer<typeof Problem>;
 
-export const ProblemSummary = Problem.pick({ id: true, title: true, folderId: true, mode: true, language: true, lastSubmission: true, updatedAt: true });
+export const ProblemSummary = Problem.pick({ id: true, title: true, folderId: true, mode: true, language: true, lastSubmission: true, timer: true, updatedAt: true });
 export type ProblemSummary = z.infer<typeof ProblemSummary>;
 
 // ─── 실행 ───

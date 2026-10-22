@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@codetest/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
+import { formatDuration } from '../lib/time.ts';
 import type { Scope } from '../lib/route.ts';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
@@ -29,7 +30,7 @@ export function SolvedMark({ p }: { p: ProblemSummary }) {
   if (sub.score === 100)
     return (
       <span className="shrink-0 rounded-full bg-ok/15 px-2 py-0.5 text-[11.5px] font-bold text-ok" title={`맞춤 · ${new Date(sub.at).toLocaleString('ko-KR')}`}>
-        ✓ 맞춤
+        ✓ 맞춤{p.timer.solvedMs !== null ? ` · ${formatDuration(p.timer.solvedMs)}` : ''}
       </span>
     );
   return (

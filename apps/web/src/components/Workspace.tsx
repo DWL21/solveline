@@ -5,6 +5,7 @@ import { ApiError, api, qk } from '../lib/api.ts';
 import { CasesEditor, MAX_CASES, newCase } from './CasesEditor.tsx';
 import { CodeEditor } from './CodeEditor.tsx';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
+import { SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
@@ -134,6 +135,7 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
   const qc = useQueryClient();
   const [draft, setDraft] = useState<ProblemInput>(() => toInput(problem));
   const save = useAutosave(problem, draft);
+  const solve = useSolveTimer(problem);
   const [tab, setTab] = useState<'desc' | 'cases'>(problem.description.trim() ? 'desc' : 'cases');
   const [editingDesc, setEditingDesc] = useState(false);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
@@ -192,6 +194,7 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
       if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
       if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs });
       setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
+      if (s.score === 100) solve.markSolved();
       // 점수는 서버가 기록한다 → 문제·목록을 다시 읽는다
       void qc.invalidateQueries({ queryKey: qk.problem(problem.id) });
       void qc.invalidateQueries({ queryKey: qk.problems });
@@ -268,8 +271,9 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
           className="min-w-0 flex-1 basis-56 rounded bg-transparent px-1 py-1 text-[15px] font-bold outline-none hover:bg-raised/60 focus:bg-raised"
         />
         <SaveBadge state={save.state} onRetry={save.retry} />
+        <SolveTimerBadge timer={solve.timer} onReset={solve.reset} />
         <span className="text-[12px] text-faint" title="테스트당 시간 제한 (테스트 케이스 탭에서 변경)">
-          ⏱ {draft.timeLimitMs / 1000}초
+          제한 {draft.timeLimitMs / 1000}초
         </span>
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>

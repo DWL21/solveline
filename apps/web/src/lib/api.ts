@@ -5,6 +5,7 @@ import {
   HiddenCases,
   Problem,
   ProblemSummary,
+  ProblemTimer,
   RunResult,
   Runtime,
   Session,
@@ -78,6 +79,8 @@ export const api = {
   submit: (r: SubmissionRequest) => request(Submission, '/api/submissions', json('POST', r)),
   submission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}`),
   cancelSubmission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}/cancel`, json('POST')),
+  saveTimer: (id: string, t: ProblemTimer, opts: { keepalive?: boolean } = {}) =>
+    request(ProblemTimer, `/api/problems/${encodeURIComponent(id)}/timer`, { ...json('PUT', t), keepalive: opts.keepalive }),
   hidden: (id: string) => request(HiddenCases, `/api/problems/${encodeURIComponent(id)}/hidden`),
   saveHidden: (id: string, cases: TestCase[]) => request(HiddenCases, `/api/problems/${encodeURIComponent(id)}/hidden`, json('PUT', { cases })),
   folders: () => request(z.array(Folder), '/api/folders'),

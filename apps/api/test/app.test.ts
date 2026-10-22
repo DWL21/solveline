@@ -160,6 +160,25 @@ describe('히든 테스트셋', () => {
   });
 });
 
+describe('풀이 시간', () => {
+  it('타이머를 저장하고 목록에 보여 주며, 목록 순서(updated_at)는 바꾸지 않는다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    expect(p.timer).toEqual({ elapsedMs: 0, solvedMs: null });
+    const t = { elapsedMs: 754_000, solvedMs: 754_000 };
+    expect((await call('PUT', `/api/problems/${p.id}/timer`, t)).body.data).toEqual(t);
+    const got = (await call('GET', '/api/problems/' + p.id)).body.data;
+    expect(got.timer).toEqual(t);
+    expect(got.updatedAt).toBe(p.updatedAt);
+    expect((await call('GET', '/api/problems')).body.data[0].timer).toEqual(t);
+    // 문제 저장(자동 저장)이 타이머를 지우지 않는다
+    await call('PUT', '/api/problems/' + p.id, { ...problem, title: '수정' });
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.timer).toEqual(t);
+    expect((await call('PUT', `/api/problems/${p.id}/timer`, { elapsedMs: -1, solvedMs: null })).status).toBe(400);
+    expect((await call('PUT', '/api/problems/nope/timer', t)).status).toBe(404);
+  });
+});
+
 describe('제출 큐', () => {
   it('코드 실행은 보이는 케이스만, 결과는 제출 id로 조회한다', async () => {
     const call = await authed();

@@ -14,6 +14,7 @@ import {
   ProblemInput,
   ProblemSummary,
   HiddenCases,
+  ProblemTimer,
   RunRequest,
   RunResult,
   Submission,
@@ -228,6 +229,14 @@ export function createApp(deps: AppDeps) {
   app.delete('/api/collections/:id', (c) =>
     collections.delete(c.req.param('id')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 컬렉션입니다.'),
   );
+
+  // ─── 풀이 시간 ───
+  app.put('/api/problems/:id/timer', async (c) => {
+    const body = await readJson(c, ProblemTimer);
+    if (!body) return fail(c, 400, 'invalid_request', '풀이 시간 형식이 올바르지 않습니다.');
+    const t = problems.setTimer(c.req.param('id'), body);
+    return t ? ok(c, ProblemTimer, t) : fail(c, 404, 'not_found', '없는 문제입니다.');
+  });
 
   // ─── 히든 테스트셋 ───
   app.get('/api/problems/:id/hidden', (c) => {
