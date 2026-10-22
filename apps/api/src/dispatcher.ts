@@ -121,12 +121,21 @@ export class SubmissionStore {
     })();
   }
 
-  finish(id: string, out: { result: RunResult; score: number | null } | { error: string }, now = new Date()) {
-    if ('error' in out) this.db.prepare("UPDATE submissions SET status = 'error', error = ?, finished_at = ? WHERE id = ?").run(out.error, now.toISOString(), id);
+  finish(id: string, out: { result: RunResult; score: number | null } | { error: string } | { cancelled: RunResult | null }, now = new Date()) {
+    if ('cancelled' in out)
+      this.db
+        .prepare("UPDATE submissions SET status = 'cancelled', result = ?, finished_at = ? WHERE id = ?")
+        .run(out.cancelled ? JSON.stringify(out.cancelled) : null, now.toISOString(), id);
+    else if ('error' in out) this.db.prepare("UPDATE submissions SET status = 'error', error = ?, finished_at = ? WHERE id = ?").run(out.error, now.toISOString(), id);
     else
       this.db
         .prepare("UPDATE submissions SET status = 'done', result = ?, score = ?, finished_at = ? WHERE id = ?")
         .run(JSON.stringify(out.result), out.score, now.toISOString(), id);
+  }
+
+  /** 대기 중인 제출을 바로 중지한다. 바뀌었으면 true */
+  cancelQueued(id: string, now = new Date()): boolean {
+    return this.db.prepare("UPDATE submissions SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'queued'").run(now.toISOString(), id).changes > 0;
   }
 
   /** 프로세스가 죽어 running으로 남은 제출을 다시 대기열로 */
@@ -141,7 +150,7 @@ export class SubmissionStore {
 
   /** 끝난 지 오래된 제출 기록을 지운다 */
   prune(olderThan: Date): number {
-    return this.db.prepare("DELETE FROM submissions WHERE status IN ('done','error') AND finished_at < ?").run(olderThan.toISOString()).changes;
+    return this.db.prepare("DELETE FROM submissions WHERE status IN ('done','error','cancelled') AND finished_at < ?").run(olderThan.toISOString()).changes;
   }
 }
 
@@ -152,6 +161,9 @@ export class SubmissionStore {
 export class Dispatcher {
   private active = new Map<RunnerClient, number>();
   private waiters = new Map<string, ((s: Submission) => void)[]>();
+  /** 실행 중인 제출 → 맡은 runner, 중지 요청을 받은 제출 */
+  private running = new Map<string, RunnerClient>();
+  private cancelling = new Set<string>();
 
   constructor(
     private store: SubmissionStore,
@@ -187,8 +199,31 @@ export class Dispatcher {
   /** 제출이 끝날 때까지 기다린다(동기 API·테스트용) */
   wait(id: string): Promise<Submission> {
     const cur = this.store.get(id);
-    if (cur && (cur.status === 'done' || cur.status === 'error')) return Promise.resolve(cur);
+    if (cur && cur.status !== 'queued' && cur.status !== 'running') return Promise.resolve(cur);
     return new Promise((resolve) => this.waiters.set(id, [...(this.waiters.get(id) ?? []), resolve]));
+  }
+
+  /**
+   * 제출을 중지한다. 대기 중이면 바로 cancelled, 실행 중이면 runner에 알리고 execute가 cancelled로 마무리한다.
+   * 이미 끝난 제출은 그대로 둔다. 없는 제출이면 null.
+   */
+  async cancel(id: string): Promise<Submission | null> {
+    if (this.store.cancelQueued(id)) {
+      this.notify(id);
+      return this.store.get(id);
+    }
+    const runner = this.running.get(id);
+    if (runner && !this.cancelling.has(id)) {
+      this.cancelling.add(id);
+      await runner.cancel(id);
+    }
+    return this.store.get(id);
+  }
+
+  private notify(id: string) {
+    const done = this.store.get(id);
+    if (done) for (const w of this.waiters.get(id) ?? []) w(done);
+    this.waiters.delete(id);
   }
 
   private freeRunner(): RunnerClient | null {
@@ -198,8 +233,9 @@ export class Dispatcher {
   }
 
   private async execute(job: NonNullable<ReturnType<SubmissionStore['claim']>>, runner: RunnerClient) {
+    this.running.set(job.id, runner);
     try {
-      const run: RunJob = { language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.time_limit_ms };
+      const run: RunJob = { language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.time_limit_ms, jobId: job.id };
       if (job.testset_hash) {
         const hash = job.testset_hash;
         run.testset = { hash, raw: () => this.testsets.raw(hash) };
@@ -207,6 +243,11 @@ export class Dispatcher {
       const raw = await runner.run(run);
       const ids = JSON.parse(job.case_ids) as string[];
       const result: RunResult = { compile: raw.compile, results: raw.results.map((r, i) => trimResult({ ...r, id: ids[i] ?? String(i) }, job.kind)) };
+      if (raw.cancelled || this.cancelling.has(job.id)) {
+        // 중지된 제출은 점수를 기록하지 않는다
+        this.store.finish(job.id, { cancelled: job.kind === 'run' ? result : null });
+        return;
+      }
       let score: number | null = null;
       if (job.kind === 'submit') {
         const total = ids.length;
@@ -216,12 +257,16 @@ export class Dispatcher {
       }
       this.store.finish(job.id, { result, score });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.error(`[queue] 제출 ${job.id} 실패`, e);
-      this.store.finish(job.id, { error: redact(msg) });
+      if (this.cancelling.has(job.id)) this.store.finish(job.id, { cancelled: null });
+      else {
+        const msg = e instanceof Error ? e.message : String(e);
+        log.error(`[queue] 제출 ${job.id} 실패`, e);
+        this.store.finish(job.id, { error: redact(msg) });
+      }
+    } finally {
+      this.running.delete(job.id);
+      this.cancelling.delete(job.id);
+      this.notify(job.id);
     }
-    const done = this.store.get(job.id);
-    if (done) for (const w of this.waiters.get(job.id) ?? []) w(done);
-    this.waiters.delete(job.id);
   }
 }

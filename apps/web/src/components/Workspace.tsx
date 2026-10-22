@@ -152,22 +152,43 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
   const lang = draft.language;
   const code = draft.code[lang];
 
+  /** 진행 중인 제출: 중지 버튼이 쓰는 id와, 조회 대기를 바로 깨우는 함수 */
+  const current = useRef<{ id: string | null; wake: () => void; stopping: boolean }>({ id: null, wake: () => {}, stopping: false });
+  const [stopping, setStopping] = useState(false);
+
   /** 제출 큐에 넣고 끝날 때까지 조회한다(처음엔 빠르게, 점점 느리게). */
   const runMut = useMutation({
     mutationFn: async ({ cases, submit }: { cases: TestCase[]; submit: boolean }) => {
       const d = draftRef.current;
       let s = await api.submit({ problemId: problem.id, kind: submit ? 'submit' : 'run', language: d.language, mode: d.mode, code: d.code[d.language], cases });
+      current.current.id = s.id;
+      // 제출 응답이 오기 전에 중지를 눌렀으면 지금 보낸다
+      if (current.current.stopping) s = await api.cancelSubmission(s.id);
       let delay = 250;
       while (s.status === 'queued' || s.status === 'running') {
         setRun({ kind: 'running', submit, ahead: s.status === 'queued' ? s.ahead : null });
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise<void>((r) => {
+          const t = setTimeout(r, delay);
+          current.current.wake = () => {
+            clearTimeout(t);
+            r();
+          };
+        });
         delay = Math.min(1500, Math.round(delay * 1.5));
         s = await api.submission(s.id);
       }
       return s;
     },
+    onSettled: () => {
+      current.current = { id: null, wake: () => {}, stopping: false };
+      setStopping(false);
+    },
     onMutate: ({ submit }) => setRun({ kind: 'running', submit, ahead: null }),
     onSuccess: (s, { cases, submit }) => {
+      if (s.status === 'cancelled') {
+        if (submit || !s.result) return setRun({ kind: 'cancelled', submit });
+        return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs, cancelled: true });
+      }
       if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
       if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs });
       setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
@@ -177,6 +198,21 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
     },
     onError: (e) => setRun({ kind: 'error', message: errMsg(e) }),
   });
+
+  /** 실행·채점 중지: 서버에 알리고, 결과 조회를 바로 다시 한다 */
+  const doStop = useCallback(async () => {
+    const cur = current.current;
+    if (cur.stopping) return;
+    cur.stopping = true;
+    setStopping(true);
+    if (!cur.id) return; // 제출 응답을 받으면 mutationFn이 보낸다
+    try {
+      await api.cancelSubmission(cur.id);
+    } catch {
+      /* 다음 조회에서 상태를 다시 본다 */
+    }
+    cur.wake();
+  }, []);
 
   /** 코드 실행: 보이는 케이스만 */
   const doRun = useCallback(() => {
@@ -339,6 +375,11 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
               테스트 케이스 추가하기
             </button>
             <div className="ml-auto flex gap-2">
+              {runMut.isPending && (
+                <button type="button" className="btn-ghost min-w-20 text-bad" disabled={stopping} onClick={() => void doStop()} title="실행·채점 중지">
+                  {stopping ? '중지 중…' : '■ 중지'}
+                </button>
+              )}
               <button type="button" className="btn-ghost min-w-24" disabled={runMut.isPending} onClick={doRun} title="보이는 케이스로 실행 (⌘/Ctrl + Enter)">
                 코드 실행
               </button>

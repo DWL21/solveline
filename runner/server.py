@@ -91,6 +91,49 @@ def loads_literal(text):
         raise ValueError("JSON 형식이 아닌 값이 있습니다: " + t[:50])
 
 
+# ─── 중지 ───
+# api가 실행 요청에 jobId를 붙이고, POST /cancel/<jobId>로 중지한다.
+# 요청이 도착하기 전에 온 중지도 기억해 둔다(오래된 기록은 지운다).
+CANCEL_TTL_S = 60 * 60
+CANCELLED_MSG = "중지되어 실행하지 않았습니다."
+
+
+class Job:
+    def __init__(self):
+        self.cancelled = threading.Event()
+        self.pgid = None
+        self.lock = threading.Lock()
+        self.at = time.monotonic()
+
+    def kill(self):
+        with self.lock:
+            if self.pgid is not None:
+                try:
+                    os.killpg(self.pgid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+
+_jobs = {}
+_jobs_lock = threading.Lock()
+
+
+def _job(job_id):
+    with _jobs_lock:
+        now = time.monotonic()
+        for k in [k for k, j in _jobs.items() if now - j.at > CANCEL_TTL_S]:
+            del _jobs[k]
+        return _jobs.setdefault(job_id, Job())
+
+
+def cancel(job_id):
+    if not re.fullmatch(r"[0-9A-Za-z-]{1,64}", job_id or ""):
+        raise ValueError("jobId가 올바르지 않습니다.")
+    job = _job(job_id)
+    job.cancelled.set()
+    job.kill()
+
+
 # 한 번에 실행하는 요청 수 (단일 사용자, 4코어 서버)
 _slots = threading.BoundedSemaphore(int(os.environ.get("RUN_SLOTS", "2")))
 
@@ -154,7 +197,7 @@ def _read_capped(stream, sink):
         sink.append("\n... (출력이 너무 길어 잘렸습니다)".encode("utf-8"))
 
 
-def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0):
+def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
     timeout = RUN_TIMEOUT_S if timeout is None else timeout
     env = {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
@@ -170,6 +213,11 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0):
         cmd, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         preexec_fn=_preexec(as_limit), close_fds=True,
     )
+    if job:
+        with job.lock:
+            job.pgid = p.pid
+        if job.cancelled.is_set():
+            job.kill()
     out, err = [], []
     readers = [threading.Thread(target=_read_capped, args=(p.stdout, out)),
                threading.Thread(target=_read_capped, args=(p.stderr, err))]
@@ -196,6 +244,9 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0):
     _, wstatus, usage = os.wait4(p.pid, 0)
     elapsed = (time.monotonic() - start) * 1000
     timer.cancel()
+    if job:
+        with job.lock:
+            job.pgid = None
     try:  # 남은 자손 프로세스 정리
         os.killpg(p.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
@@ -206,7 +257,10 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0):
         t.join(2)
     if p.returncode == -signal.SIGXCPU:  # CPU 시간 제한
         timed_out.set()
-    status = "timeout" if timed_out.is_set() else ("ok" if p.returncode == 0 else "error")
+    if job and job.cancelled.is_set():
+        status = "cancelled"
+    else:
+        status = "timeout" if timed_out.is_set() else ("ok" if p.returncode == 0 else "error")
     return Proc(status, p.returncode, b"".join(out).decode("utf-8", "replace"),
                 b"".join(err).decode("utf-8", "replace"), round(elapsed, 2),
                 usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss)
@@ -248,12 +302,12 @@ def _java_main_class(code):
     return names[-1] if names else "Solution"
 
 
-def prepare(lang, code, work):
+def prepare(lang, code, work, job=None):
     """컴파일한다. 실패 시 (False, 메시지)."""
     if lang == "python":
         with open(os.path.join(work, "solution.py"), "w", encoding="utf-8") as f:
             f.write(code)
-        p = run_proc([sys.executable, "-m", "py_compile", "solution.py"], work, timeout=COMPILE_TIMEOUT_S)
+        p = run_proc([sys.executable, "-m", "py_compile", "solution.py"], work, timeout=COMPILE_TIMEOUT_S, job=job)
         if p.status != "ok":
             return False, (p.stderr or p.stdout).replace(work + "/", "")
         return True, ""
@@ -264,7 +318,7 @@ def prepare(lang, code, work):
     if SANDBOX_UID >= 0:
         os.chown(os.path.join(work, "out"), SANDBOX_UID, SANDBOX_UID)
     p = run_proc(["javac", "-J-Xmx384m", "-encoding", "UTF-8", "-nowarn", "-d", "out", "-cp", JAVA_HARNESS_CP, name],
-                 work, timeout=COMPILE_TIMEOUT_S)
+                 work, timeout=COMPILE_TIMEOUT_S, job=job)
     if p.status != "ok":
         msg = p.stderr or p.stdout
         if p.status == "timeout":
@@ -278,7 +332,7 @@ def java_cmd(*rest):
             "-Dstdout.encoding=UTF-8", "-cp", "out" + os.pathsep + JAVA_HARNESS_CP] + list(rest)
 
 
-def run_function_case(lang, work, args, expected, limit_s):
+def run_function_case(lang, work, args, expected, limit_s, job=None):
     case_path = os.path.join(work, "case.json")
     result_path = os.path.join(work, "result.json")
     for path in (result_path,):
@@ -288,9 +342,9 @@ def run_function_case(lang, work, args, expected, limit_s):
         json.dump({"args": args}, f, ensure_ascii=False)
     if lang == "python":
         p = run_proc([sys.executable, "-I", os.path.join(HARNESS_DIR, "py_harness.py"), work], work, as_limit=PY_AS_LIMIT,
-                     timeout=limit_s + STARTUP_SLACK_S[lang])
+                     timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
     else:
-        p = run_proc(java_cmd("CodetestHarness", work), work, timeout=limit_s + STARTUP_SLACK_S[lang])
+        p = run_proc(java_cmd("CodetestHarness", work), work, timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
 
     res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
            "memoryMb": round(p.memory_kb / 1024, 1), "actual": None}
@@ -321,12 +375,12 @@ def run_function_case(lang, work, args, expected, limit_s):
     return res
 
 
-def run_stdin_case(lang, code, work, stdin, expected, limit_s):
+def run_stdin_case(lang, code, work, stdin, expected, limit_s, job=None):
     timeout = limit_s + STARTUP_SLACK_S[lang]
     if lang == "python":
-        p = run_proc([sys.executable, "solution.py"], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout)
+        p = run_proc([sys.executable, "solution.py"], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout, job=job)
     else:
-        p = run_proc(java_cmd(_java_main_class(code)), work, stdin.encode("utf-8"), timeout=timeout)
+        p = run_proc(java_cmd(_java_main_class(code)), work, stdin.encode("utf-8"), timeout=timeout, job=job)
     res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
            "memoryMb": round(p.memory_kb / 1024, 1), "actual": p.stdout}
     if p.status == "timeout":
@@ -368,33 +422,56 @@ def execute(req):
     if not isinstance(cases, list) or not 1 <= len(cases) <= MAX_CASES:
         raise ValueError("테스트 케이스는 1~%d개여야 합니다." % MAX_CASES)
 
-    with _slots:
-        work = tempfile.mkdtemp(prefix="run-", dir=WORK_ROOT)
-        try:
-            os.chmod(work, 0o700)
-            if SANDBOX_UID >= 0:
-                os.chown(work, SANDBOX_UID, SANDBOX_UID)
-            ok, msg = prepare(lang, code, work)
-            if not ok:
-                return {"compile": {"ok": False, "output": msg}, "results": []}
-            results = []
-            deadline = time.monotonic() + TOTAL_BUDGET_S
-            for c in cases:
-                if time.monotonic() > deadline:
-                    results.append({"status": "skipped", "stdout": "", "stderr": "전체 실행 시간 제한으로 건너뛰었습니다.",
-                                    "timeMs": 0, "memoryMb": 0, "actual": None})
-                    continue
-                # 케이스는 화면과 같은 형식: args = 리터럴 텍스트 목록, expected = 텍스트('' 이면 비교 안 함)
-                exp_text = c.get("expected") or ""
-                if mode == "function":
-                    args = [loads_literal(a) for a in c.get("args", [])]
-                    expected = loads_literal(exp_text) if exp_text.strip() else None
-                    results.append(run_function_case(lang, work, args, expected, limit_s))
-                else:
-                    results.append(run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None, limit_s))
-            return {"compile": {"ok": True, "output": ""}, "results": results}
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
+    job_id = req.get("jobId")
+    job = _job(job_id) if job_id else Job()
+
+    def skipped(msg):
+        return {"status": "skipped", "stdout": "", "stderr": msg, "timeMs": 0, "memoryMb": 0, "actual": None}
+
+    def cancelled_result(results):
+        results = results + [skipped(CANCELLED_MSG)] * (len(cases) - len(results))
+        return {"compile": {"ok": True, "output": ""}, "results": results, "cancelled": True}
+
+    try:
+        with _slots:
+            if job.cancelled.is_set():
+                return cancelled_result([])
+            work = tempfile.mkdtemp(prefix="run-", dir=WORK_ROOT)
+            try:
+                os.chmod(work, 0o700)
+                if SANDBOX_UID >= 0:
+                    os.chown(work, SANDBOX_UID, SANDBOX_UID)
+                ok, msg = prepare(lang, code, work, job)
+                if job.cancelled.is_set():
+                    return cancelled_result([])
+                if not ok:
+                    return {"compile": {"ok": False, "output": msg}, "results": []}
+                results = []
+                deadline = time.monotonic() + TOTAL_BUDGET_S
+                for c in cases:
+                    if job.cancelled.is_set():
+                        return cancelled_result(results)
+                    if time.monotonic() > deadline:
+                        results.append(skipped("전체 실행 시간 제한으로 건너뛰었습니다."))
+                        continue
+                    # 케이스는 화면과 같은 형식: args = 리터럴 텍스트 목록, expected = 텍스트('' 이면 비교 안 함)
+                    exp_text = c.get("expected") or ""
+                    if mode == "function":
+                        args = [loads_literal(a) for a in c.get("args", [])]
+                        expected = loads_literal(exp_text) if exp_text.strip() else None
+                        r = run_function_case(lang, work, args, expected, limit_s, job)
+                    else:
+                        r = run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None, limit_s, job)
+                    if job.cancelled.is_set():  # 실행 중에 중지된 케이스는 결과를 버린다
+                        return cancelled_result(results)
+                    results.append(r)
+                return {"compile": {"ok": True, "output": ""}, "results": results}
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+    finally:
+        if job_id:
+            with _jobs_lock:
+                _jobs.pop(job_id, None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -428,6 +505,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": str(e)})
 
     def do_POST(self):
+        m = re.fullmatch(r"/cancel/([0-9A-Za-z-]{1,64})", self.path)
+        if m:
+            cancel(m.group(1))
+            return self._send(200, {"cancelled": m.group(1)})
         if self.path != "/run":
             return self._send(404, {"error": "not_found"})
         try:

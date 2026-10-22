@@ -145,7 +145,8 @@ export const SubmissionRequest = z.object({
 });
 export type SubmissionRequest = z.infer<typeof SubmissionRequest>;
 
-export const SubmissionStatus = z.enum(['queued', 'running', 'done', 'error']);
+/** cancelled: 사용자가 중지함(result에 중지 전까지의 결과가 남을 수 있다) */
+export const SubmissionStatus = z.enum(['queued', 'running', 'done', 'error', 'cancelled']);
 export type SubmissionStatus = z.infer<typeof SubmissionStatus>;
 
 export const Submission = z.object({

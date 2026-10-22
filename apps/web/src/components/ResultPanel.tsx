@@ -5,7 +5,9 @@ export type RunState =
   /** ahead: 대기열에서 앞에 있는 제출 수(대기 중일 때) */
   | { kind: 'running'; submit: boolean; ahead: number | null }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode; limitMs: number }
+  /** 중지함. 코드 실행이면 중지 전까지의 결과를 done(cancelled)으로 보여 준다 */
+  | { kind: 'cancelled'; submit: boolean }
+  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode; limitMs: number; cancelled?: boolean }
   /** 제출 후 채점: 입력·기댓값은 보여 주지 않는다 */
   | { kind: 'graded'; result: RunResult; score: number };
 
@@ -35,7 +37,7 @@ function verdict(r: CaseResult, mode: ProblemMode, expected: string, limitMs: nu
     case 'timeout':
       return <span className="text-warn">실행 시간이 제한({seconds(limitMs)})을 초과했습니다.</span>;
     case 'skipped':
-      return <span className="text-faint">전체 실행 시간 제한으로 건너뛰었습니다.</span>;
+      return <span className="text-faint">{r.stderr.trim() || '전체 실행 시간 제한으로 건너뛰었습니다.'}</span>;
     default:
       return <span className="text-bad">실행 중 에러가 발생했습니다.</span>;
   }
@@ -57,6 +59,7 @@ export function ResultPanel({ state, onNext }: { state: RunState; onNext?: () =>
       </p>
     );
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
+  if (state.kind === 'cancelled') return <p className="p-4 text-[13px] font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
   if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
   if (state.kind === 'graded') return <Graded result={state.result} score={state.score} onNext={onNext} />;
 
@@ -67,6 +70,7 @@ export function ResultPanel({ state, onNext }: { state: RunState; onNext?: () =>
 
   return (
     <div className="flex flex-col gap-3 p-4 font-mono text-[12.5px] leading-relaxed">
+      {state.cancelled && <p className="font-sans text-[13px] font-semibold text-warn">실행을 중지했습니다.</p>}
       {result.results.map((r, i) => {
         const c = cases.find((x) => x.id === r.id);
         return (
@@ -103,7 +107,7 @@ export function ResultPanel({ state, onNext }: { state: RunState; onNext?: () =>
                     <dd className="break-all whitespace-pre-wrap text-sky">{r.stdout.trimEnd()}</dd>
                   </>
                 )}
-                {r.stderr && (
+                {r.stderr && r.status !== 'skipped' && (
                   <>
                     <dt className="text-faint">에러 〉</dt>
                     <dd className="break-all whitespace-pre-wrap text-bad/90">{r.stderr.trimEnd()}</dd>

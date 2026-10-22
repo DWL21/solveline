@@ -77,6 +77,7 @@ export const api = {
   /** 제출 큐: 바로 id를 받고, submission(id)로 결과를 조회한다 */
   submit: (r: SubmissionRequest) => request(Submission, '/api/submissions', json('POST', r)),
   submission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}`),
+  cancelSubmission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}/cancel`, json('POST')),
   hidden: (id: string) => request(HiddenCases, `/api/problems/${encodeURIComponent(id)}/hidden`),
   saveHidden: (id: string, cases: TestCase[]) => request(HiddenCases, `/api/problems/${encodeURIComponent(id)}/hidden`, json('PUT', { cases })),
   folders: () => request(z.array(Folder), '/api/folders'),

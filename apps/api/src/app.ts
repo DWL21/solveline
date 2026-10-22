@@ -34,7 +34,7 @@ import { log } from './redact.ts';
 
 type Status = 400 | 401 | 404 | 409 | 429 | 500 | 502 | 503;
 
-type Runner = Pick<RunnerClient, 'run' | 'runtime'>;
+type Runner = Pick<RunnerClient, 'run' | 'runtime' | 'cancel'>;
 
 export type AppDeps = {
   config: Config;
@@ -297,6 +297,12 @@ export function createApp(deps: AppDeps) {
     return s ? ok(c, Submission, s) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
+  /** 실행·채점 중지. 이미 끝난 제출이면 그대로 돌려준다. */
+  app.post('/api/submissions/:id/cancel', async (c) => {
+    const s = await dispatcher.cancel(c.req.param('id'));
+    return s ? ok(c, Submission, s) : fail(c, 404, 'not_found', '없는 제출입니다.');
+  });
+
   /** 동기 실행(스크립트용): 대기열에 넣고 끝날 때까지 기다린다 */
   app.post('/api/run', async (c) => {
     const blocked = limited(c);
@@ -308,6 +314,7 @@ export function createApp(deps: AppDeps) {
     if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
     dispatcher.kick();
     const done = await dispatcher.wait(id);
+    if (done.status === 'cancelled') return fail(c, 409, 'cancelled', '실행이 중지되었습니다.');
     if (done.status === 'error' || !done.result) return fail(c, 502, 'runner_error', done.error ?? '실행하지 못했습니다.');
     return ok(c, RunResult, done.result);
   });

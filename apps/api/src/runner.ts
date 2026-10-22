@@ -44,6 +44,8 @@ export type RunJob = {
   mode: RunRequest['mode'];
   code: string;
   timeLimitMs: number;
+  /** 중지할 때 쓰는 id(제출 id) */
+  jobId?: string;
   /** 요청에 담아 보내는 케이스(코드 실행) */
   cases?: TestCase[];
   /** runner 캐시에서 꺼내 쓰는 테스트셋(제출). raw는 캐시에 없을 때 한 번 올린다. */
@@ -70,8 +72,8 @@ export class RunnerClient {
     }
   }
 
-  async run(job: RunJob): Promise<Omit<RunResult, 'results'> & { results: RawResult['results'] }> {
-    const body = JSON.stringify({ language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.timeLimitMs, cases: job.cases, testset: job.testset?.hash });
+  async run(job: RunJob): Promise<Omit<RunResult, 'results'> & { results: RawResult['results']; cancelled?: boolean }> {
+    const body = JSON.stringify({ language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.timeLimitMs, jobId: job.jobId, cases: job.cases, testset: job.testset?.hash });
     let res = await this.post('/run', body);
     if (res.status === 409 && job.testset) {
       // runner 캐시에 테스트셋이 없다 → 한 번 올리고 다시 실행
@@ -81,9 +83,19 @@ export class RunnerClient {
       if (!up.ok) throw new RunnerError(`테스트셋을 올리지 못했습니다 (${up.status})`);
       res = await this.post('/run', body);
     }
-    const parsed = (await res.json().catch(() => null)) as (RawResult & { error?: string }) | null;
+    const parsed = (await res.json().catch(() => null)) as (RawResult & { error?: string; cancelled?: boolean }) | null;
     if (!res.ok || !parsed) throw new RunnerError(parsed?.error ?? `실행 서버 오류 (${res.status})`);
     return parsed;
+  }
+
+  /** 진행 중인 실행을 중지한다. 요청보다 먼저 와도 runner가 기억한다. 실패해도 던지지 않는다. */
+  async cancel(jobId: string): Promise<boolean> {
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/cancel/${encodeURIComponent(jobId)}`, { method: 'POST', signal: AbortSignal.timeout(5000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   async runtime(): Promise<Runtime> {

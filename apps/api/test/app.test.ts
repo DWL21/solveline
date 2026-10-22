@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { templateFor, type ProblemInput, type TestCase } from '@codetest/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
@@ -8,14 +8,23 @@ import { SubmissionStore } from '../src/dispatcher.ts';
 
 const PASSWORD = 'test-password-0123456789abcdef';
 
-/** 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다. */
+/**
+ * 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다.
+ * 코드가 'hold'면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
+ */
 function setup() {
   const config = loadConfig({ ACCESS_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' });
   const calls: RunJob[] = [];
   const uploads: string[] = [];
+  const held = new Map<string, () => void>();
   const runner = {
     run: async (job: RunJob) => {
       calls.push(job);
+      if (job.code === 'hold') {
+        await new Promise<void>((resolve) => held.set(job.jobId!, resolve));
+        const skipped = { status: 'skipped' as const, actual: null, stdout: '', stderr: '중지', timeMs: 0, memoryMb: 0 };
+        return { compile: { ok: true, output: '' }, results: (job.cases ?? []).map(() => skipped), cancelled: true };
+      }
       let cases: TestCase[] = job.cases ?? [];
       if (job.testset) {
         if (!uploads.includes(job.testset.hash)) uploads.push(job.testset.hash);
@@ -27,9 +36,13 @@ function setup() {
       };
     },
     runtime: async () => ({ runner: 'up' as const, versions: { java: '17', python: '3.8' } }),
+    cancel: async (jobId: string) => {
+      held.get(jobId)?.();
+      return true;
+    },
   };
   const { app, dispatcher } = createApp({ config, db: openDb(':memory:'), runners: [runner] });
-  return { app, dispatcher, calls, uploads };
+  return { app, dispatcher, calls, uploads, held };
 }
 
 function login(s: ReturnType<typeof setup>, password = PASSWORD) {
@@ -226,6 +239,39 @@ describe('제출 큐', () => {
     expect(store.claim()?.id).toBe(sub);
     expect(store.claim()).toBeNull();
     expect(store.requeueStale()).toBe(2);
+  });
+
+  it('실행 중인 제출을 중지하면 cancelled로 끝나고 점수를 기록하지 않는다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    const res = await call('POST', '/api/submissions', { problemId: p.id, kind: 'submit', language: 'python', mode: 'function', code: 'hold', cases: problem.cases });
+    const id = res.body.data.id;
+    await vi.waitFor(() => expect(call.s.held.has(id)).toBe(true));
+    expect((await call('GET', '/api/submissions/' + id)).body.data.status).toBe('running');
+    await call('POST', `/api/submissions/${id}/cancel`);
+    const done = await call.s.dispatcher.wait(id);
+    expect(done.status).toBe('cancelled');
+    expect(done.score).toBeNull();
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.lastSubmission).toBeNull();
+    // 슬롯이 비어 다음 제출이 처리된다
+    const next = await call('POST', '/api/submissions', { problemId: p.id, kind: 'run', language: 'python', mode: 'function', code: 'x', cases: problem.cases });
+    expect((await call.s.dispatcher.wait(next.body.data.id)).status).toBe('done');
+  });
+
+  it('대기 중인 제출은 runner에 보내지 않고 바로 중지한다', async () => {
+    const call = await authed();
+    const body = { problemId: null, kind: 'run', language: 'python', mode: 'function', code: 'hold', cases: problem.cases };
+    // 슬롯(기본 2개)을 모두 채운 뒤의 제출은 대기열에 남는다
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push((await call('POST', '/api/submissions', body)).body.data.id);
+    const queued = ids[2]!;
+    expect((await call('GET', '/api/submissions/' + queued)).body.data.status).toBe('queued');
+    const res = await call('POST', `/api/submissions/${queued}/cancel`);
+    expect(res.body.data.status).toBe('cancelled');
+    for (const id of ids.slice(0, 2)) await call('POST', `/api/submissions/${id}/cancel`);
+    await Promise.all(ids.map((id) => call.s.dispatcher.wait(id)));
+    expect(call.s.calls.filter((c) => c.jobId === queued)).toHaveLength(0);
+    expect((await call('POST', '/api/submissions/nope/cancel')).status).toBe(404);
   });
 
   it('동기 /api/run도 큐를 거쳐 결과를 돌려준다', async () => {

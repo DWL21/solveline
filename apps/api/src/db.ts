@@ -76,6 +76,32 @@ const migrations: string[] = [
    CREATE INDEX submissions_queue ON submissions(status, priority, created_at);`,
   // 문제별 시간 제한 (#19)
   `ALTER TABLE submissions ADD COLUMN time_limit_ms INTEGER NOT NULL DEFAULT 10000;`,
+  // 실행 중지 (#21): status CHECK에 cancelled 추가 → 테이블을 다시 만든다
+  `CREATE TABLE submissions_new (
+     id TEXT PRIMARY KEY,
+     problem_id TEXT REFERENCES problems(id) ON DELETE SET NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('run','submit')),
+     language TEXT NOT NULL,
+     mode TEXT NOT NULL,
+     code TEXT NOT NULL,
+     cases TEXT,
+     testset_hash TEXT,
+     case_ids TEXT NOT NULL,
+     priority INTEGER NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('queued','running','done','error','cancelled')),
+     result TEXT,
+     score INTEGER,
+     error TEXT,
+     created_at TEXT NOT NULL,
+     started_at TEXT,
+     finished_at TEXT,
+     time_limit_ms INTEGER NOT NULL DEFAULT 10000
+   );
+   INSERT INTO submissions_new (id, problem_id, kind, language, mode, code, cases, testset_hash, case_ids, priority, status, result, score, error, created_at, started_at, finished_at, time_limit_ms)
+     SELECT id, problem_id, kind, language, mode, code, cases, testset_hash, case_ids, priority, status, result, score, error, created_at, started_at, finished_at, time_limit_ms FROM submissions;
+   DROP TABLE submissions;
+   ALTER TABLE submissions_new RENAME TO submissions;
+   CREATE INDEX submissions_queue ON submissions(status, priority, created_at);`,
 ];
 
 /** 이름 중복·없는 폴더처럼 요청을 고쳐야 하는 오류 */

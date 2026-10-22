@@ -181,6 +181,26 @@ def main():
     except ValueError:
         ok &= check("testset hash verified", True, "")
 
+    # 중지: 실행 중인 프로세스를 죽이고 남은 케이스를 건너뛴다
+    import threading
+    import time
+    loop = {"language": "python", "mode": "function", "code": "def solution(x):\n    while True:\n        pass\n",
+            "timeLimitMs": 10000, "jobId": "selftest-cancel", "cases": [{"args": [1], "expected": 1}] * 3}
+    out = {}
+    t0 = time.monotonic()
+    th = threading.Thread(target=lambda: out.update(r=run(loop)))
+    th.start()
+    time.sleep(1.5)
+    server.cancel("selftest-cancel")
+    th.join(15)
+    r = out.get("r") or {}
+    ok &= check("cancel running job", r.get("cancelled") is True and time.monotonic() - t0 < 5
+                and [x["status"] for x in r["results"]] == ["skipped"] * 3, r)
+    server.cancel("selftest-precancel")  # 요청보다 먼저 온 중지
+    r = run({"language": "python", "mode": "function", "code": PY_SUM, "jobId": "selftest-precancel",
+             "cases": [{"args": [[1], 1], "expected": 2}]})
+    ok &= check("cancel before start", r.get("cancelled") is True and r["results"][0]["status"] == "skipped", r)
+
     if server.SANDBOX_UID >= 0:
         r = run({"language": "python", "mode": "function", "code": PY_ESCAPE,
                             "cases": [{"args": [], "expected": [True, True, False]}]})
