@@ -2,7 +2,8 @@ import type { CaseResult, ProblemMode, RunResult, TestCase } from '@codetest/sha
 
 export type RunState =
   | { kind: 'idle' }
-  | { kind: 'running'; submit: boolean }
+  /** ahead: 대기열에서 앞에 있는 제출 수(대기 중일 때) */
+  | { kind: 'running'; submit: boolean; ahead: number | null }
   | { kind: 'error'; message: string }
   | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode }
   /** 제출 후 채점: 입력·기댓값은 보여 주지 않는다 */
@@ -47,7 +48,12 @@ function Code({ children }: { children: React.ReactNode }) {
 export function ResultPanel({ state }: { state: RunState }) {
   if (state.kind === 'idle')
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
-  if (state.kind === 'running') return <p className="animate-pulse p-4 text-[13px] text-dim">{state.submit ? '채점 중…' : '실행 중…'}</p>;
+  if (state.kind === 'running')
+    return (
+      <p className="animate-pulse p-4 text-[13px] text-dim">
+        {state.ahead ? `대기 중… (앞에 ${state.ahead}개)` : state.submit ? '채점 중…' : '실행 중…'}
+      </p>
+    );
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
   if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
   if (state.kind === 'graded') return <Graded result={state.result} score={state.score} />;

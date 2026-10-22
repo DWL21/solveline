@@ -9,7 +9,10 @@ services:
     networks: [sandbox]
     read_only: true
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      - /tmp:size=768m,mode=1777
+    environment:
+      RUN_SLOTS: "2"
+      TESTSET_CACHE_MB: "200"
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
     security_opt: [no-new-privileges:true]
@@ -31,7 +34,9 @@ services:
       PORT: "8787"
       DATA_DIR: /data
       WEB_ORIGIN: https://codetest.simplyimg.com
-      RUNNER_URL: http://runner:8000
+      # runner를 늘리면 쉼표로 더한다 (예: http://runner:8000,http://runner2:8000)
+      RUNNER_URLS: http://runner:8000
+      RUNNER_SLOTS: "2"
     volumes:
       - /var/lib/codetest:/data
     depends_on:

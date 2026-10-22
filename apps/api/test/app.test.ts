@@ -1,25 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { templateFor, type ProblemInput, type RunRequest } from '@codetest/shared';
+import { templateFor, type ProblemInput, type TestCase } from '@codetest/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { openDb } from '../src/db.ts';
-import { CaseInputError, normalizeLiteral, toRunnerCases } from '../src/runner.ts';
+import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
+import { SubmissionStore } from '../src/dispatcher.ts';
 
 const PASSWORD = 'test-password-0123456789abcdef';
 
+/** 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다. */
 function setup() {
   const config = loadConfig({ ACCESS_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' });
-  const calls: RunRequest[] = [];
+  const calls: RunJob[] = [];
+  const uploads: string[] = [];
   const runner = {
-    run: async (req: RunRequest) => {
-      calls.push(req);
-      toRunnerCases(req);
-      return { compile: { ok: true, output: '' }, results: req.cases.map((c) => ({ id: c.id, status: 'pass' as const, actual: '1', stdout: '', stderr: '', timeMs: 1, memoryMb: 10 })) };
+    run: async (job: RunJob) => {
+      calls.push(job);
+      let cases: TestCase[] = job.cases ?? [];
+      if (job.testset) {
+        if (!uploads.includes(job.testset.hash)) uploads.push(job.testset.hash);
+        cases = JSON.parse(job.testset.raw() ?? '[]') as TestCase[];
+      }
+      return {
+        compile: { ok: true, output: '' },
+        results: cases.map((c) => ({ status: c.expected === '"fail"' ? ('fail' as const) : ('pass' as const), actual: '1', stdout: '', stderr: '', timeMs: 1, memoryMb: 10 })),
+      };
     },
     runtime: async () => ({ runner: 'up' as const, versions: { java: '17', python: '3.8' } }),
   };
-  const app = createApp({ config, db: openDb(':memory:'), runner });
-  return { app, calls };
+  const { app, dispatcher } = createApp({ config, db: openDb(':memory:'), runners: [runner] });
+  return { app, dispatcher, calls, uploads };
 }
 
 function login(s: ReturnType<typeof setup>, password = PASSWORD) {
@@ -101,7 +111,7 @@ describe('문제·실행', () => {
   it('잘못된 입력값은 400으로 알린다', async () => {
     const s = setup();
     const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
-    const body: RunRequest = { language: 'python', mode: 'function', code: 'x', cases: [{ id: 'a', args: ['[1, 2'], stdin: '', expected: '3', hidden: false }] };
+    const body = { language: 'python', mode: 'function', code: 'x', cases: [{ id: 'a', args: ['[1, 2'], stdin: '', expected: '3', hidden: false }] };
     const res = await s.app.request('/api/run', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(res.status).toBe(400);
   });
@@ -114,17 +124,91 @@ async function authed() {
     const res = await s.app.request(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: (await res.json()) as { data: any; error?: { code: string } } }; // eslint-disable-line @typescript-eslint/no-explicit-any -- 테스트 응답 파싱
   };
-  return call;
+  return Object.assign(call, { s });
 }
 
-describe('제출 결과', () => {
-  it('마지막 제출 결과를 저장하고 목록에 보여 준다', async () => {
+describe('히든 테스트셋', () => {
+  it('히든 케이스는 문제 본문이 아니라 테스트셋으로 저장되고, 자동 저장(PUT)이 지우지 않는다', async () => {
+    const call = await authed();
+    const hidden = [
+      { id: 'h1', args: ['[5]'], stdin: '', expected: '5', hidden: true },
+      { id: 'h2', args: ['[6]'], stdin: '', expected: '6', hidden: true },
+    ];
+    const p = (await call('POST', '/api/problems', { ...problem, cases: [...problem.cases, ...hidden] })).body.data;
+    expect(p.cases).toHaveLength(1);
+    expect(p.hiddenTestset.count).toBe(2);
+    await call('PUT', '/api/problems/' + p.id, { ...problem, title: '수정' });
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.hiddenTestset).toEqual(p.hiddenTestset);
+    expect((await call('GET', `/api/problems/${p.id}/hidden`)).body.data.cases.map((c: TestCase) => c.id)).toEqual(['h1', 'h2']);
+    const cleared = await call('PUT', `/api/problems/${p.id}/hidden`, { cases: [] });
+    expect(cleared.body.data.cases).toEqual([]);
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.hiddenTestset).toBeNull();
+  });
+});
+
+describe('제출 큐', () => {
+  it('코드 실행은 보이는 케이스만, 결과는 제출 id로 조회한다', async () => {
     const call = await authed();
     const p = (await call('POST', '/api/problems', problem)).body.data;
-    expect(p.lastSubmission).toBeNull();
-    const sub = { score: 80, passed: 8, total: 10, language: 'java', at: '2026-10-22T00:00:00.000Z' };
-    await call('PUT', '/api/problems/' + p.id, { ...problem, lastSubmission: sub });
-    expect((await call('GET', '/api/problems')).body.data[0].lastSubmission).toEqual(sub);
+    const res = await call('POST', '/api/submissions', { problemId: p.id, kind: 'run', language: 'python', mode: 'function', code: 'x', cases: problem.cases });
+    expect(res.status).toBe(202);
+    const done = await call.s.dispatcher.wait(res.body.data.id);
+    expect(done.status).toBe('done');
+    expect(done.caseIds).toEqual(['a']);
+    expect((await call('GET', '/api/submissions/' + done.id)).body.data.result.results[0].status).toBe('pass');
+  });
+
+  it('제출은 히든 테스트셋(해시)으로 채점하고 점수를 서버가 기록한다', async () => {
+    const call = await authed();
+    const hidden = [
+      { id: 'h1', args: ['1'], stdin: '', expected: '1', hidden: true },
+      { id: 'h2', args: ['2'], stdin: '', expected: '"fail"', hidden: true },
+    ];
+    const p = (await call('POST', '/api/problems', { ...problem, cases: [...problem.cases, ...hidden] })).body.data;
+    const res = await call('POST', '/api/submissions', { problemId: p.id, kind: 'submit', language: 'java', mode: 'function', code: 'x', cases: problem.cases });
+    const done = await call.s.dispatcher.wait(res.body.data.id);
+    expect(done.score).toBe(50);
+    expect(call.s.calls.at(-1)?.testset?.hash).toBe(p.hiddenTestset.hash);
+    expect(call.s.calls.at(-1)?.cases).toBeUndefined();
+    const sub = (await call('GET', '/api/problems')).body.data[0].lastSubmission;
+    expect(sub).toMatchObject({ score: 50, passed: 1, total: 2, language: 'java' });
+    // 클라이언트가 보낸 lastSubmission은 무시한다
+    await call('PUT', '/api/problems/' + p.id, { ...problem, lastSubmission: { score: 100, passed: 2, total: 2, language: 'java', at: 'x' } });
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.lastSubmission.score).toBe(50);
+  });
+
+  it('잘못된 리터럴은 대기열에 넣기 전에 400', async () => {
+    const call = await authed();
+    const res = await call('POST', '/api/submissions', {
+      problemId: null,
+      kind: 'run',
+      language: 'python',
+      mode: 'function',
+      code: 'x',
+      cases: [{ id: 'a', args: ['[1, 2'], stdin: '', expected: '3', hidden: false }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('invalid_case');
+  });
+
+  it('코드 실행이 제출 채점보다 먼저 꺼내진다', () => {
+    const db = openDb(':memory:');
+    const store = new SubmissionStore(db);
+    const base = { problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [] };
+    const sub = store.insert({ ...base, kind: 'submit' }, new Date('2026-01-01T00:00:00Z'));
+    const run = store.insert({ ...base, kind: 'run' }, new Date('2026-01-01T00:00:01Z'));
+    expect(store.get(sub)!.ahead).toBe(1);
+    expect(store.claim()?.id).toBe(run);
+    expect(store.claim()?.id).toBe(sub);
+    expect(store.claim()).toBeNull();
+    expect(store.requeueStale()).toBe(2);
+  });
+
+  it('동기 /api/run도 큐를 거쳐 결과를 돌려준다', async () => {
+    const call = await authed();
+    const res = await call('POST', '/api/run', { language: 'python', mode: 'function', code: 'x', cases: problem.cases });
+    expect(res.status).toBe(200);
+    expect(res.body.data.results[0].id).toBe('a');
   });
 });
 
@@ -180,8 +264,8 @@ describe('입력값 파싱', () => {
     expect(normalizeLiteral('123456789012345678901', 'x')).toBe('123456789012345678901');
   });
 
-  it('빈 기댓값은 비교하지 않는다(null)', () => {
-    const cases = toRunnerCases({ language: 'java', mode: 'function', code: '', cases: [{ id: 'a', args: ['1'], stdin: '', expected: ' ', hidden: false }] });
-    expect(cases[0]).toEqual({ argsJson: ['1'], expectedJson: null });
+  it('빈 기댓값은 검사하지 않는다', () => {
+    expect(() => validateCases('function', [{ id: 'a', args: ['1'], stdin: '', expected: ' ', hidden: false }])).not.toThrow();
+    expect(() => validateCases('function', [{ id: 'a', args: ['x'], stdin: '', expected: '', hidden: false }])).toThrow(CaseInputError);
   });
 });

@@ -150,18 +150,28 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
   const lang = draft.language;
   const code = draft.code[lang];
 
+  /** 제출 큐에 넣고 끝날 때까지 조회한다(처음엔 빠르게, 점점 느리게). */
   const runMut = useMutation({
-    mutationFn: ({ cases }: { cases: TestCase[]; submit: boolean }) => {
+    mutationFn: async ({ cases, submit }: { cases: TestCase[]; submit: boolean }) => {
       const d = draftRef.current;
-      return api.run({ language: d.language, mode: d.mode, code: d.code[d.language], cases });
+      let s = await api.submit({ problemId: problem.id, kind: submit ? 'submit' : 'run', language: d.language, mode: d.mode, code: d.code[d.language], cases });
+      let delay = 250;
+      while (s.status === 'queued' || s.status === 'running') {
+        setRun({ kind: 'running', submit, ahead: s.status === 'queued' ? s.ahead : null });
+        await new Promise((r) => setTimeout(r, delay));
+        delay = Math.min(1500, Math.round(delay * 1.5));
+        s = await api.submission(s.id);
+      }
+      return s;
     },
-    onMutate: ({ submit }) => setRun({ kind: 'running', submit }),
-    onSuccess: (result, { cases, submit }) => {
-      if (!submit) return setRun({ kind: 'done', result, cases, mode: draftRef.current.mode });
-      const passed = result.compile.ok ? result.results.filter((r) => r.status === 'pass').length : 0;
-      const score = Math.round((passed / cases.length) * 100);
-      setRun({ kind: 'graded', result, score });
-      patch({ lastSubmission: { score, passed, total: cases.length, language: draftRef.current.language, at: new Date().toISOString() } });
+    onMutate: ({ submit }) => setRun({ kind: 'running', submit, ahead: null }),
+    onSuccess: (s, { cases, submit }) => {
+      if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
+      if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode });
+      setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
+      // 점수는 서버가 기록한다 → 문제·목록을 다시 읽는다
+      void qc.invalidateQueries({ queryKey: qk.problem(problem.id) });
+      void qc.invalidateQueries({ queryKey: qk.problems });
     },
     onError: (e) => setRun({ kind: 'error', message: errMsg(e) }),
   });
@@ -178,19 +188,17 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
     runMut.mutate({ cases, submit: false });
   }, [runMut]);
 
-  /** 제출 후 채점: 히든 케이스(없으면 전체). 기댓값이 모두 있어야 한다. */
+  /** 제출 후 채점: 서버의 히든 테스트셋으로. 히든이 없으면 보이는 케이스로(기댓값 필요). */
   const doSubmit = useCallback(() => {
     if (runMut.isPending) return;
-    const all = draftRef.current.cases;
-    const hidden = all.filter((c) => c.hidden);
-    const cases = hidden.length ? hidden : all;
-    if (cases.length === 0 || cases.some((c) => !c.expected.trim())) {
+    const cases = draftRef.current.cases.filter((c) => !c.hidden);
+    if (!problem.hiddenTestset?.count && (cases.length === 0 || cases.some((c) => !c.expected.trim()))) {
       setTab('cases');
-      setRun({ kind: 'error', message: '채점하려면 기댓값이 있는 테스트 케이스가 필요해요.' });
+      setRun({ kind: 'error', message: '채점하려면 히든 케이스나 기댓값이 있는 테스트 케이스가 필요해요.' });
       return;
     }
     runMut.mutate({ cases, submit: true });
-  }, [runMut]);
+  }, [runMut, problem.hiddenTestset]);
 
   const delMut = useMutation({
     mutationFn: () => api.deleteProblem(problem.id),
@@ -209,7 +217,7 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
   };
 
   const visibleCount = draft.cases.filter((c) => !c.hidden).length;
-  const sub = draft.lastSubmission;
+  const sub = problem.lastSubmission;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -284,7 +292,15 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
                 </div>
               )
             ) : (
-              <CasesEditor mode={draft.mode} params={draft.params} cases={draft.cases} onParams={(params) => patch({ params })} onCases={(cases) => patch({ cases })} />
+              <CasesEditor
+                problemId={problem.id}
+                mode={draft.mode}
+                params={draft.params}
+                cases={draft.cases}
+                hidden={problem.hiddenTestset}
+                onParams={(params) => patch({ params })}
+                onCases={(cases) => patch({ cases })}
+              />
             )}
           </div>
         </section>
@@ -319,7 +335,7 @@ function Editor({ problem, onDeleted }: { problem: Problem; onDeleted: () => voi
               <button type="button" className="btn-ghost min-w-24" disabled={runMut.isPending} onClick={doRun} title="보이는 케이스로 실행 (⌘/Ctrl + Enter)">
                 코드 실행
               </button>
-              <button type="button" className="btn-primary min-w-32" disabled={runMut.isPending} onClick={doSubmit} title="히든 케이스로 채점">
+              <button type="button" className="btn-primary min-w-32" disabled={runMut.isPending} onClick={doSubmit} title={problem.hiddenTestset?.count ? `히든 케이스 ${problem.hiddenTestset.count}개로 채점` : '보이는 케이스로 채점'}>
                 {runMut.isPending ? (run.kind === 'running' && run.submit ? '채점 중…' : '실행 중…') : '제출 후 채점하기'}
               </button>
             </div>

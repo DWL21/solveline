@@ -26,6 +26,9 @@ const EnvSchema = z.object({
   PORT: positiveNumber(8787),
   DATA_DIR: optionalString,
   RUNNER_URL: optionalString,
+  /** 쉼표로 구분한 runner 주소들. 있으면 RUNNER_URL보다 우선 */
+  RUNNER_URLS: optionalString,
+  RUNNER_SLOTS: positiveNumber(2),
   ACCESS_PASSWORD: optionalString,
   SESSION_SECRET: optionalString,
   SESSION_TTL_DAYS: positiveNumber(30),
@@ -36,7 +39,9 @@ export type Config = {
   port: number;
   dataDir: string;
   production: boolean;
-  runnerUrl: string;
+  runnerUrls: string[];
+  /** runner 한 대에 동시에 보내는 제출 수(runner의 RUN_SLOTS와 맞춘다) */
+  runnerSlots: number;
   /** 로그인 비밀번호. 없으면 로그인할 수 없다. */
   accessPassword: string | null;
   sessionSecret: string;
@@ -76,7 +81,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.PORT,
     dataDir: resolve(e.DATA_DIR ?? './data'),
     production,
-    runnerUrl: (e.RUNNER_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, ''),
+    runnerUrls: (e.RUNNER_URLS ?? e.RUNNER_URL ?? 'http://127.0.0.1:8000')
+      .split(',')
+      .map((u) => u.trim().replace(/\/$/, ''))
+      .filter(Boolean),
+    runnerSlots: Math.floor(e.RUNNER_SLOTS),
     accessPassword: e.ACCESS_PASSWORD ?? null,
     // 개발 편의: 비밀이 없으면 프로세스마다 임의 값 (재시작하면 세션이 무효화된다)
     sessionSecret: e.SESSION_SECRET ?? cryptoRandom(),

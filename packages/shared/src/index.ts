@@ -72,14 +72,14 @@ export const CollectionItemsInput = z.object({ problemIds: z.array(z.string().mi
 export type CollectionItemsInput = z.infer<typeof CollectionItemsInput>;
 
 /** 마지막 제출(채점) 결과 */
-export const Submission = z.object({
+export const LastSubmission = z.object({
   score: z.number().int().min(0).max(100),
   passed: z.number().int().min(0),
   total: z.number().int().min(0),
   language: z.enum(['java', 'python']),
   at: z.string(),
 });
-export type Submission = z.infer<typeof Submission>;
+export type LastSubmission = z.infer<typeof LastSubmission>;
 
 export const ProblemInput = z.object({
   title: z.string().trim().min(1).max(200),
@@ -91,12 +91,22 @@ export const ProblemInput = z.object({
   cases: z.array(TestCase).max(60),
   language: Language,
   code: z.object({ java: z.string().max(MAX_TEXT), python: z.string().max(MAX_TEXT) }),
-  lastSubmission: Submission.nullable().default(null),
+  lastSubmission: LastSubmission.nullable().default(null),
 });
 export type ProblemInput = z.infer<typeof ProblemInput>;
 
+/** 히든 테스트셋: 내용은 서버의 해시 파일에 있고 문제에는 해시와 개수만 둔다. */
+export const TestsetRef = z.object({ hash: z.string(), count: z.number().int().min(0) });
+export type TestsetRef = z.infer<typeof TestsetRef>;
+
+/**
+ * cases에는 보이는 케이스만 온다. 히든 케이스는 /api/problems/:id/hidden 으로 따로 읽고 쓴다.
+ * (호환: ProblemInput.cases에 hidden 케이스를 넣어 보내면 히든 테스트셋을 그것으로 바꾼다.)
+ * lastSubmission은 서버가 채점 결과로 갱신한다(입력값은 무시).
+ */
 export const Problem = ProblemInput.extend({
   id: z.string(),
+  hiddenTestset: TestsetRef.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -106,6 +116,46 @@ export const ProblemSummary = Problem.pick({ id: true, title: true, folderId: tr
 export type ProblemSummary = z.infer<typeof ProblemSummary>;
 
 // ─── 실행 ───
+
+export const HiddenCases = z.object({ cases: z.array(TestCase).max(200) });
+export type HiddenCases = z.infer<typeof HiddenCases>;
+
+// ─── 제출 큐 ───
+
+/** run: 보이는 케이스(요청에 담음) / submit: 히든 테스트셋(없으면 요청의 케이스)으로 채점 */
+export const SubmissionKind = z.enum(['run', 'submit']);
+export type SubmissionKind = z.infer<typeof SubmissionKind>;
+
+export const SubmissionRequest = z.object({
+  problemId: z.string().max(64).nullable(),
+  kind: SubmissionKind,
+  language: Language,
+  mode: ProblemMode,
+  code: z.string().max(MAX_TEXT),
+  cases: z.array(TestCase).max(40),
+});
+export type SubmissionRequest = z.infer<typeof SubmissionRequest>;
+
+export const SubmissionStatus = z.enum(['queued', 'running', 'done', 'error']);
+export type SubmissionStatus = z.infer<typeof SubmissionStatus>;
+
+export const Submission = z.object({
+  id: z.string(),
+  problemId: z.string().nullable(),
+  kind: SubmissionKind,
+  language: Language,
+  status: SubmissionStatus,
+  /** queued일 때 앞에 기다리는 제출 수 */
+  ahead: z.number().int().min(0).nullable(),
+  /** 채점한 케이스의 id (run: 요청 순서, submit: 테스트셋 순서) */
+  caseIds: z.array(z.string()),
+  result: z.lazy(() => RunResult).nullable(),
+  score: z.number().int().min(0).max(100).nullable(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  finishedAt: z.string().nullable(),
+});
+export type Submission = z.infer<typeof Submission>;
 
 export const RunRequest = z.object({
   language: Language,
@@ -135,6 +185,7 @@ export const RunResult = z.object({
   results: z.array(CaseResult),
 });
 export type RunResult = z.infer<typeof RunResult>;
+
 
 // ─── 기본 템플릿 (기존 형식) ───
 

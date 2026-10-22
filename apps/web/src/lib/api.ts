@@ -2,12 +2,16 @@ import { z } from 'zod';
 import {
   Collection,
   Folder,
+  HiddenCases,
   Problem,
   ProblemSummary,
   RunResult,
   Runtime,
   Session,
+  Submission,
   type CollectionInput,
+  type SubmissionRequest,
+  type TestCase,
   type ProblemInput,
   type RunRequest,
 } from '@codetest/shared';
@@ -70,6 +74,11 @@ export const api = {
     request(Problem, `/api/problems/${encodeURIComponent(id)}`, { ...json('PUT', p), keepalive: opts.keepalive }),
   deleteProblem: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/problems/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   run: (r: RunRequest) => request(RunResult, '/api/run', json('POST', r)),
+  /** 제출 큐: 바로 id를 받고, submission(id)로 결과를 조회한다 */
+  submit: (r: SubmissionRequest) => request(Submission, '/api/submissions', json('POST', r)),
+  submission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}`),
+  hidden: (id: string) => request(HiddenCases, `/api/problems/${encodeURIComponent(id)}/hidden`),
+  saveHidden: (id: string, cases: TestCase[]) => request(HiddenCases, `/api/problems/${encodeURIComponent(id)}/hidden`, json('PUT', { cases })),
   folders: () => request(z.array(Folder), '/api/folders'),
   createFolder: (name: string) => request(Folder, '/api/folders', json('POST', { name })),
   renameFolder: (id: string, name: string) => request(Folder, `/api/folders/${encodeURIComponent(id)}`, json('PUT', { name })),
@@ -89,4 +98,5 @@ export const qk = {
   problem: (id: string) => ['problem', id] as const,
   folders: ['folders'] as const,
   collections: ['collections'] as const,
+  hidden: (id: string) => ['hidden', id] as const,
 };

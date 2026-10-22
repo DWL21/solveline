@@ -5,6 +5,7 @@ api만 이 서버를 호출한다. 서버는 root로 돌고, 사용자 코드는
 서버에 남기는 capability(CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL)는 setuid 후 자식에 남지 않는다.
 Python 3.8 표준 라이브러리만 쓴다 (사용자 코드와 같은 인터프리터).
 """
+import hashlib
 import json
 import os
 import re
@@ -29,10 +30,64 @@ COMPILE_TIMEOUT_S = 30.0
 JAVA_XMX = os.environ.get("JAVA_XMX", "512m")
 PY_AS_LIMIT = int(os.environ.get("PY_AS_LIMIT_MB", "1024")) * 1024 * 1024
 OUTPUT_LIMIT = 64 * 1024
-MAX_CASES = 40
-# Cloudflare 응답 제한(100초) 안에 끝나도록 요청 전체 예산을 둔다.
-TOTAL_BUDGET_S = float(os.environ.get("TOTAL_BUDGET_S", "80"))
+MAX_CASES = 200
+# 요청 하나의 전체 실행 시간 상한. (api는 비동기 큐라 Cloudflare 응답 제한과 무관하다)
+TOTAL_BUDGET_S = float(os.environ.get("TOTAL_BUDGET_S", "600"))
 MAX_CODE = 200 * 1024
+
+# 테스트셋 캐시: api가 해시만 보내고, 없을 때만 내용을 올린다(파일은 내용이 바뀌지 않는다).
+TESTSET_DIR = os.environ.get("TESTSET_DIR", os.path.join(WORK_ROOT, "testsets"))
+TESTSET_CACHE_BYTES = int(os.environ.get("TESTSET_CACHE_MB", "200")) * 1024 * 1024
+_testset_lock = threading.Lock()
+
+
+def testset_path(h):
+    if not re.fullmatch(r"[0-9a-f]{64}", h or ""):
+        raise ValueError("테스트셋 해시가 올바르지 않습니다.")
+    return os.path.join(TESTSET_DIR, h + ".json")
+
+
+def load_testset(h):
+    """캐시에 있으면 케이스 목록, 없으면 None. 쓸 때마다 mtime을 갱신해 LRU로 쓴다."""
+    path = testset_path(h)
+    try:
+        with open(path, encoding="utf-8") as f:
+            cases = json.load(f)
+        os.utime(path)
+        return cases
+    except FileNotFoundError:
+        return None
+
+
+def store_testset(h, raw):
+    if hashlib.sha256(raw).hexdigest() != h:
+        raise ValueError("테스트셋 내용이 해시와 다릅니다.")
+    json.loads(raw)
+    with _testset_lock:
+        os.makedirs(TESTSET_DIR, exist_ok=True)
+        tmp = testset_path(h) + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(raw)
+        os.replace(tmp, testset_path(h))
+        # 용량을 넘으면 오래 안 쓴 것부터 지운다
+        files = [os.path.join(TESTSET_DIR, n) for n in os.listdir(TESTSET_DIR) if n.endswith(".json")]
+        files.sort(key=lambda p: os.stat(p).st_mtime)
+        total = sum(os.stat(p).st_size for p in files)
+        while files and total > TESTSET_CACHE_BYTES and files[0] != testset_path(h):
+            total -= os.stat(files[0]).st_size
+            os.remove(files.pop(0))
+
+
+def loads_literal(text):
+    """기존 표기 리터럴(JSON, 작은따옴표 허용)을 해석한다. 정수는 정밀도 제한이 없다."""
+    t = text.strip()
+    try:
+        return json.loads(t)
+    except ValueError:
+        if "'" in t and '"' not in t:
+            return json.loads(t.replace("'", '"'))
+        raise ValueError("JSON 형식이 아닌 값이 있습니다: " + t[:50])
+
 
 # 한 번에 실행하는 요청 수 (단일 사용자, 4코어 서버)
 _slots = threading.BoundedSemaphore(int(os.environ.get("RUN_SLOTS", "2")))
@@ -279,11 +334,20 @@ def run_stdin_case(lang, code, work, stdin, expected):
     return res
 
 
+class TestsetMissing(Exception):
+    pass
+
+
 def execute(req):
     lang = req.get("language")
     mode = req.get("mode")
     code = req.get("code", "")
-    cases = req.get("cases") or []
+    if req.get("testset"):
+        cases = load_testset(req["testset"])
+        if cases is None:
+            raise TestsetMissing()
+    else:
+        cases = req.get("cases") or []
     if lang not in ("java", "python") or mode not in ("function", "stdin"):
         raise ValueError("language/mode 값이 올바르지 않습니다.")
     if not isinstance(code, str) or len(code) > MAX_CODE:
@@ -307,16 +371,14 @@ def execute(req):
                     results.append({"status": "skipped", "stdout": "", "stderr": "전체 실행 시간 제한으로 건너뛰었습니다.",
                                     "timeMs": 0, "memoryMb": 0, "actual": None})
                     continue
+                # 케이스는 화면과 같은 형식: args = 리터럴 텍스트 목록, expected = 텍스트('' 이면 비교 안 함)
+                exp_text = c.get("expected") or ""
                 if mode == "function":
-                    # api는 JSON 텍스트를 그대로 넘긴다(큰 정수 정밀도 보존). 예전 형식(args/expected 값)도 받는다.
-                    if "argsJson" in c:
-                        args = [json.loads(a) for a in c["argsJson"]]
-                        expected = None if c.get("expectedJson") is None else json.loads(c["expectedJson"])
-                    else:
-                        args, expected = c.get("args", []), c.get("expected")
+                    args = [loads_literal(a) for a in c.get("args", [])]
+                    expected = loads_literal(exp_text) if exp_text.strip() else None
                     results.append(run_function_case(lang, work, args, expected))
                 else:
-                    results.append(run_stdin_case(lang, code, work, c.get("stdin", ""), c.get("expected")))
+                    results.append(run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None))
             return {"compile": {"ok": True, "output": ""}, "results": results}
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -339,15 +401,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"status": "up", "versions": VERSIONS})
         self._send(404, {"error": "not_found"})
 
+    def do_PUT(self):
+        m = re.fullmatch(r"/testsets/([0-9a-f]{64})", self.path)
+        if not m:
+            return self._send(404, {"error": "not_found"})
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length > 64 * 1024 * 1024:
+                return self._send(413, {"error": "테스트셋이 너무 큽니다."})
+            store_testset(m.group(1), self.rfile.read(length))
+            return self._send(200, {"stored": m.group(1)})
+        except ValueError as e:
+            return self._send(400, {"error": str(e)})
+
     def do_POST(self):
         if self.path != "/run":
             return self._send(404, {"error": "not_found"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length > 4 * 1024 * 1024:
+            if length > 16 * 1024 * 1024:
                 return self._send(413, {"error": "요청이 너무 큽니다."})
             req = json.loads(self.rfile.read(length) or b"{}")
             return self._send(200, execute(req))
+        except TestsetMissing:
+            return self._send(409, {"error": "testset_missing"})
         except ValueError as e:
             return self._send(400, {"error": str(e)})
         except Exception as e:  # noqa: BLE001 - 서버는 죽지 않는다

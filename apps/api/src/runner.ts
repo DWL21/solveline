@@ -1,4 +1,4 @@
-import type { RunRequest, RunResult, Runtime } from '@codetest/shared';
+import type { RunRequest, RunResult, Runtime, TestCase } from '@codetest/shared';
 
 export class RunnerError extends Error {}
 export class CaseInputError extends Error {}
@@ -28,46 +28,61 @@ export function normalizeLiteral(text: string, where: string): string {
   }
 }
 
-type RunnerCase = { argsJson?: string[]; stdin?: string; expectedJson?: string | null; expected?: string | null };
-
-export function toRunnerCases(req: RunRequest): RunnerCase[] {
-  return req.cases.map((c, i) => {
-    const n = i + 1;
-    if (req.mode === 'stdin') return { stdin: c.stdin, expected: c.expected.trim() === '' ? null : c.expected };
-    return {
-      argsJson: c.args.map((a, j) => normalizeLiteral(a, `테스트 ${n} 매개변수 ${j + 1}`)),
-      expectedJson: c.expected.trim() === '' ? null : normalizeLiteral(c.expected, `테스트 ${n} 기댓값`),
-    };
+/** 즉시 실행용(보이는) 케이스의 리터럴을 미리 검사해 400으로 알린다. 해석은 runner가 한다. */
+export function validateCases(mode: RunRequest['mode'], cases: TestCase[]) {
+  if (mode !== 'function') return;
+  cases.forEach((c, i) => {
+    c.args.forEach((a, j) => normalizeLiteral(a, `테스트 ${i + 1} 매개변수 ${j + 1}`));
+    if (c.expected.trim()) normalizeLiteral(c.expected, `테스트 ${i + 1} 기댓값`);
   });
 }
 
 type RawResult = { compile: RunResult['compile']; results: Omit<RunResult['results'][number], 'id'>[] };
 
+export type RunJob = {
+  language: RunRequest['language'];
+  mode: RunRequest['mode'];
+  code: string;
+  /** 요청에 담아 보내는 케이스(코드 실행) */
+  cases?: TestCase[];
+  /** runner 캐시에서 꺼내 쓰는 테스트셋(제출). raw는 캐시에 없을 때 한 번 올린다. */
+  testset?: { hash: string; raw: () => string | null };
+};
+
+/** runner 한 대. 결과의 순서는 케이스 순서와 같다(id는 호출한 쪽이 붙인다). */
 export class RunnerClient {
   constructor(
-    private baseUrl: string,
+    readonly baseUrl: string,
     private fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async run(req: RunRequest): Promise<RunResult> {
-    const cases = toRunnerCases(req);
-    let res: Response;
+  private async post(path: string, body: string, method = 'POST') {
     try {
-      res = await this.fetchImpl(`${this.baseUrl}/run`, {
-        method: 'POST',
+      return await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ language: req.language, mode: req.mode, code: req.code, cases }),
-        signal: AbortSignal.timeout(110_000),
+        body,
+        signal: AbortSignal.timeout(15 * 60_000),
       });
     } catch (e) {
       throw new RunnerError(`실행 서버에 연결할 수 없습니다: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const body = (await res.json().catch(() => null)) as (RawResult & { error?: string }) | null;
-    if (!res.ok || !body) throw new RunnerError(body?.error ?? `실행 서버 오류 (${res.status})`);
-    return {
-      compile: body.compile,
-      results: body.results.map((r, i) => ({ ...r, id: req.cases[i]?.id ?? String(i) })),
-    };
+  }
+
+  async run(job: RunJob): Promise<Omit<RunResult, 'results'> & { results: RawResult['results'] }> {
+    const body = JSON.stringify({ language: job.language, mode: job.mode, code: job.code, cases: job.cases, testset: job.testset?.hash });
+    let res = await this.post('/run', body);
+    if (res.status === 409 && job.testset) {
+      // runner 캐시에 테스트셋이 없다 → 한 번 올리고 다시 실행
+      const raw = job.testset.raw();
+      if (raw === null) throw new RunnerError('테스트셋 파일이 없습니다.');
+      const up = await this.post(`/testsets/${job.testset.hash}`, raw, 'PUT');
+      if (!up.ok) throw new RunnerError(`테스트셋을 올리지 못했습니다 (${up.status})`);
+      res = await this.post('/run', body);
+    }
+    const parsed = (await res.json().catch(() => null)) as (RawResult & { error?: string }) | null;
+    if (!res.ok || !parsed) throw new RunnerError(parsed?.error ?? `실행 서버 오류 (${res.status})`);
+    return parsed;
   }
 
   async runtime(): Promise<Runtime> {

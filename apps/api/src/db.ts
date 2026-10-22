@@ -2,7 +2,8 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { Collection, Folder, Problem, type CollectionInput, type ProblemInput, type ProblemSummary } from '@codetest/shared';
+import { Collection, Folder, Problem, type CollectionInput, type LastSubmission, type ProblemInput, type ProblemSummary, type TestCase, type TestsetRef } from '@codetest/shared';
+import type { TestsetStore } from './testsets.ts';
 
 export type Db = Database.Database;
 
@@ -52,6 +53,27 @@ const migrations: string[] = [
      PRIMARY KEY (collection_id, problem_id)
    );
    CREATE INDEX collection_items_problem ON collection_items(problem_id);`,
+  // 제출 큐 (#15)
+  `CREATE TABLE submissions (
+     id TEXT PRIMARY KEY,
+     problem_id TEXT REFERENCES problems(id) ON DELETE SET NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('run','submit')),
+     language TEXT NOT NULL,
+     mode TEXT NOT NULL,
+     code TEXT NOT NULL,
+     cases TEXT,
+     testset_hash TEXT,
+     case_ids TEXT NOT NULL,
+     priority INTEGER NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('queued','running','done','error')),
+     result TEXT,
+     score INTEGER,
+     error TEXT,
+     created_at TEXT NOT NULL,
+     started_at TEXT,
+     finished_at TEXT
+   );
+   CREATE INDEX submissions_queue ON submissions(status, priority, created_at);`,
 ];
 
 /** 이름 중복·없는 폴더처럼 요청을 고쳐야 하는 오류 */
@@ -91,9 +113,25 @@ export function openDb(dataDir: string): Db {
 
 type Row = { id: string; title: string; folder_id: string | null; mode: string; language: string; body: string; created_at: string; updated_at: string };
 
-/** 문제 저장소. 검색할 열만 따로 두고 나머지(설명·케이스·코드)는 JSON body에 둔다. */
+type Body = {
+  description: string;
+  params: string[];
+  /** 보이는 케이스만 */
+  cases: TestCase[];
+  code: ProblemInput['code'];
+  lastSubmission: LastSubmission | null;
+  hiddenTestset: TestsetRef | null;
+};
+
+/**
+ * 문제 저장소. 검색할 열만 따로 두고 나머지는 JSON body에 둔다.
+ * 히든 케이스는 body가 아니라 TestsetStore(해시 파일)에 두고 body에는 해시·개수만 남긴다 → 자동 저장이 가볍다.
+ */
 export class ProblemStore {
-  constructor(private db: Db) {}
+  constructor(
+    private db: Db,
+    private testsets: TestsetStore,
+  ) {}
 
   list(): ProblemSummary[] {
     const rows = this.db
@@ -110,12 +148,28 @@ export class ProblemStore {
     }));
   }
 
+  private row(id: string) {
+    return this.db.prepare('SELECT * FROM problems WHERE id = ?').get(id) as Row | undefined;
+  }
+
+  private body(row: Row): Body {
+    const b = JSON.parse(row.body) as Partial<Body>;
+    return {
+      description: b.description ?? '',
+      params: b.params ?? [],
+      cases: b.cases ?? [],
+      code: b.code ?? { java: '', python: '' },
+      lastSubmission: b.lastSubmission ?? null,
+      hiddenTestset: b.hiddenTestset ?? null,
+    };
+  }
+
   get(id: string): Problem | null {
-    const row = this.db.prepare('SELECT * FROM problems WHERE id = ?').get(id) as Row | undefined;
+    const row = this.row(id);
     if (!row) return null;
-    const body = JSON.parse(row.body) as Omit<ProblemInput, 'title' | 'folderId' | 'mode' | 'language'>;
+    const b = this.body(row);
     return Problem.parse({
-      ...body,
+      ...b,
       id: row.id,
       title: row.title,
       folderId: row.folder_id,
@@ -130,31 +184,91 @@ export class ProblemStore {
     if (folderId && !this.db.prepare('SELECT 1 FROM folders WHERE id = ?').get(folderId)) throw new StoreError('folder_not_found', '없는 폴더입니다.');
   }
 
+  /** 입력의 hidden 케이스는 테스트셋으로 옮기고, 없으면 기존 테스트셋을 유지한다. lastSubmission은 서버 값 유지. */
+  private toBody(input: ProblemInput, prev: Body | null): Body {
+    const hidden = input.cases.filter((c) => c.hidden);
+    return {
+      description: input.description,
+      params: input.params,
+      cases: input.cases.filter((c) => !c.hidden),
+      code: input.code,
+      lastSubmission: prev?.lastSubmission ?? null,
+      hiddenTestset: hidden.length ? this.testsets.put(hidden) : (prev?.hiddenTestset ?? null),
+    };
+  }
+
   create(input: ProblemInput, now = new Date()): Problem {
     this.checkFolder(input.folderId);
     const id = randomUUID();
     const ts = now.toISOString();
     this.db
       .prepare('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, input.title, input.folderId, input.mode, input.language, bodyOf(input), ts, ts);
+      .run(id, input.title, input.folderId, input.mode, input.language, JSON.stringify(this.toBody(input, null)), ts, ts);
     return this.get(id)!;
   }
 
   update(id: string, input: ProblemInput, now = new Date()): Problem | null {
     this.checkFolder(input.folderId);
-    const r = this.db
+    const row = this.row(id);
+    if (!row) return null;
+    this.db
       .prepare('UPDATE problems SET title = ?, folder_id = ?, mode = ?, language = ?, body = ?, updated_at = ? WHERE id = ?')
-      .run(input.title, input.folderId, input.mode, input.language, bodyOf(input), now.toISOString(), id);
-    return r.changes ? this.get(id) : null;
+      .run(input.title, input.folderId, input.mode, input.language, JSON.stringify(this.toBody(input, this.body(row))), now.toISOString(), id);
+    return this.get(id);
+  }
+
+  private patchBody(id: string, patch: Partial<Body>, touch: Date | null) {
+    const row = this.row(id);
+    if (!row) return false;
+    const b = { ...this.body(row), ...patch };
+    if (touch) this.db.prepare('UPDATE problems SET body = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(b), touch.toISOString(), id);
+    else this.db.prepare('UPDATE problems SET body = ? WHERE id = ?').run(JSON.stringify(b), id);
+    return true;
+  }
+
+  hidden(id: string): TestCase[] | null {
+    const row = this.row(id);
+    if (!row) return null;
+    const ref = this.body(row).hiddenTestset;
+    return ref ? (this.testsets.get(ref.hash) ?? []) : [];
+  }
+
+  setHidden(id: string, cases: TestCase[], now = new Date()): TestsetRef | null | false {
+    const ref = cases.length ? this.testsets.put(cases) : null;
+    return this.patchBody(id, { hiddenTestset: ref }, now) ? ref : false;
+  }
+
+  /** 채점 결과로 마지막 제출을 갱신한다(목록 순서가 바뀌지 않도록 updated_at은 그대로). */
+  setLastSubmission(id: string, sub: LastSubmission) {
+    this.patchBody(id, { lastSubmission: sub }, null);
+  }
+
+  /** 예전 형식(body.cases 안의 hidden 케이스)을 테스트셋으로 옮긴다. 옮긴 문제 수를 돌려준다. */
+  migrateInlineHidden(): number {
+    const rows = this.db.prepare('SELECT * FROM problems').all() as Row[];
+    let moved = 0;
+    for (const row of rows) {
+      const raw = JSON.parse(row.body) as Partial<Body>;
+      const hidden = (raw.cases ?? []).filter((c) => c.hidden);
+      if (!hidden.length) continue;
+      const b = this.body(row);
+      b.cases = b.cases.filter((c) => !c.hidden);
+      b.hiddenTestset = this.testsets.put(hidden);
+      this.db.prepare('UPDATE problems SET body = ? WHERE id = ?').run(JSON.stringify(b), row.id);
+      moved++;
+    }
+    return moved;
+  }
+
+  /** 문제들이 쓰는 테스트셋 해시 */
+  testsetHashes(): Set<string> {
+    const hashes = this.db.prepare("SELECT json_extract(body, '$.hiddenTestset.hash') FROM problems").pluck().all() as (string | null)[];
+    return new Set(hashes.filter((h): h is string => !!h));
   }
 
   delete(id: string): boolean {
     return this.db.prepare('DELETE FROM problems WHERE id = ?').run(id).changes > 0;
   }
-}
-
-function bodyOf(p: ProblemInput) {
-  return JSON.stringify({ description: p.description, params: p.params, cases: p.cases, code: p.code, lastSubmission: p.lastSubmission });
 }
 
 type FolderRow = { id: string; name: string; position: number; created_at: string };

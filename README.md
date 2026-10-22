@@ -98,7 +98,10 @@ $ pnpm dev
 | `GET` `POST` | `/api/collections` | 컬렉션 목록(문제 id 순서 포함) / 만들기 |
 | `PUT` `DELETE` | `/api/collections/{id}` | 컬렉션 이름·설명 바꾸기 / 삭제 (문제는 그대로) |
 | `PUT` | `/api/collections/{id}/items` | 컬렉션의 문제 목록·순서 지정 |
-| `POST` | `/api/run` | 코드 실행 (테스트 케이스 최대 40개) |
+| `GET` `PUT` | `/api/problems/{id}/hidden` | 히든 테스트셋 읽기 / 바꾸기 (내용 해시 파일로 저장) |
+| `POST` | `/api/submissions` | 코드 실행(`run`) 또는 제출 채점(`submit`)을 대기열에 넣고 id 반환 (202) |
+| `GET` | `/api/submissions/{id}` | 제출 상태(queued·running·done·error), 대기 순번, 결과·점수 |
+| `POST` | `/api/run` | 동기 실행(스크립트용, 내부적으로 대기열 사용) |
 | `GET` | `/api/health` | 상태 확인 |
 
 ## Stack
@@ -139,8 +142,15 @@ $ pnpm check   # 타입 검사 + 테스트 + 빌드
 ```
 codetest.simplyimg.com ─ Cloudflare Tunnel ─ pahidc 127.0.0.1:8083
                                               └─ nginx (web 정적 파일)
-                                                  └─ /api/* → api:8787 (Hono)
-                                                               └─ runner:8000 (internal 네트워크, 인터넷 차단)
+                                                  └─ /api/* → api:8787 (Hono, SQLite, 제출 큐·디스패처)
+                                                               └─ runner:8000 × RUNNER_URLS (internal 네트워크, 인터넷 차단, 테스트셋 캐시)
+```
+
+채점 흐름(자세히는 [`docs/decisions/0003-judge-pipeline.md`](docs/decisions/0003-judge-pipeline.md)):
+
+```
+브라우저 ─POST /api/submissions─▶ api: submissions 표(queued) ─디스패처(코드 실행 > 제출)─▶ 빈 runner 슬롯
+   └─ GET /api/submissions/:id 로 결과 조회         runner: 테스트셋을 해시로 캐시, 없을 때만 받음 (409 → 업로드)
 ```
 
 `main` 푸시 → `Production deployment` 워크플로(self-hosted runner `codetest-production`) → `/etc/codetest/api.env` 기록 → `docker compose up --build` → 공개 주소 헬스 체크.

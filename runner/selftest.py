@@ -1,7 +1,21 @@
 """runner 자체 검사. CI에서 runner 이미지 안에서 실행한다: python3 selftest.py"""
+import json
 import sys
 
 import server
+
+
+def run(req):
+    """셀프테스트는 값으로 적고, runner 형식(리터럴 텍스트)으로 바꿔 실행한다. raw=True면 그대로."""
+    for c in req["cases"]:
+        if c.pop("raw", False):
+            continue
+        if "args" in c:
+            c["args"] = [json.dumps(a) for a in c["args"]]
+        if "expected" in c:
+            e = c["expected"]
+            c["expected"] = "" if e is None else (e if req["mode"] == "stdin" else json.dumps(e))
+    return server.execute(req)
 
 JAVA_SUM = """
 import java.util.*;
@@ -82,60 +96,79 @@ def check(name, cond, detail):
 
 def main():
     ok = True
-    r = server.execute({"language": "java", "mode": "function", "code": JAVA_SUM,
+    r = run({"language": "java", "mode": "function", "code": JAVA_SUM,
                         "cases": [{"args": [[1, 2, 3], 4], "expected": 10}, {"args": [[1], 1], "expected": 3}]})
     ok &= check("java function pass/fail", [x["status"] for x in r["results"]] == ["pass", "fail"], r)
     ok &= check("java stdout", r["results"][0]["stdout"].strip() == "debug 3", r)
 
-    r = server.execute({"language": "java", "mode": "function", "code": JAVA_ARR,
+    r = run({"language": "java", "mode": "function", "code": JAVA_ARR,
                         "cases": [{"args": [["ab"], [[1], [2]], "z", [5]], "expected": ["abz", "7"]}]})
     ok &= check("java arrays/char/list", r["results"][0]["status"] == "pass", r)
 
-    r = server.execute({"language": "java", "mode": "function", "code": "class Solution { int solution() { return } }",
+    r = run({"language": "java", "mode": "function", "code": "class Solution { int solution() { return } }",
                         "cases": [{"args": [], "expected": 1}]})
     ok &= check("java compile error", not r["compile"]["ok"] and "error" in r["compile"]["output"], r)
 
-    r = server.execute({"language": "java", "mode": "function",
+    r = run({"language": "java", "mode": "function",
                         "code": "class Solution { int solution(int a) { return 10 / a; } }",
                         "cases": [{"args": [0], "expected": 1}]})
     ok &= check("java runtime error", r["results"][0]["status"] == "error" and "ArithmeticException" in r["results"][0]["stderr"], r)
 
-    r = server.execute({"language": "java", "mode": "stdin", "code": JAVA_STDIN,
+    r = run({"language": "java", "mode": "stdin", "code": JAVA_STDIN,
                         "cases": [{"stdin": "3 4\n", "expected": "7"}]})
     ok &= check("java stdin", r["results"][0]["status"] == "pass", r)
 
-    r = server.execute({"language": "python", "mode": "function", "code": PY_SUM,
+    r = run({"language": "python", "mode": "function", "code": PY_SUM,
                         "cases": [{"args": [[1, 2, 3], 4], "expected": 10}, {"args": [[1], 1], "expected": True}]})
     ok &= check("python function pass/fail(bool!=int)", [x["status"] for x in r["results"]] == ["pass", "fail"], r)
 
-    r = server.execute({"language": "python", "mode": "function", "code": PY_TUPLE,
+    r = run({"language": "python", "mode": "function", "code": PY_TUPLE,
                         "cases": [{"args": ["ab"], "expected": ["AB", [1.5, True]]}]})
     ok &= check("python tuple→list", r["results"][0]["status"] == "pass", r)
 
-    r = server.execute({"language": "python", "mode": "function", "code": "def solution(:\n  pass",
+    r = run({"language": "python", "mode": "function", "code": "def solution(:\n  pass",
                         "cases": [{"args": [], "expected": 1}]})
     ok &= check("python syntax error", not r["compile"]["ok"], r)
 
     big = "123456789012345678901"
-    r = server.execute({"language": "python", "mode": "function", "code": "def solution(x):\n    return x * 10 + 1\n",
-                        "cases": [{"argsJson": ["12345678901234567890"], "expectedJson": big}]})
+    r = run({"language": "python", "mode": "function", "code": "def solution(x):\n    return x * 10 + 1\n",
+                        "cases": [{"args": ["12345678901234567890"], "expected": big, "raw": True}]})
     ok &= check("python big int exact", r["results"][0]["status"] == "pass", r)
-    r = server.execute({"language": "java", "mode": "function", "code": "class Solution { long solution(long x) { return x * 10 + 7; } }",
-                        "cases": [{"argsJson": ["900719925474099"], "expectedJson": "9007199254740997"}, {"argsJson": ["900719925474099"], "expectedJson": "9007199254740996"}]})
+    r = run({"language": "java", "mode": "function", "code": "class Solution { long solution(long x) { return x * 10 + 7; } }",
+                        "cases": [{"args": ["900719925474099"], "expected": "9007199254740997", "raw": True}, {"args": ["900719925474099"], "expected": "9007199254740996", "raw": True}]})
     ok &= check("java long beyond 2^53", [x["status"] for x in r["results"]] == ["pass", "fail"], r)
 
     server.RUN_TIMEOUT_S = 2.0
-    r = server.execute({"language": "python", "mode": "function", "code": PY_LOOP,
+    r = run({"language": "python", "mode": "function", "code": PY_LOOP,
                         "cases": [{"args": [1], "expected": 1}]})
     ok &= check("python timeout", r["results"][0]["status"] == "timeout", r)
     server.RUN_TIMEOUT_S = 10.0
 
-    r = server.execute({"language": "python", "mode": "stdin", "code": PY_STDIN,
+    r = run({"language": "python", "mode": "stdin", "code": PY_STDIN,
                         "cases": [{"stdin": "3 4\n", "expected": "7\n"}, {"stdin": "1 1", "expected": None}]})
     ok &= check("python stdin", [x["status"] for x in r["results"]] == ["pass", "done"], r)
 
+    # 테스트셋 캐시: 없으면 TestsetMissing, 올린 뒤에는 해시로 실행
+    import hashlib
+    raw = json.dumps([{"id": "h1", "args": ["[1, 2]", "3"], "stdin": "", "expected": "6", "hidden": True}]).encode()
+    h = hashlib.sha256(raw).hexdigest()
+    req = {"language": "python", "mode": "function", "code": PY_SUM, "testset": h}
+    try:
+        server.execute(dict(req))
+        ok &= check("testset missing -> 409", False, "no exception")
+    except server.TestsetMissing:
+        ok &= check("testset missing -> 409", True, "")
+    server.store_testset(h, raw)
+    r = server.execute(dict(req))
+    ok &= check("testset cached run", r["results"][0]["status"] == "pass", r)
+    try:
+        server.store_testset(h, raw + b" ")
+        ok &= check("testset hash verified", False, "accepted bad content")
+    except ValueError:
+        ok &= check("testset hash verified", True, "")
+
     if server.SANDBOX_UID >= 0:
-        r = server.execute({"language": "python", "mode": "function", "code": PY_ESCAPE,
+        r = run({"language": "python", "mode": "function", "code": PY_ESCAPE,
                             "cases": [{"args": [], "expected": [True, True, False]}]})
         ok &= check("sandbox isolation", r["results"][0]["status"] == "pass", r)
 
