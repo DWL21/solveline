@@ -234,6 +234,7 @@ export class ProblemStore {
   }
 
   setHidden(id: string, cases: TestCase[], now = new Date()): TestsetRef | null | false {
+    if (!this.row(id)) return false;
     const ref = cases.length ? this.testsets.put(cases) : null;
     return this.patchBody(id, { hiddenTestset: ref }, now) ? ref : false;
   }

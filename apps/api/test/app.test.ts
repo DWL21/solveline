@@ -177,6 +177,19 @@ describe('제출 큐', () => {
     expect((await call('GET', '/api/problems/' + p.id)).body.data.lastSubmission.score).toBe(50);
   });
 
+  it('큰 히든 테스트셋(수 MB)을 저장하고, 채점 결과에는 반환값·출력을 남기지 않는다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    const big = JSON.stringify(Array.from({ length: 300_000 }, (_, i) => i * 7));
+    const saved = await call('PUT', `/api/problems/${p.id}/hidden`, { cases: [{ id: 'h1', args: [big], stdin: '', expected: '1', hidden: true }] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.data.cases[0].args[0].length).toBe(big.length);
+    const res = await call('POST', '/api/submissions', { problemId: p.id, kind: 'submit', language: 'java', mode: 'function', code: 'x', cases: problem.cases });
+    const done = await call.s.dispatcher.wait(res.body.data.id);
+    expect(done.score).toBe(100);
+    expect(done.result!.results[0]!.actual).toBeNull();
+  });
+
   it('잘못된 리터럴은 대기열에 넣기 전에 400', async () => {
     const call = await authed();
     const res = await call('POST', '/api/submissions', {

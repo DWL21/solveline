@@ -37,6 +37,23 @@ function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: str
   );
 }
 
+const BIG_FIELD = 10_000;
+
+/** 큰 값(효율성 케이스)은 입력칸에 넣으면 화면이 느려지므로 읽기 전용으로 크기와 앞부분만 보여 준다. */
+function Field({ value, label, multiline, onChange }: { value: string; label: string; multiline?: boolean; onChange: (v: string) => void }) {
+  if (value.length > BIG_FIELD)
+    return (
+      <div className="field cursor-default truncate text-faint" title={`${value.length.toLocaleString()}자 — 너무 커서 여기서는 편집할 수 없어요`} aria-label={label}>
+        {value.slice(0, 40)}… <span className="text-[11px]">({(value.length / 1024).toFixed(0)}KB)</span>
+      </div>
+    );
+  return multiline ? (
+    <textarea className="field min-h-24 resize-y" value={value} aria-label={label} onChange={(e) => onChange(e.target.value)} />
+  ) : (
+    <input className="field" value={value} aria-label={label} onChange={(e) => onChange(e.target.value)} />
+  );
+}
+
 /** 케이스 목록 편집(보이는/히든 공용) */
 function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode; params: string[]; cases: TestCase[]; label: string; onChange: (c: TestCase[]) => void }) {
   const update = (id: string, patch: Partial<TestCase>) => onChange(cases.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -67,17 +84,16 @@ function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode;
               <tr key={c.id}>
                 <td className="text-faint">{i + 1}</td>
                 {params.map((p, j) => (
-                  <td key={p} className="px-1">
-                    <input
-                      className="field"
+                  <td key={p} className="max-w-48 px-1">
+                    <Field
                       value={c.args[j] ?? ''}
-                      aria-label={`${label} ${i + 1} ${p}`}
-                      onChange={(e) => update(c.id, { args: params.map((_, k) => (k === j ? e.target.value : (c.args[k] ?? ''))) })}
+                      label={`${label} ${i + 1} ${p}`}
+                      onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
                     />
                   </td>
                 ))}
-                <td className="px-1">
-                  <input className="field" value={c.expected} aria-label={`${label} ${i + 1} 기댓값`} onChange={(e) => update(c.id, { expected: e.target.value })} />
+                <td className="max-w-48 px-1">
+                  <Field value={c.expected} label={`${label} ${i + 1} 기댓값`} onChange={(v) => update(c.id, { expected: v })} />
                 </td>
                 <td>{del(i + 1, c.id)}</td>
               </tr>
@@ -99,11 +115,11 @@ function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode;
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-dim">입력</span>
-              <textarea className="field min-h-24 resize-y" value={c.stdin} onChange={(e) => update(c.id, { stdin: e.target.value })} />
+              <Field multiline value={c.stdin} label={`${label} ${i + 1} 입력`} onChange={(v) => update(c.id, { stdin: v })} />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-dim">기대 출력</span>
-              <textarea className="field min-h-24 resize-y" value={c.expected} onChange={(e) => update(c.id, { expected: e.target.value })} />
+              <Field multiline value={c.expected} label={`${label} ${i + 1} 기대 출력`} onChange={(v) => update(c.id, { expected: v })} />
             </label>
           </div>
         </div>

@@ -117,7 +117,14 @@ export type ProblemSummary = z.infer<typeof ProblemSummary>;
 
 // ─── 실행 ───
 
-export const HiddenCases = z.object({ cases: z.array(TestCase).max(200) });
+/** 히든 케이스는 효율성 테스트용 큰 데이터를 담으므로 필드 한도가 크다(문제 본문에는 들어가지 않는다). */
+const MAX_HIDDEN_TEXT = 8_000_000;
+export const HiddenTestCase = TestCase.extend({
+  args: z.array(z.string().max(MAX_HIDDEN_TEXT)).max(20),
+  stdin: z.string().max(MAX_HIDDEN_TEXT),
+  expected: z.string().max(MAX_HIDDEN_TEXT),
+});
+export const HiddenCases = z.object({ cases: z.array(HiddenTestCase).max(200) });
 export type HiddenCases = z.infer<typeof HiddenCases>;
 
 // ─── 제출 큐 ───

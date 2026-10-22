@@ -5,6 +5,18 @@ import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
 import { log, redact } from './redact.ts';
 
+const RUN_TEXT_LIMIT = 20_000;
+const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}\n… (${t.length.toLocaleString()}자 중 ${n.toLocaleString()}자만 표시)` : t);
+
+/**
+ * 저장·조회되는 결과를 작게 유지한다. 채점(submit)은 화면에 반환값·출력을 보여 주지 않으므로 저장하지 않고,
+ * 코드 실행(run)은 반환값·출력을 잘라 둔다(큰 효율성 케이스가 수 MB를 반환해도 조회 응답이 작다).
+ */
+function trimResult(r: RunResult['results'][number], kind: SubmissionKind): RunResult['results'][number] {
+  if (kind === 'submit') return { ...r, actual: null, stdout: '', stderr: cut(r.stderr, 2000) };
+  return { ...r, actual: r.actual === null ? null : cut(r.actual, RUN_TEXT_LIMIT), stdout: cut(r.stdout, RUN_TEXT_LIMIT), stderr: cut(r.stderr, RUN_TEXT_LIMIT) };
+}
+
 /** 숫자가 작을수록 먼저. 코드 실행이 제출 채점 뒤에 밀리지 않게 한다(기존의 우선순위 큐와 같은 생각). */
 export const PRIORITY: Record<SubmissionKind, number> = { run: 0, submit: 1 };
 
@@ -179,7 +191,7 @@ export class Dispatcher {
       } else run.cases = JSON.parse(job.cases ?? '[]') as TestCase[];
       const raw = await runner.run(run);
       const ids = JSON.parse(job.case_ids) as string[];
-      const result: RunResult = { compile: raw.compile, results: raw.results.map((r, i) => ({ ...r, id: ids[i] ?? String(i) })) };
+      const result: RunResult = { compile: raw.compile, results: raw.results.map((r, i) => trimResult({ ...r, id: ids[i] ?? String(i) }, job.kind)) };
       let score: number | null = null;
       if (job.kind === 'submit') {
         const total = ids.length;
