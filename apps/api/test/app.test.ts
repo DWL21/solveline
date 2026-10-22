@@ -164,8 +164,8 @@ describe('풀이 시간', () => {
   it('타이머를 저장하고 목록에 보여 주며, 목록 순서(updated_at)는 바꾸지 않는다', async () => {
     const call = await authed();
     const p = (await call('POST', '/api/problems', problem)).body.data;
-    expect(p.timer).toEqual({ elapsedMs: 0, solvedMs: null });
-    const t = { elapsedMs: 754_000, solvedMs: 754_000 };
+    expect(p.timer).toEqual({ elapsedMs: 0, solvedMs: null, paused: false });
+    const t = { elapsedMs: 754_000, solvedMs: 754_000, paused: false };
     expect((await call('PUT', `/api/problems/${p.id}/timer`, t)).body.data).toEqual(t);
     const got = (await call('GET', '/api/problems/' + p.id)).body.data;
     expect(got.timer).toEqual(t);
@@ -176,6 +176,16 @@ describe('풀이 시간', () => {
     expect((await call('GET', '/api/problems/' + p.id)).body.data.timer).toEqual(t);
     expect((await call('PUT', `/api/problems/${p.id}/timer`, { elapsedMs: -1, solvedMs: null })).status).toBe(400);
     expect((await call('PUT', '/api/problems/nope/timer', t)).status).toBe(404);
+  });
+
+  it('일시정지 상태를 저장하고, 예전 형식(paused 없음)은 일시정지 아님으로 읽는다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    const paused = { elapsedMs: 61_000, solvedMs: null, paused: true };
+    expect((await call('PUT', `/api/problems/${p.id}/timer`, paused)).body.data).toEqual(paused);
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.timer.paused).toBe(true);
+    await call('PUT', `/api/problems/${p.id}/timer`, { elapsedMs: 61_000, solvedMs: null });
+    expect((await call('GET', '/api/problems/' + p.id)).body.data.timer).toEqual({ elapsedMs: 61_000, solvedMs: null, paused: false });
   });
 });
 

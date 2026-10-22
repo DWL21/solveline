@@ -18,7 +18,7 @@ export function useSolveTimer(problem: Problem) {
   const ref = useRef(timer);
   ref.current = timer;
   const saved = useRef(JSON.stringify(problem.timer));
-  const running = timer.solvedMs === null;
+  const running = timer.solvedMs === null && !timer.paused;
 
   useEffect(() => {
     if (!running) return;
@@ -28,7 +28,7 @@ export function useSolveTimer(problem: Problem) {
       const delta = Math.min(MAX_TICK_MS, now - last);
       last = now;
       if (document.visibilityState !== 'visible') return;
-      setTimer((t) => (t.solvedMs === null ? { ...t, elapsedMs: t.elapsedMs + Math.round(delta) } : t));
+      setTimer((t) => (t.solvedMs === null && !t.paused ? { ...t, elapsedMs: t.elapsedMs + Math.round(delta) } : t));
     }, 1000);
     return () => clearInterval(id);
   }, [running]);
@@ -73,18 +73,33 @@ export function useSolveTimer(problem: Problem) {
   }, [bump, persist]);
 
   const markSolved = useCallback(() => {
-    setTimer((t) => (t.solvedMs === null ? { ...t, solvedMs: t.elapsedMs } : t));
+    setTimer((t) => (t.solvedMs === null ? { ...t, solvedMs: t.elapsedMs, paused: false } : t));
     setBump((n) => n + 1);
   }, []);
   const reset = useCallback(() => {
     setTimer(EMPTY_TIMER);
     setBump((n) => n + 1);
   }, []);
+  /** 일시정지/다시 시작: 다시 시작하면 멈춘 시간부터 이어서 잰다 */
+  const setPaused = useCallback((paused: boolean) => {
+    setTimer((t) => (t.solvedMs === null ? { ...t, paused } : t));
+    setBump((n) => n + 1);
+  }, []);
 
-  return { timer, markSolved, reset };
+  return { timer, markSolved, reset, pause: () => setPaused(true), resume: () => setPaused(false) };
 }
 
-export function SolveTimerBadge({ timer, onReset }: { timer: ProblemTimer; onReset: () => void }) {
+export function SolveTimerBadge({
+  timer,
+  onReset,
+  onPause,
+  onResume,
+}: {
+  timer: ProblemTimer;
+  onReset: () => void;
+  onPause: () => void;
+  onResume: () => void;
+}) {
   const solved = timer.solvedMs !== null;
   return (
     <span className="inline-flex items-center gap-1">
@@ -93,8 +108,18 @@ export function SolveTimerBadge({ timer, onReset }: { timer: ProblemTimer; onRes
         title={solved ? '맞춘 순간의 풀이 시간 (타이머 멈춤)' : '풀이 시간 — 이 화면이 보일 때만 자동으로 잽니다'}
         aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}에 맞춤` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >
-        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `⏱ ${formatDuration(timer.elapsedMs)}`}
+        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `${timer.paused ? '⏸' : '⏱'} ${formatDuration(timer.elapsedMs)}`}
       </span>
+      {!solved &&
+        (timer.paused ? (
+          <button type="button" className="btn-quiet min-h-7 px-1.5 text-[13px]" title="다시 시작" aria-label="타이머 다시 시작" onClick={onResume}>
+            ▶
+          </button>
+        ) : (
+          <button type="button" className="btn-quiet min-h-7 px-1.5 text-[13px]" title="일시정지" aria-label="타이머 일시정지" onClick={onPause}>
+            ⏸
+          </button>
+        ))}
       <button
         type="button"
         className="btn-quiet min-h-7 px-1.5 text-[13px]"
@@ -105,5 +130,21 @@ export function SolveTimerBadge({ timer, onReset }: { timer: ProblemTimer; onRes
         ↺
       </button>
     </span>
+  );
+}
+
+/** 일시정지 중에는 문제·에디터·결과를 흐리게 가린다(멈춘 동안 풀 수 없게). */
+export function PausedOverlay({ elapsedMs, onResume }: { elapsedMs: number; onResume: () => void }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="타이머 일시정지됨">
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-line-strong bg-panel/95 px-8 py-6 text-center shadow-2xl">
+        <p className="text-[13px] font-bold text-dim">일시정지됨</p>
+        <p className="font-mono text-[32px] font-bold tabular-nums">{formatDuration(elapsedMs)}</p>
+        <button type="button" className="btn-primary min-h-11 px-6 text-[15px]" onClick={onResume} autoFocus>
+          ▶ 다시 시작
+        </button>
+        <p className="text-[11.5px] text-faint">멈춘 시간부터 이어서 잽니다</p>
+      </div>
+    </div>
   );
 }

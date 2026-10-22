@@ -75,9 +75,11 @@ export type CollectionItemsInput = z.infer<typeof CollectionItemsInput>;
 export const ProblemTimer = z.object({
   elapsedMs: z.number().int().min(0).max(1_000 * 3600 * 24 * 365),
   solvedMs: z.number().int().min(0).nullable(),
+  /** 사용자가 일시정지했는지(새로고침해도 유지) */
+  paused: z.boolean().default(false),
 });
 export type ProblemTimer = z.infer<typeof ProblemTimer>;
-export const EMPTY_TIMER: ProblemTimer = { elapsedMs: 0, solvedMs: null };
+export const EMPTY_TIMER: ProblemTimer = { elapsedMs: 0, solvedMs: null, paused: false };
 
 /** 마지막 제출(채점) 결과 */
 export const LastSubmission = z.object({

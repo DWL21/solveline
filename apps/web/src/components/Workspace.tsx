@@ -5,7 +5,7 @@ import { ApiError, api, qk } from '../lib/api.ts';
 import { CasesEditor, MAX_CASES, newCase } from './CasesEditor.tsx';
 import { CodeEditor } from './CodeEditor.tsx';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
-import { SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
+import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
@@ -271,7 +271,7 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
           className="min-w-0 flex-1 basis-56 rounded bg-transparent px-1 py-1 text-[15px] font-bold outline-none hover:bg-raised/60 focus:bg-raised"
         />
         <SaveBadge state={save.state} onRetry={save.retry} />
-        <SolveTimerBadge timer={solve.timer} onReset={solve.reset} />
+        <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />
         <span className="text-[12px] text-faint" title="테스트당 시간 제한 (테스트 케이스 탭에서 변경)">
           제한 {draft.timeLimitMs / 1000}초
         </span>
@@ -301,7 +301,8 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
+        {solve.timer.paused && solve.timer.solvedMs === null && <PausedOverlay elapsedMs={solve.timer.elapsedMs} onResume={solve.resume} />}
         {/* 왼쪽: 문제 설명 / 테스트 케이스 */}
         <section className="flex min-h-[260px] flex-col border-line lg:w-[40%] lg:min-w-[340px] lg:border-r">
           <div className="pane-title gap-0 px-1">
