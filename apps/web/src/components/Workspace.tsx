@@ -7,6 +7,7 @@ import { CodeEditor } from './CodeEditor.tsx';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
 import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
 import { SolvedDialog } from './SolvedDialog.tsx';
+import { DEFAULT_LAYOUT, Splitter, useLayout } from './Splitter.tsx';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
@@ -137,6 +138,9 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const [draft, setDraft] = useState<ProblemInput>(() => toInput(problem));
   const save = useAutosave(problem, draft);
   const solve = useSolveTimer(problem);
+  const { layout, set: setLayout } = useLayout();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLElement>(null);
   const [solvedOpen, setSolvedOpen] = useState(false);
   const [tab, setTab] = useState<'desc' | 'cases'>(problem.description.trim() ? 'desc' : 'cases');
   const [editingDesc, setEditingDesc] = useState(false);
@@ -314,10 +318,10 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           onClose={() => setSolvedOpen(false)}
         />
       )}
-      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div ref={rowRef} className="relative flex min-h-0 flex-1 flex-col lg:flex-row" style={{ '--left': `${layout.leftPct}%` } as React.CSSProperties}>
         {solve.timer.paused && solve.timer.solvedMs === null && <PausedOverlay elapsedMs={solve.timer.elapsedMs} onResume={solve.resume} />}
         {/* 왼쪽: 문제 설명 / 테스트 케이스 */}
-        <section className="flex min-h-[260px] flex-col border-line lg:w-[40%] lg:min-w-[340px] lg:border-r">
+        <section className="flex min-h-[260px] flex-col lg:w-(--left) lg:min-w-[280px] lg:shrink-0">
           <div className="pane-title gap-0 px-1">
             {(['desc', 'cases'] as const).map((t) => (
               <button
@@ -366,16 +370,33 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           </div>
         </section>
 
+        <Splitter
+          direction="vertical"
+          container={rowRef}
+          value={layout.leftPct}
+          defaultValue={DEFAULT_LAYOUT.leftPct}
+          label="문제·에디터 너비"
+          onChange={(v) => setLayout('leftPct', v)}
+        />
+
         {/* 오른쪽: 에디터 + 실행 결과 */}
-        <section className="flex min-h-0 flex-1 flex-col">
+        <section ref={rightRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="pane-title">
             <span>solution.{lang === 'java' ? 'java' : 'py'}</span>
           </div>
-          <div className="min-h-[300px] flex-[3] lg:min-h-0">
+          <div className="min-h-[300px] lg:min-h-0" style={{ flex: `${layout.editorPct} 1 0` }}>
             <CodeEditor docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
           </div>
-          <div className="pane-title border-t">{run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'}</div>
-          <div className="min-h-[180px] flex-[2] overflow-y-auto bg-panel lg:min-h-0">
+          <Splitter
+            direction="horizontal"
+            container={rightRef}
+            value={layout.editorPct}
+            defaultValue={DEFAULT_LAYOUT.editorPct}
+            label="에디터·실행 결과 높이"
+            onChange={(v) => setLayout('editorPct', v)}
+          />
+          <div className="pane-title">{run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'}</div>
+          <div className="min-h-[180px] overflow-y-auto bg-panel lg:min-h-0" style={{ flex: `${100 - layout.editorPct} 1 0` }}>
             <ResultPanel state={run} />
           </div>
           <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
