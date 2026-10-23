@@ -344,7 +344,7 @@ def run_function_case(lang, work, args, expected, limit_s, job=None):
         p = run_proc([sys.executable, "-I", os.path.join(HARNESS_DIR, "py_harness.py"), work], work, as_limit=PY_AS_LIMIT,
                      timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
     else:
-        p = run_proc(java_cmd("CodetestHarness", work), work, timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
+        p = run_proc(java_cmd("SolvelineHarness", work), work, timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
 
     res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
            "memoryMb": round(p.memory_kb / 1024, 1), "actual": None}
@@ -475,7 +475,7 @@ def execute(req):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "codetest-runner"
+    server_version = "solveline-runner"
     sys_version = ""
 
     def _send(self, status, body):
@@ -530,5 +530,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("codetest-runner :%d %s" % (PORT, VERSIONS), flush=True)
+    print("solveline-runner :%d %s" % (PORT, VERSIONS), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

@@ -9,7 +9,7 @@ const KEEP_DAYS = 7;
 const SUBMISSION_DAYS = 30;
 
 /**
- * 매일 한 번: SQLite 온라인 백업(DATA_DIR/backups/codetest-YYYY-MM-DD.db, 7일 보관),
+ * 매일 한 번: SQLite 온라인 백업(DATA_DIR/backups/solveline-YYYY-MM-DD.db, 7일 보관),
  * 테스트셋 파일 복사(내용이 바뀌지 않으므로 없는 것만), 오래된 제출 기록·안 쓰는 테스트셋 정리.
  * 같은 디스크라 디스크 고장은 못 막는다 — 외부 저장소로 내보내는 것은 로드맵.
  */
@@ -40,7 +40,7 @@ export class BackupJob {
     const dir = join(this.dataDir, 'backups');
     mkdirSync(join(dir, 'testsets'), { recursive: true });
     const day = now.toISOString().slice(0, 10);
-    const file = join(dir, `codetest-${day}.db`);
+    const file = join(dir, `solveline-${day}.db`);
     if (existsSync(file)) return null;
     try {
       await this.db.backup(`${file}.tmp`);
@@ -54,7 +54,7 @@ export class BackupJob {
         copied++;
       }
       const old = readdirSync(dir)
-        .filter((n) => /^codetest-\d{4}-\d{2}-\d{2}\.db$/.test(n))
+        .filter((n) => /^(solveline|codetest)-\d{4}-\d{2}-\d{2}\.db$/.test(n))
         .sort()
         .slice(0, -KEEP_DAYS);
       for (const n of old) unlinkSync(join(dir, n));

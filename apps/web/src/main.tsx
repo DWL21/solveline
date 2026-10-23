@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { Session } from '@codetest/shared';
+import type { Session } from '@solveline/shared';
 import { App } from './App.tsx';
 import { ApiError, qk } from './lib/api.ts';
 import './index.css';

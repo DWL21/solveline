@@ -1,5 +1,5 @@
 {
-  "name": "@codetest/api",
+  "name": "@solveline/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
-    "@codetest/shared": "workspace:*",
+    "@solveline/shared": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "hono": "^4.13.13",
     "tsx": "^4.23.15",

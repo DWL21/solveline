@@ -1,5 +1,5 @@
 import { Spinner } from './Loading.tsx';
-import type { CaseResult, ProblemMode, RunResult, TestCase } from '@codetest/shared';
+import type { CaseResult, ProblemMode, RunResult, TestCase } from '@solveline/shared';
 
 export type RunState =
   | { kind: 'idle' }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TestCase, TestsetRef } from '@codetest/shared';
+import type { TestCase, TestsetRef } from '@solveline/shared';
 
 const HASH = /^[0-9a-f]{64}$/;
 

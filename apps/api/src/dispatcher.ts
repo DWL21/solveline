@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Submission, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@codetest/shared';
+import { Submission, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
 import type { Db, ProblemStore } from './db.ts';
 import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';

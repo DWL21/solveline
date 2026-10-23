@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type Language, type Problem, type ProblemInput, type ProblemMode, type TestCase } from '@codetest/shared';
+import { type Language, type Problem, type ProblemInput, type ProblemMode, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';

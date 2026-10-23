@@ -21,7 +21,7 @@ import {
   type TestCase,
   type ProblemInput,
   type RunRequest,
-} from '@codetest/shared';
+} from '@solveline/shared';
 
 export class ApiError extends Error {
   constructor(

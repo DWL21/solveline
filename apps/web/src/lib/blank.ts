@@ -1,4 +1,4 @@
-import { templateFor, type Language, type ProblemInput, type ProblemMode, type TestCase } from '@codetest/shared';
+import { templateFor, type Language, type ProblemInput, type ProblemMode, type TestCase } from '@solveline/shared';
 
 /** 빈 테스트 케이스 (첫 화면 번들에 에디터를 끌어오지 않도록 lib에 둔다) */
 export const newCase = (params: number, hidden = false): TestCase => ({

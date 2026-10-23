@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AdminSession, AdminUser, AdminUserDetail } from '@codetest/shared';
+import type { AdminUser, AdminUserDetail } from '@solveline/shared';
 import { ApiError, adminApi, qk } from '../lib/api.ts';
 import { formatDuration } from '../lib/time.ts';
 import { Avatar } from './Avatar.tsx';
@@ -75,10 +75,10 @@ function Dashboard() {
   const [selected, setSelected] = useState<string | null>(null);
   const logout = useMutation({
     mutationFn: adminApi.logout,
+    // 나가면 관리자 쿠키를 지우고 초기 화면으로
     onSettled: () => {
-      const out: AdminSession = { authenticated: false, expiresAt: null };
       qc.removeQueries({ queryKey: qk.admin });
-      qc.setQueryData(qk.admin, out);
+      location.replace('/');
     },
   });
   return (

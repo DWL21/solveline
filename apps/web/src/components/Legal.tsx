@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PRIVACY_VERSION, TERMS_VERSION } from '@codetest/shared';
+import { PRIVACY_VERSION, TERMS_VERSION } from '@solveline/shared';
 import { api, qk } from '../lib/api.ts';
 
 /** 화면 맨 아래 약관 링크. admin이면 관리자 모드로 가는 흐린 글자를 덧붙인다. */

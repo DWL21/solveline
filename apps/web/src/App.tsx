@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Language, ProblemMode, Session } from '@codetest/shared';
+import type { Language, ProblemMode, Session } from '@solveline/shared';
 import { ApiError, api, qk } from './lib/api.ts';
 import { useRoute, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';

@@ -7,13 +7,13 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: codetest-production
+  group: solveline-production
   cancel-in-progress: false
 jobs:
   deploy:
     # 포크·다른 브랜치에서는 절대 self-hosted runner를 쓰지 않는다.
     if: github.repository == 'DWL21/solveline' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, x64, codetest-production]
+    runs-on: [self-hosted, linux, x64, solveline-production]
     environment:
       name: production
       url: https://solveline.simplyimg.com
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Write /etc/codetest/api.env from GitHub Environment
+      - name: Write /etc/solveline/api.env from GitHub Environment
         # 공개 저장소: 서버에 필요한 값만 이름으로 넘긴다(비밀 전체를 꺼내지 않는다). 값은 출력하지 않는다.
         # 새 환경 변수는 apps/api/.env.example, 여기 env, 아래 KEYS에 함께 추가한다.
         env:
@@ -38,14 +38,14 @@ jobs:
           for k in $REQUIRED; do
             [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }
           done
-          sudo install -d -m 700 -o root -g root /etc/codetest
+          sudo install -d -m 700 -o root -g root /etc/solveline
           for k in $KEYS; do
             v="${!k}"
             if [ -n "$v" ]; then printf '%s=%s\n' "$k" "${v//$'\n'/}"; fi
-          done | sudo tee /etc/codetest/api.env.new >/dev/null
-          sudo chmod 600 /etc/codetest/api.env.new
-          sudo mv /etc/codetest/api.env.new /etc/codetest/api.env
-          echo "env keys: $(sudo cut -d= -f1 /etc/codetest/api.env | tr '\n' ' ')"
+          done | sudo tee /etc/solveline/api.env.new >/dev/null
+          sudo chmod 600 /etc/solveline/api.env.new
+          sudo mv /etc/solveline/api.env.new /etc/solveline/api.env
+          echo "env keys: $(sudo cut -d= -f1 /etc/solveline/api.env | tr '\n' ' ')"
       - name: Deploy
         run: bash scripts/deploy-production.sh
       - name: Verify public deployment

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ProblemMode, TestCase, TestsetRef } from '@codetest/shared';
+import type { ProblemMode, TestCase, TestsetRef } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { newCase } from '../lib/blank.ts';
 import { LinesSkeleton, Spinner } from './Loading.tsx';

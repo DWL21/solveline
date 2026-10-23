@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
 
 type Layout = { leftPct: number; editorPct: number };
-const KEY = 'codetest.layout.v1';
+const KEY = 'solveline.layout.v1';
+/** 예전 이름(codetest) 시절의 키. 새 키가 없을 때만 읽는다. */
+const LEGACY_KEY = 'codetest.layout.v1';
 export const DEFAULT_LAYOUT: Layout = { leftPct: 40, editorPct: 60 };
 export const LIMITS = { leftPct: [20, 75], editorPct: [15, 85] } as const;
 
@@ -11,7 +13,7 @@ const clamp = (v: number, [lo, hi]: readonly [number, number]) => Math.min(hi, M
 export function useLayout() {
   const [layout, setLayout] = useState<Layout>(() => {
     try {
-      const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Layout> | null;
+      const v = JSON.parse(localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY) ?? 'null') as Partial<Layout> | null;
       return {
         leftPct: clamp(Number(v?.leftPct) || DEFAULT_LAYOUT.leftPct, LIMITS.leftPct),
         editorPct: clamp(Number(v?.editorPct) || DEFAULT_LAYOUT.editorPct, LIMITS.editorPct),

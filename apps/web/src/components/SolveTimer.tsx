@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { EMPTY_TIMER, type Problem, type ProblemTimer } from '@codetest/shared';
+import { EMPTY_TIMER, type Problem, type ProblemTimer } from '@solveline/shared';
 import { api, qk } from '../lib/api.ts';
 import { formatDuration } from '../lib/time.ts';
 

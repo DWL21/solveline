@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { templateFor, type ProblemInput, type TestCase } from '@codetest/shared';
+import { existsSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { templateFor, type ProblemInput, type TestCase } from '@solveline/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { openDb, UserStore } from '../src/db.ts';
@@ -70,7 +73,7 @@ async function googleRoundTrip(s: ReturnType<typeof setup>, code: string, next =
   const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
   const oauth = cookieOf(start, 'solveline_oauth')!;
   const cb = await s.app.request(`/api/auth/google/callback?code=${encodeURIComponent(code)}&state=${state}`, { headers: { cookie: oauth } });
-  return { location: cb.headers.get('location'), session: cookieOf(cb, 'codetest_session'), signup: cookieOf(cb, 'solveline_signup') };
+  return { location: cb.headers.get('location'), session: cookieOf(cb, 'solveline_session'), signup: cookieOf(cb, 'solveline_signup') };
 }
 
 function masterRequest(s: ReturnType<typeof setup>, password: string) {
@@ -93,7 +96,7 @@ async function login(s: ReturnType<typeof setup>, email = OWNER): Promise<string
   expect(r.location).toBe('/signup');
   const res = await s.app.request('/api/auth/signup', { method: 'POST', headers: { cookie: r.signup!, 'content-type': 'application/json' }, body: JSON.stringify(agree) });
   expect(res.status).toBe(200);
-  return cookieOf(res, 'codetest_session')!;
+  return cookieOf(res, 'solveline_session')!;
 }
 
 const problem: ProblemInput = {
@@ -158,7 +161,7 @@ describe('인증', () => {
     const oauth = cookieOf(start, 'solveline_oauth')!;
     const forged = await s.app.request('/api/auth/google/callback?code=a@x.com&state=forged', { headers: { cookie: oauth } });
     expect(forged.headers.get('location')).toBe('/?auth_error=invalid_state');
-    expect(cookieOf(forged, 'codetest_session')).toBeUndefined();
+    expect(cookieOf(forged, 'solveline_session')).toBeUndefined();
     const bad = await googleRoundTrip(s, 'bad');
     expect(bad.location).toBe('/?auth_error=google_error');
   });
@@ -600,6 +603,27 @@ describe('컬렉션', () => {
     expect((await call('GET', '/api/collections')).body.data[0].problemIds).toEqual([a.id]);
     expect((await call('DELETE', '/api/collections/' + c2.id)).status).toBe(200);
     expect((await call('GET', '/api/problems/' + a.id)).status).toBe(200);
+  });
+});
+
+describe('이름 변경(codetest → solveline)', () => {
+  it('예전 DB 파일(codetest.db)을 solveline.db로 옮겨 연다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'solveline-'));
+    const old = openDb(dir);
+    old.prepare("INSERT INTO folders (id, name, position, created_at) VALUES ('f', '구현', 0, 'x')").run();
+    old.close();
+    renameSync(join(dir, 'solveline.db'), join(dir, 'codetest.db'));
+    const db = openDb(dir);
+    expect(existsSync(join(dir, 'codetest.db'))).toBe(false);
+    expect((db.prepare('SELECT name FROM folders').get() as { name: string }).name).toBe('구현');
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('예전 이름의 세션 쿠키로도 로그인 상태가 유지된다', async () => {
+    const s = setup();
+    const cookie = (await login(s)).replace(/^solveline_session=/, 'codetest_session=');
+    expect((await s.app.request('/api/collections', { headers: { cookie } })).status).toBe(200);
   });
 });
 

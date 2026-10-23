@@ -21,6 +21,7 @@ import {
   Runtime,
   Session,
   SESSION_COOKIE,
+  LEGACY_SESSION_COOKIE,
   PublicConfig,
   AdminLogin,
   AdminSession,
@@ -35,7 +36,7 @@ import {
   SignupRequest,
   TERMS_VERSION,
   PRIVACY_VERSION,
-} from '@codetest/shared';
+} from '@solveline/shared';
 import type { Config } from './config.ts';
 import { BlocklistStore, CollectionStore, FolderStore, ProblemStore, StoreError, UserStore, type Db, type GoogleProfile } from './db.ts';
 import { passwordMatches } from './auth/password.ts';
@@ -148,7 +149,7 @@ export function createApp(deps: AppDeps) {
   app.get('/api/health', (c) => c.json({ data: { status: 'up' } }));
 
   const readSession = async (c: Context) => {
-    const id = await getSignedCookie(c, config.sessionSecret, SESSION_COOKIE);
+    const id = (await getSignedCookie(c, config.sessionSecret, SESSION_COOKIE)) || (await getSignedCookie(c, config.sessionSecret, LEGACY_SESSION_COOKIE));
     if (!id) return null;
     const s = sessions.validate(id, now());
     return s ? { id, ...s } : null;
@@ -284,6 +285,7 @@ export function createApp(deps: AppDeps) {
     const s = await readSession(c);
     if (s) sessions.revoke(s.id);
     deleteCookie(c, SESSION_COOKIE, sessionCookie);
+    deleteCookie(c, LEGACY_SESSION_COOKIE, sessionCookie);
     return ok(c, Session, sessionBody(null));
   });
 

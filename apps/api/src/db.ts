@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   Collection,
@@ -21,7 +21,7 @@ import {
   type TestCase,
   templateFor,
   type TestsetRef,
-} from '@codetest/shared';
+} from '@solveline/shared';
 import type { TestsetStore } from './testsets.ts';
 
 export type Db = Database.Database;
@@ -216,7 +216,12 @@ export function openDb(dataDir: string): Db {
   if (dataDir === ':memory:') db = new Database(':memory:');
   else {
     mkdirSync(dataDir, { recursive: true });
-    db = new Database(join(dataDir, 'codetest.db'));
+    // 예전 이름(codetest.db)이면 한 번 옮긴다(WAL·SHM 파일 포함, DB를 열기 전에)
+    const file = join(dataDir, 'solveline.db');
+    const legacy = join(dataDir, 'codetest.db');
+    if (!existsSync(file) && existsSync(legacy))
+      for (const ext of ['', '-wal', '-shm']) if (existsSync(legacy + ext)) renameSync(legacy + ext, file + ext);
+    db = new Database(file);
     db.pragma('journal_mode = WAL');
   }
   db.pragma('foreign_keys = ON');

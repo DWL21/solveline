@@ -3,7 +3,7 @@ x-logging: &logging
   driver: json-file
   options: { max-size: 10m, max-file: "3" }
 
-name: codetest-production
+name: solveline-production
 services:
   runner:
     logging: *logging
@@ -34,7 +34,7 @@ services:
     networks: [default, sandbox]
     # GitHub Environment(production) secrets·variables로 배포 시 생성된다.
     env_file:
-      - path: /etc/codetest/api.env
+      - path: /etc/solveline/api.env
         required: false
     environment:
       NODE_ENV: production
@@ -45,7 +45,7 @@ services:
       RUNNER_URLS: http://runner:8000
       RUNNER_SLOTS: "2"
     volumes:
-      - /var/lib/codetest:/data
+      - /var/lib/solveline:/data
     depends_on:
       runner:
         condition: service_healthy

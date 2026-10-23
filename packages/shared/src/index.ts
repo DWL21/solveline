@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 /** API 계약. api·web이 함께 쓴다. 성공 `{ data }`, 실패 `{ error: { code, message } }`. */
 
-export const SESSION_COOKIE = 'codetest_session';
+export const SESSION_COOKIE = 'solveline_session';
+/** 예전 이름(codetest) 시절의 세션 쿠키. 읽기만 하고, 다음 로그인·로그아웃 때 지운다. */
+export const LEGACY_SESSION_COOKIE = 'codetest_session';
 
 /** 약관·개인정보처리방침 버전(시행일). 내용을 바꾸면 올리고, 가입 때 동의한 버전을 저장한다. */
 export const TERMS_VERSION = '2026-10-23';

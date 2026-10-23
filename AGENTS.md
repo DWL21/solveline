@@ -2,7 +2,7 @@
 
 사람과 AI 에이전트(Claude Code, Codex 등)가 이 저장소에서 작업할 때 지키는 규칙입니다. `CLAUDE.md`는 이 파일을 가리킵니다.
 **공개 저장소**(DWL21/solveline, 예전 이름 codetest)입니다. 서비스 이름은 **Solveline**, 주소는 https://solveline.simplyimg.com 입니다.
-내부 식별자(`@codetest/*` 패키지, compose 프로젝트 `codetest-production`, `/var/lib/codetest`·`/etc/codetest`, 세션 쿠키 이름)는 데이터 이전 없이 그대로 둡니다. 커밋·이슈·PR·Actions 로그는 누구나 볼 수 있다고 가정합니다.
+내부 식별자도 모두 solveline입니다(`@solveline/*` 패키지, compose 프로젝트 `solveline-production`, `/var/lib/solveline`·`/etc/solveline`, 세션 쿠키 `solveline_session`). 예전 이름에서의 이전은 [docs/architecture.md](docs/architecture.md#이름) 참고. 커밋·이슈·PR·Actions 로그는 누구나 볼 수 있다고 가정합니다.
 
 ## 저장소 구조
 
@@ -35,7 +35,7 @@
 | `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 
-- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/codetest/api.env`(root, 600)로 기록한다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
+- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/solveline/api.env`(root, 600)로 기록한다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
 - 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`의 `env:`와 `KEYS`(필수면 `REQUIRED`도)에 함께 추가해야 반영된다.
 - `production` 환경은 `main` 브랜치에서만 쓸 수 있다(deployment branch policy).
 - `.env.example`은 커밋 대상이다. 실제 값을 넣지 않는다.
@@ -44,7 +44,7 @@
 
 ## 공개 저장소 + self-hosted runner 규칙
 
-- self-hosted runner(`codetest-production`)는 `deploy.yml`의 `push: main`·`workflow_dispatch`에서만 쓴다. 다른 워크플로·`pull_request` 이벤트에 self-hosted 레이블을 쓰지 않는다.
+- self-hosted runner(레이블 `solveline-production`)는 `deploy.yml`의 `push: main`·`workflow_dispatch`에서만 쓴다. 다른 워크플로·`pull_request` 이벤트에 self-hosted 레이블을 쓰지 않는다.
 - `deploy` 잡은 `github.repository == 'DWL21/solveline' && github.ref == 'refs/heads/main'`일 때만 돈다.
 - 외부 기여자 PR의 워크플로는 **항상 승인 후 실행**(저장소 설정 `all_external_contributors`). 외부 PR이 `.github/workflows`를 바꾸면 승인 전에 반드시 내용을 읽는다.
 - CI(`ci.yml`)는 GitHub-hosted runner만 쓴다.
@@ -59,7 +59,7 @@
 
 ## 기존 동등성
 
-- 기본 버전: **OpenJDK 21.0.2, Python 3.13.13** (`docker/runner.Dockerfile`의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자). 바꾸면 README와 이 문서를 같이 고친다.
+- 기본 버전: **OpenJDK 21.0.2, Python 3.13.13** (`docker/runner.Dockerfile`의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자). 바꾸면 README·docs/architecture.md와 이 문서를 같이 고친다.
 - 함수형 문제: Java는 `class Solution`의 `solution(...)`, Python은 `solution(...)`을 테스트 케이스마다 새 프로세스로 한 번 호출한다. 결과는 타입까지 비교(bool≠int, 실수 1e-9 허용)한다.
 - 입출력형 문제: Java는 `static void main`이 있는 클래스, Python은 스크립트를 표준 입력과 함께 실행하고 줄 끝 공백을 무시해 비교한다.
 - 테스트 케이스당 10초, 제출 하나당 최대 600초, 히든 케이스 최대 200개. 채점은 비동기 큐라 Cloudflare 응답 제한과 무관하다.

@@ -25,7 +25,7 @@ import java.util.Set;
  * 인자는 case.json(JSON)에서 매개변수 타입에 맞게 변환하고, 반환값은 result.json에 기록한다.
  * 사용자 System.out 출력은 그대로 stdout으로 나간다.
  */
-public final class CodetestHarness {
+public final class SolvelineHarness {
     public static void main(String[] argv) throws Exception {
         Path work = Path.of(argv[0]);
         Path result = work.resolve("result.json");
@@ -82,7 +82,7 @@ public final class CodetestHarness {
         // 실행기 내부 프레임은 숨긴다
         StringBuilder out = new StringBuilder();
         for (String line : sw.toString().split("\n")) {
-            if (line.contains("jdk.internal.reflect") || line.contains("java.lang.reflect.Method.invoke") || line.contains("CodetestHarness")) continue;
+            if (line.contains("jdk.internal.reflect") || line.contains("java.lang.reflect.Method.invoke") || line.contains("SolvelineHarness")) continue;
             out.append(line).append('\n');
         }
         return out.toString().trim();

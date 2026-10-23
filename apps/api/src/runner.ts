@@ -1,4 +1,4 @@
-import type { RunRequest, RunResult, Runtime, TestCase } from '@codetest/shared';
+import type { RunRequest, RunResult, Runtime, TestCase } from '@solveline/shared';
 
 export class RunnerError extends Error {}
 export class CaseInputError extends Error {}

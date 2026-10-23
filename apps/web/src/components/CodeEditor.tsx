@@ -19,7 +19,7 @@ import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
-import type { Language } from '@codetest/shared';
+import type { Language } from '@solveline/shared';
 
 const navy = EditorView.theme(
   {

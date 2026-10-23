@@ -11,8 +11,8 @@ COPY --from=jdk /opt/java/openjdk /opt/java/openjdk
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin sandbox
 WORKDIR /opt/runner
 COPY runner/server.py runner/py_harness.py runner/selftest.py ./
-COPY runner/java/CodetestHarness.java java/
-RUN javac -encoding UTF-8 -d java java/CodetestHarness.java && rm java/CodetestHarness.java \
+COPY runner/java/SolvelineHarness.java java/
+RUN javac -encoding UTF-8 -d java java/SolvelineHarness.java && rm java/SolvelineHarness.java \
   && python3 -m compileall -q /opt/runner && chmod -R a+rX,go-w /opt/runner
 ENV HARNESS_DIR=/opt/runner JAVA_HARNESS_CP=/opt/runner/java SANDBOX_UID=10001 WORK_ROOT=/tmp PORT=8000 \
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
