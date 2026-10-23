@@ -13,6 +13,9 @@ import { Spinner, WorkspaceSkeleton } from './Loading.tsx';
 import { draftQueue, inputChanges, useDraftState } from '../lib/drafts.ts';
 import { applyPatch, type DraftState } from '../lib/draft-queue.ts';
 import { loginHref, useMe } from '../lib/me.ts';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 
 const toInput = (p: Problem): ProblemInput => ({
   title: p.title,
@@ -66,7 +69,6 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   // 편집 모드: 편집 권한이 있는 사용자만. 켜면 문제 내용·채점 케이스·폴더를 바꿀 수 있고 모든 사용자에게 적용된다.
   const canEdit = !!me?.editor;
   const [editing, setEditing] = useState(false);
-  const [editingDesc, setEditingDesc] = useState(false);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [resets, setResets] = useState(0);
   const draftRef = useRef(draft);
@@ -256,8 +258,9 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
             aria-pressed={editing}
             title="문제 내용·채점 케이스·폴더를 바꿉니다. 바꾸면 모든 사용자에게 적용돼요."
             onClick={() => {
-              setEditing((v) => !v);
-              setEditingDesc(false);
+              const next = !editing;
+              setEditing(next);
+              if (next) setTab('desc');
             }}
           >
             {editing ? '편집 끝내기' : '편집 모드'}
@@ -291,11 +294,6 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
                 {t === 'desc' ? '문제 설명' : t === 'cases' ? `테스트 케이스 ${visibleCount}` : draft.memo.trim() ? '메모 •' : '메모'}
               </button>
             ))}
-            {tab === 'desc' && editing && (
-              <button type="button" className="btn-quiet ml-auto min-h-7 px-2 text-[12px]" onClick={() => setEditingDesc((v) => !v)}>
-                {editingDesc ? '완료' : '편집'}
-              </button>
-            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto bg-panel">
             {tab === 'memo' ? (
@@ -307,17 +305,23 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
                 className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
               />
             ) : tab === 'desc' ? (
-              editing && (editingDesc || !draft.description.trim()) ? (
+              editing ? (
                 <textarea
                   value={draft.description}
                   onChange={(e) => patch({ description: e.target.value })}
-                  placeholder="문제 설명, 제한 사항, 입출력 예를 붙여 넣으세요."
+                  placeholder="문제 설명을 Markdown으로 작성하세요. 제목, 목록, 표, 코드 블록, 링크를 쓸 수 있어요."
                   className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
-                  autoFocus={editingDesc}
+                  autoFocus
                 />
               ) : (
-                <div className="p-4 text-[14px] leading-[1.75] whitespace-pre-wrap text-text/90" onDoubleClick={() => editing && setEditingDesc(true)}>
-                  {draft.description.trim() || <span className="text-faint">문제 설명이 없어요.</span>}
+                <div className="markdown-body p-4 text-[14px] leading-[1.75] text-text/90">
+                  {draft.description.trim() ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} skipHtml>
+                      {draft.description}
+                    </ReactMarkdown>
+                  ) : (
+                    <span className="text-faint">문제 설명이 없어요.</span>
+                  )}
                 </div>
               )
             ) : (

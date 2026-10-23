@@ -78,6 +78,96 @@ body {
   outline: none;
 }
 
+.markdown-body {
+  overflow-wrap: anywhere;
+}
+.markdown-body > * + * {
+  margin-top: 0.9em;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  color: var(--color-text);
+  font-weight: 700;
+  line-height: 1.35;
+}
+.markdown-body h1 {
+  font-size: 1.45rem;
+}
+.markdown-body h2 {
+  font-size: 1.25rem;
+}
+.markdown-body h3 {
+  font-size: 1.1rem;
+}
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5rem;
+}
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body li + li {
+  margin-top: 0.3rem;
+}
+.markdown-body a {
+  color: var(--color-sky);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body blockquote {
+  border-left: 3px solid var(--color-line-strong);
+  padding-left: 0.85rem;
+  color: var(--color-dim);
+}
+.markdown-body :not(pre) > code {
+  border: 1px solid var(--color-line);
+  border-radius: 0.25rem;
+  background: var(--color-base);
+  padding: 0.08rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.markdown-body pre {
+  overflow-x: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 0.4rem;
+  background: var(--color-base);
+  padding: 0.8rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  line-height: 1.6;
+  tab-size: 4;
+}
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--color-line-strong);
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.markdown-body th {
+  background: var(--color-base);
+  color: var(--color-text);
+  font-weight: 700;
+}
+.markdown-body hr {
+  border-color: var(--color-line);
+}
+
 /* 스켈레톤: 은은한 반짝임. 움직임 줄이기 설정이면 정지 */
 .skeleton {
   background: linear-gradient(90deg, var(--color-raised) 25%, var(--color-line-strong) 37%, var(--color-raised) 63%);
