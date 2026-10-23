@@ -40,13 +40,13 @@ export function LoginScreen() {
       <main className="w-full max-w-sm">
         <div className="mb-6 flex items-center gap-2.5">
           <img src="/icon.svg" alt="" className="size-8" />
-          <span className="font-mono text-[20px] font-bold tracking-tight">codetest</span>
+          <span className="text-[20px] font-extrabold tracking-tight">Solveline</span>
         </div>
         <form onSubmit={(e) => void submit(e)} className="rounded-xl border border-line bg-panel p-5 shadow-2xl shadow-black/30">
           <h1 className="text-[17px] font-bold">로그인</h1>
           <p className="mt-1 text-[13px] leading-relaxed text-dim">기존와 같은 Java·Python 환경입니다. 비밀번호를 아는 사람만 열 수 있어요.</p>
           {/* 비밀번호 관리자가 이 사이트의 항목으로 저장·자동 입력하도록 사용자 이름 칸을 숨겨 둔다 */}
-          <input type="text" name="username" autoComplete="username" value="codetest" readOnly hidden />
+          <input type="text" name="username" autoComplete="username" value="solveline" readOnly hidden />
           <label className="mt-5 flex flex-col gap-1.5">
             <span className="text-[12px] font-bold text-dim">비밀번호</span>
             <input

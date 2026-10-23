@@ -25,7 +25,7 @@ const backup = new BackupJob(db, config.dataDir, problems, submissions, testsets
 backup.start();
 
 const server = serve({ fetch: app.fetch, port: config.port }, ({ port }) =>
-  log.info(`codetest-api :${port} (runners=${config.runnerUrls.join(',')} × ${config.runnerSlots})`),
+  log.info(`solveline-api :${port} (runners=${config.runnerUrls.join(',')} × ${config.runnerSlots})`),
 );
 
 const shutdown = () => {

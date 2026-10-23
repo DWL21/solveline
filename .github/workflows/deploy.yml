@@ -12,11 +12,11 @@ concurrency:
 jobs:
   deploy:
     # 포크·다른 브랜치에서는 절대 self-hosted runner를 쓰지 않는다.
-    if: github.repository == 'DWL21/codetest' && github.ref == 'refs/heads/main'
+    if: github.repository == 'DWL21/solveline' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, x64, codetest-production]
     environment:
       name: production
-      url: https://codetest.simplyimg.com
+      url: https://solveline.simplyimg.com
     steps:
       - uses: actions/checkout@v5
         with:
@@ -46,5 +46,5 @@ jobs:
         run: bash scripts/deploy-production.sh
       - name: Verify public deployment
         run: |
-          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://codetest.simplyimg.com/api/health
-          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://codetest.simplyimg.com/ -o /dev/null
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline.simplyimg.com/api/health
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline.simplyimg.com/ -o /dev/null

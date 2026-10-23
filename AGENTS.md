@@ -1,7 +1,8 @@
-# AGENTS.md — codetest 작업 규칙
+# AGENTS.md — Solveline 작업 규칙
 
 사람과 AI 에이전트(Claude Code, Codex 등)가 이 저장소에서 작업할 때 지키는 규칙입니다. `CLAUDE.md`는 이 파일을 가리킵니다.
-**공개 저장소**입니다. 커밋·이슈·PR·Actions 로그는 누구나 볼 수 있다고 가정합니다.
+**공개 저장소**(DWL21/solveline, 예전 이름 codetest)입니다. 서비스 이름은 **Solveline**, 주소는 https://solveline.simplyimg.com 입니다.
+내부 식별자(`@codetest/*` 패키지, compose 프로젝트 `codetest-production`, `/var/lib/codetest`·`/etc/codetest`, 세션 쿠키 이름)는 데이터 이전 없이 그대로 둡니다. 커밋·이슈·PR·Actions 로그는 누구나 볼 수 있다고 가정합니다.
 
 ## 저장소 구조
 
@@ -44,7 +45,7 @@
 ## 공개 저장소 + self-hosted runner 규칙
 
 - self-hosted runner(`codetest-production`)는 `deploy.yml`의 `push: main`·`workflow_dispatch`에서만 쓴다. 다른 워크플로·`pull_request` 이벤트에 self-hosted 레이블을 쓰지 않는다.
-- `deploy` 잡은 `github.repository == 'DWL21/codetest' && github.ref == 'refs/heads/main'`일 때만 돈다.
+- `deploy` 잡은 `github.repository == 'DWL21/solveline' && github.ref == 'refs/heads/main'`일 때만 돈다.
 - 외부 기여자 PR의 워크플로는 **항상 승인 후 실행**(저장소 설정 `all_external_contributors`). 외부 PR이 `.github/workflows`를 바꾸면 승인 전에 반드시 내용을 읽는다.
 - CI(`ci.yml`)는 GitHub-hosted runner만 쓴다.
 

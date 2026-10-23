@@ -1,5 +1,5 @@
 <p align="center">
-  <b>codetest</b> — 기존와 같은 Java·Python 코딩 테스트 환경
+  <b>Solveline</b> — 기존와 같은 Java·Python 코딩 테스트 연습 환경
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/Java-OpenJDK%2017-e76f00" alt="OpenJDK 17">
@@ -9,7 +9,7 @@
 
 ---
 
-**서비스**: <a href="https://codetest.simplyimg.com">https://codetest.simplyimg.com</a> (비밀번호 보유자 전용)
+**서비스**: <a href="https://solveline.simplyimg.com">https://solveline.simplyimg.com</a> (예전 주소 codetest.simplyimg.com은 이곳으로 이동)
 
 **문서**: [`AGENTS.md`](AGENTS.md) · [`packages/shared/src/index.ts`](packages/shared/src/index.ts) (API 계약) · [`docs/decisions`](docs/decisions)
 
@@ -38,6 +38,10 @@
 버전은 [`docker/runner.Dockerfile`](docker/runner.Dockerfile)의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자로 바꿀 수 있습니다.
 기존는 공식 버전 표를 공개하지 않아, 기존에서 `System.getProperty("java.version")` / `sys.version`을 출력해 확인한 뒤 맞추세요.
 
+## 이름
+
+서비스 이름은 **Solveline**입니다(예전 이름 codetest, 저장소 DWL21/solveline). 내부 식별자(`@codetest/*` 패키지, compose 프로젝트 `codetest-production`, 서버 경로 `/var/lib/codetest`·`/etc/codetest`, 세션 쿠키 이름)는 운영 데이터 이전 없이 그대로 둡니다.
+
 ## Requirements
 
 * Node.js 24+, pnpm 10+
@@ -46,8 +50,8 @@
 ## Installation
 
 ```console
-$ git clone https://github.com/DWL21/codetest.git
-$ cd codetest
+$ git clone https://github.com/DWL21/solveline.git
+$ cd solveline
 $ pnpm install
 ```
 
@@ -140,7 +144,7 @@ $ pnpm check   # 타입 검사 + 테스트 + 빌드
 ### 배포 구조
 
 ```
-codetest.simplyimg.com ─ Cloudflare Tunnel ─ pahidc 127.0.0.1:8083
+solveline.simplyimg.com ─ Cloudflare Tunnel ─ pahidc 127.0.0.1:8083
                                               └─ nginx (web 정적 파일)
                                                   └─ /api/* → api:8787 (Hono, SQLite, 제출 큐·디스패처)
                                                                └─ runner:8000 × RUNNER_URLS (internal 네트워크, 인터넷 차단, 테스트셋 캐시)

@@ -33,7 +33,7 @@ services:
       NODE_ENV: production
       PORT: "8787"
       DATA_DIR: /data
-      WEB_ORIGIN: https://codetest.simplyimg.com
+      WEB_ORIGIN: https://solveline.simplyimg.com
       # runner를 늘리면 쉼표로 더한다 (예: http://runner:8000,http://runner2:8000)
       RUNNER_URLS: http://runner:8000
       RUNNER_SLOTS: "2"
