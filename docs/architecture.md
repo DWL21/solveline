@@ -13,10 +13,11 @@
 ## 배포 구조
 
 ```
-solveline.simplyimg.com ─ Cloudflare Tunnel ─ pahidc 127.0.0.1:8083
-                                              └─ nginx (web 정적 파일)
-                                                  └─ /api/* → api:8787 (Hono, SQLite, 제출 큐·디스패처)
-                                                               └─ runner:8000 × RUNNER_URLS (internal 네트워크, 인터넷 차단, 테스트셋 캐시)
+solveline.simplyimg.com ─ Cloudflare Pages (web 정적 파일)
+                        └─ /api/* → Pages 프록시 → solveline-api.simplyimg.com
+                                                   └─ Cloudflare Tunnel → pahidc 127.0.0.1:8083
+                                                       └─ nginx → api:8787 (Hono, SQLite, 제출 큐)
+                                                                  └─ runner:8000 (internal 네트워크)
 ```
 
 채점 흐름(자세히는 [`decisions/0003-judge-pipeline.md`](decisions/0003-judge-pipeline.md)):
@@ -26,7 +27,9 @@ solveline.simplyimg.com ─ Cloudflare Tunnel ─ pahidc 127.0.0.1:8083
    └─ GET /api/submissions/:id 로 결과 조회         runner: 테스트셋을 해시로 캐시, 없을 때만 받음 (409 → 업로드)
 ```
 
-`main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/api.env` 기록 → `docker compose up --build` → 공개 주소 헬스 체크.
+`main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/api.env` 기록 → web 빌드·Pages 업로드 → API·runner·게이트웨이 `docker compose up --build` → 공개 주소 헬스 체크. PR의 `check`, `docker`, `secret-scan`은 기존처럼 GitHub-hosted에서 실행합니다.
+
+배포 준비·전환·롤백은 [Pages 배포](pages-deployment.md)를 참고하세요.
 
 ## 이름
 

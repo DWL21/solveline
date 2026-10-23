@@ -9,10 +9,10 @@
 | 경로 | 내용 | 실행 환경 |
 |---|---|---|
 | `apps/api` | Hono REST API, Google 로그인·관리자 모드, 문제 저장(SQLite), 히든 테스트셋(해시 파일), 제출 큐·디스패처, 매일 백업 | Node 24 (Docker, pahidc) |
-| `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE | nginx (Docker, pahidc) — API와 같은 출처 |
+| `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE | Cloudflare Pages — `/api/*`만 Tunnel로 프록시 |
 | `runner` | 코드 실행 서버(Python 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 21.0.2, Python 3.13.13) |
 | `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
-| `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 이미지·nginx·배포 | pahidc |
+| `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 API 이미지·nginx 게이트웨이·배포 | pahidc |
 | `.github/workflows` | CI(`ci.yml`), 배포(`deploy.yml`) | GitHub-hosted / self-hosted(pahidc) |
 | `docs/decisions` | 결정 기록 | — |
 
