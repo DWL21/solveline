@@ -1,12 +1,22 @@
 import { useEffect, useRef } from 'react';
-import { EditorView, basicSetup } from 'codemirror';
-import { Annotation, Compartment, EditorState } from '@codemirror/state';
-import { keymap } from '@codemirror/view';
-import { indentWithTab } from '@codemirror/commands';
-import { indentUnit } from '@codemirror/language';
-import { java, javaLanguage } from '@codemirror/lang-java';
-import { acceptCompletion, completionStatus } from '@codemirror/autocomplete';
-import { expandJavaTemplate, javaTemplateCompletions } from '../lib/snippets.ts';
+import { Annotation, Compartment, EditorState, type Extension } from '@codemirror/state';
+import {
+  EditorView,
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+  rectangularSelection,
+} from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
+import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
+import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { Language } from '@codetest/shared';
@@ -21,8 +31,31 @@ const navy = EditorView.theme(
   { dark: true },
 );
 
-/** Java는 sout·fori 같은 코드 템플릿을 함께 켠다 */
-const langExt = (l: Language) => (l === 'java' ? [java(), javaLanguage.data.of({ autocomplete: javaTemplateCompletions })] : python());
+const langExt = (l: Language) => (l === 'java' ? java() : python());
+
+/**
+ * 기존 에디터에 가깝게: 자동 완성 목록·코드 템플릿 없음(실력 향상 목적), Tab은 들여쓰기만.
+ * codemirror의 basicSetup에서 autocompletion만 뺀 구성이다.
+ */
+const editorSetup: Extension = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  history(),
+  foldGutter(),
+  drawSelection(),
+  dropCursor(),
+  EditorState.allowMultipleSelections.of(true),
+  indentOnInput(),
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  bracketMatching(),
+  closeBrackets(),
+  rectangularSelection(),
+  crosshairCursor(),
+  highlightActiveLine(),
+  highlightSelectionMatches(),
+  keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+];
 
 /** 바깥 값으로 문서를 바꾼 트랜잭션. 사용자의 편집이 아니므로 onChange를 부르지 않는다. */
 const external = Annotation.define<boolean>();
@@ -46,8 +79,6 @@ export function CodeEditor({
   const lang = useRef(new Compartment());
   const cb = useRef({ onChange, onRun });
   cb.current = { onChange, onRun };
-  const langRef = useRef(language);
-  langRef.current = language;
 
   useEffect(() => {
     const v = new EditorView({
@@ -57,11 +88,8 @@ export function CodeEditor({
         extensions: [
           keymap.of([
             { key: 'Mod-Enter', preventDefault: true, run: () => (cb.current.onRun(), true) },
-            // Tab: 자동 완성 목록이 열려 있으면 선택, 아니면 Java 템플릿(sout 등) 펼치기, 둘 다 아니면 들여쓰기
-            { key: 'Tab', run: (v) => (completionStatus(v.state) === 'active' ? acceptCompletion(v) : langRef.current === 'java' && expandJavaTemplate(v)) },
-            indentWithTab,
           ]),
-          basicSetup,
+          editorSetup,
           indentUnit.of('    '),
           EditorState.tabSize.of(4),
           lang.current.of(langExt(language)),
