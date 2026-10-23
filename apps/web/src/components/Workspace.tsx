@@ -473,6 +473,7 @@ guest ? (
           </div>
         </section>
 
+        {!narrow && (
         <Splitter
           direction="vertical"
           container={rowRef}
@@ -481,6 +482,7 @@ guest ? (
           label="문제·에디터 너비"
           onChange={(v) => setLayout('leftPct', v)}
         />
+        )}
 
         {/* 오른쪽: 에디터 + 실행 결과 */}
         <section ref={rightRef} className={narrow && pane === 'problem' ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'}>

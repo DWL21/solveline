@@ -6,22 +6,21 @@ import { App } from './App.tsx';
 import { ApiError, qk } from './lib/api.ts';
 import './index.css';
 
-// 화상 키보드가 올라오면 보이는 높이가 줄어든다. 앱 높이를 거기에 맞춰 하단 실행 바·코딩 키가 키보드 바로 위에 오게 한다.
+// 앱을 화면에 실제로 보이는 영역에 맞춘다: 화상 키보드·브라우저 도구 막대가 나타나고 사라지면 높이와 위치가 바뀐다.
+// 하단 실행 바가 키보드 바로 위·도구 막대 바로 위에 붙고, 아래에 빈 공간이 생기지 않는다.
 const vv = window.visualViewport;
 if (vv) {
   // 화상 키보드 열림: 지금까지 본 가장 큰 높이보다 150px 넘게 줄면 키보드로 본다(화면 회전 때 기준을 다시 잡는다)
   let tallest = vv.height;
   screen.orientation?.addEventListener('change', () => (tallest = 0));
+  const root = document.documentElement;
   const fit = () => {
     tallest = Math.max(tallest, vv.height);
-    const keyboard = vv.height < tallest - 150;
-    if (keyboard) document.documentElement.dataset.keyboard = '';
-    else delete document.documentElement.dataset.keyboard;
-    document.documentElement.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
-    // iOS는 키보드가 올라올 때 문서를 밀어 올린다 → 화면 높이에 고정된 화면(문제 풀이 등)이면 맨 위로 되돌린다
-    const fixedLayout = document.documentElement.scrollHeight <= window.innerHeight + 1;
-    if (fixedLayout && (window.scrollY || window.scrollX)) window.scrollTo(0, 0);
-    else if (window.scrollX) window.scrollTo(0, window.scrollY);
+    if (vv.height < tallest - 150) root.dataset.keyboard = '';
+    else delete root.dataset.keyboard;
+    root.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+    // iOS는 키보드가 올라오면 보이는 영역을 문서 아래쪽으로 옮긴다 → 앱을 그 위치에 따라 붙인다
+    root.style.setProperty('--app-top', `${Math.round(vv.offsetTop)}px`);
   };
   vv.addEventListener('resize', fit);
   vv.addEventListener('scroll', fit);

@@ -101,7 +101,7 @@ function Shell() {
           onClick={(e) => (e.preventDefault(), go({ kind: 'home', scope: { kind: 'all' } }))}
         >
           <img src="/icon.svg" alt="" className="size-6" />
-          <span className="text-[15px] font-extrabold tracking-tight">Solveline</span>
+          <span className="text-[15px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
         </a>
         {route.kind === 'problem' && (
           <button type="button" className="btn-quiet ml-1" onClick={() => go({ kind: 'home', scope: lastScope })}>

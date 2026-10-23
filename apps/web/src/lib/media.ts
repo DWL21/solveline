@@ -13,7 +13,10 @@ export function useMediaQuery(query: string): boolean {
   return match;
 }
 
-/** 휴대폰 폭(태블릿 세로 768px 미만): 문제 화면을 탭으로 나눈다 */
-export const useNarrow = () => useMediaQuery('(max-width: 767px)');
+/**
+ * 휴대폰 배치: 폭 768px 미만(세로 휴대폰·폴더블 접은 화면), 또는 터치 기기의 낮은 화면(가로로 눕힌 휴대폰).
+ * 가로 휴대폰은 폭이 넓어도 높이가 낮아 좌우 분할에 키보드까지 올라오면 코드가 거의 안 보인다.
+ */
+export const useNarrow = () => useMediaQuery('(max-width: 767px), (pointer: coarse) and (max-height: 500px)');
 /** 손가락으로 쓰는 기기 */
 export const useTouch = () => useMediaQuery('(pointer: coarse)');

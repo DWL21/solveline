@@ -22,22 +22,51 @@
   --color-warn: #f5b94a;
 }
 
-/* --app-h: 화상 키보드를 뺀 실제 보이는 높이(main.tsx가 visualViewport로 갱신). 없으면 동적 뷰포트 높이. */
+/*
+ * 앱을 화면에 실제로 보이는 영역(visualViewport)에 딱 맞춰 고정한다.
+ * --app-h·--app-top은 main.tsx가 갱신한다(화상 키보드·브라우저 도구 막대가 나타나고 사라질 때).
+ * 문서 자체는 스크롤하지 않고, 긴 화면(약관·관리자 등)은 #root 안에서 스크롤한다.
+ */
 html,
 body {
   height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
-  /* iOS가 커서를 보이게 하려고 화면을 옆으로 밀지 않도록 가로 넘침을 자른다 */
-  overflow-x: clip;
 }
 #root {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
   height: var(--app-h, 100dvh);
   overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 노치·상태 막대(가로 화면, 홈 화면 앱)를 비켜 간다. 일반 세로 화면 브라우저에서는 0이다. */
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+/* dvh를 모르는 오래된 브라우저(iOS 15.3 이하 등) */
+@supports not (height: 100dvh) {
+  #root {
+    height: var(--app-h, 100vh);
+  }
+}
+/* overflow-x: clip을 모르는 브라우저(iOS 15 이하) */
+@supports not (overflow-x: clip) {
+  html,
+  body,
+  #root {
+    overflow-x: hidden;
+  }
 }
 
-/* 안전 영역(노치·홈 막대) */
+/* 안전 영역(홈 막대): 홈 화면에 추가해 전체 화면으로 열었을 때만. 브라우저에서는 도구 막대가 이미 비켜 준다. */
 @utility pb-safe {
-  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  @media (display-mode: standalone) {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 @utility pt-safe {
   padding-top: env(safe-area-inset-top);

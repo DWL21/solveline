@@ -116,11 +116,11 @@ function Dashboard() {
         {tab === 'users' ? (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             {/* 좁은 화면: 목록과 상세를 번갈아 보여 준다 */}
-            <div className={selected && !wide ? 'hidden' : ''}>
+            <div className={`min-w-0 ${selected && !wide ? 'hidden' : ''}`}>
               <UserList selected={selected} onSelect={setSelected} />
             </div>
             {selected ? (
-              <div>
+              <div className="min-w-0">
                 {!wide && (
                   <button type="button" className="btn-quiet touch-target mb-2 px-1 text-[13px]" onClick={() => setSelected(null)}>
                     ← 사용자 목록
@@ -238,12 +238,12 @@ function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
         ).map(([k, v]) => (
           <div key={k}>
             <dt className="text-faint">{k}</dt>
-            <dd className="font-semibold">{v}</dd>
+            <dd className="font-semibold whitespace-nowrap">{v}</dd>
           </div>
         ))}
       </dl>
       <p className="mt-2 text-[11.5px] text-faint">
-        약관 {u.termsVersion} · 개인정보 {u.privacyVersion} 동의 ({time(u.agreedAt)})
+        약관 {u.termsVersion} · 개인정보 {u.privacyVersion} 동의 <span className="whitespace-nowrap">({time(u.agreedAt)})</span>
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
@@ -294,13 +294,16 @@ function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
       ) : (
         <ul className="max-h-60 overflow-y-auto rounded-md border border-line text-[12.5px]">
           {u.recentSubmissions.map((s) => (
-            <li key={s.id} className="flex items-center gap-2 border-b border-line px-2 py-1.5 last:border-0">
-              <span className="w-24 shrink-0 text-faint">{time(s.createdAt)}</span>
-              <span className="min-w-0 flex-1 truncate">{s.problemTitle ?? '(스크립트 실행)'}</span>
-              <span className="shrink-0 text-dim">{s.kind === 'submit' ? '제출' : '실행'} · {s.language === 'java' ? 'Java' : 'Python'}</span>
-              <span className={`w-10 shrink-0 text-right font-semibold ${s.score === 100 ? 'text-ok' : 'text-dim'}`}>
-                {s.kind === 'submit' && s.score !== null ? (s.score === 100 ? '✓' : s.score) : ''}
-              </span>
+            <li key={s.id} className="border-b border-line px-2.5 py-2 last:border-0">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate">{s.problemTitle ?? '(스크립트 실행)'}</span>
+                <span className={`shrink-0 font-semibold ${s.score === 100 ? 'text-ok' : 'text-dim'}`}>
+                  {s.kind === 'submit' && s.score !== null ? (s.score === 100 ? '✓' : `${s.score}점`) : ''}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11.5px] whitespace-nowrap text-faint tabular-nums">
+                {time(s.createdAt)} · {s.kind === 'submit' ? '제출' : '실행'} · {s.language === 'java' ? 'Java' : 'Python'}
+              </p>
             </li>
           ))}
         </ul>
