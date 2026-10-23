@@ -108,8 +108,10 @@ function Shell() {
             ← 문제 목록
           </button>
         )}
-        {me && <a href="#/submissions" className={`btn-quiet ml-auto ${route.kind === 'submissions' ? 'text-accent' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>}
-        <UserMenu onLogout={() => logout.mutate()} />
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {me && <a href="#/submissions" className={`btn-quiet ${route.kind === 'submissions' ? 'text-accent' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>}
+          <UserMenu onLogout={() => logout.mutate()} />
+        </div>
       </header>
 
       {route.kind === 'problem' ? (
@@ -167,12 +169,12 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
   }, [open]);
   if (!me)
     return (
-      <a href={loginHref()} className="btn-primary ml-auto min-h-8 px-3 text-[12.5px]">
+      <a href={loginHref()} className="btn-primary min-h-8 px-3 text-[12.5px]">
         로그인
       </a>
     );
   return (
-    <div className="relative ml-auto" data-user-menu>
+    <div className="relative" data-user-menu>
       <button type="button" className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-raised" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Avatar picture={me.picture} email={me.email} size={24} />
         <span className="hidden max-w-56 truncate text-[12.5px] text-dim sm:inline">{me.email}</span>
