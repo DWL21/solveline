@@ -1,11 +1,20 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Language, ProblemMode, Session } from '@codetest/shared';
 import { ApiError, api, qk } from './lib/api.ts';
 import { useRoute, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
 import { Home, scopeList } from './components/Home.tsx';
-import { Workspace, blankProblem } from './components/Workspace.tsx';
+import { blankProblem } from './lib/blank.ts';
+
+// 문제 화면(에디터)은 무거우므로 열 때만 받는다. 목록 화면이 뜨면 미리 받아 둔다(prefetchWorkspace).
+const loadWorkspace = () => import('./components/Workspace.tsx');
+const Workspace = lazy(() => loadWorkspace().then((m) => ({ default: m.Workspace })));
+const prefetchWorkspace = () => {
+  const run = () => void loadWorkspace();
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 3000 });
+  else setTimeout(run, 1500);
+};
 
 export function App() {
   const session = useQuery({ queryKey: qk.session, queryFn: api.session, staleTime: Infinity });
@@ -27,6 +36,7 @@ function Shell() {
   const [route, go] = useRoute();
   const [creating, setCreating] = useState(false);
   const runtime = useQuery({ queryKey: qk.runtime, queryFn: api.runtime, staleTime: 60_000 });
+  useEffect(prefetchWorkspace, []);
   // 홈에서 마지막으로 보던 범위. 문제를 닫으면 그 범위로 돌아간다.
   const [lastScope, setLastScope] = useState<Scope>(route.kind === 'home' ? route.scope : { kind: 'all' });
   useEffect(() => {
@@ -80,12 +90,14 @@ function Shell() {
       </header>
 
       {route.kind === 'problem' ? (
+        <Suspense fallback={<p className="p-6 text-[13px] text-dim">문제 화면을 불러오는 중…</p>}>
         <Workspace
           problemId={route.id}
           onDeleted={() => go({ kind: 'home', scope: lastScope })}
           onNext={nextId ? () => go({ kind: 'problem', id: nextId }) : undefined}
           onList={() => go({ kind: 'home', scope: lastScope })}
         />
+        </Suspense>
       ) : (
         <Home
           scope={route.scope}

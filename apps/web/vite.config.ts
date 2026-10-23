@@ -4,6 +4,20 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        // 자주 바뀌지 않는 라이브러리는 따로 묶어, 앱 코드만 바뀐 배포에서도 브라우저 캐시를 그대로 쓴다.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/](@codemirror|@lezer|crelt|style-mod|w3c-keyname)[\\/]/.test(id)) return 'editor';
+          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+          if (/[\\/]@tanstack[\\/]/.test(id)) return 'query';
+          if (/[\\/]zod[\\/]/.test(id)) return 'zod';
+        },
+      },
+    },
+  },
   server: {
     host: true,
     port: Number(process.env.WEB_PORT ?? 5173),

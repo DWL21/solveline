@@ -2,18 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProblemMode, TestCase, TestsetRef } from '@codetest/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
+import { newCase } from '../lib/blank.ts';
 
 export const MAX_CASES = 60;
 const MAX_HIDDEN = 200;
 const HIDDEN_SAVE_DELAY_MS = 500;
-
-export const newCase = (params: number, hidden = false): TestCase => ({
-  id: crypto.randomUUID().slice(0, 8),
-  args: Array.from({ length: params }, () => ''),
-  stdin: '',
-  expected: '',
-  hidden,
-});
 
 /** 매개변수 이름 입력: 쉼표로 구분. 타이핑 중 빈 칸을 지우지 않도록 로컬 텍스트를 따로 둔다. */
 function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: string[]) => void }) {

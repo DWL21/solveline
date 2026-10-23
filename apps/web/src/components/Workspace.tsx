@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { templateFor, type Language, type Problem, type ProblemInput, type ProblemMode, type TestCase } from '@codetest/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
-import { CasesEditor, MAX_CASES, newCase } from './CasesEditor.tsx';
+import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
+import { newCase } from '../lib/blank.ts';
 import { CodeEditor } from './CodeEditor.tsx';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
 import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
@@ -28,22 +29,6 @@ const toInput = (p: Problem): ProblemInput => ({
   code: p.code,
   lastSubmission: p.lastSubmission,
 });
-
-export function blankProblem(title: string, mode: ProblemMode, language: Language, folderId: string | null = null): ProblemInput {
-  const params = mode === 'function' ? ['numbers'] : [];
-  return {
-    title,
-    folderId,
-    description: '',
-    mode,
-    params,
-    timeLimitMs: 10_000,
-    cases: [newCase(params.length)],
-    language,
-    code: { java: templateFor('java', mode, params), python: templateFor('python', mode, params) },
-    lastSubmission: null,
-  };
-}
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const languageName = (l: Language) => (l === 'java' ? 'Java' : 'Python3');
