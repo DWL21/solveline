@@ -6,8 +6,9 @@ import { App } from './App.tsx';
 import { ApiError, qk } from './lib/api.ts';
 import './index.css';
 
-// 앱을 화면에 실제로 보이는 영역에 맞춘다: 화상 키보드·브라우저 도구 막대가 나타나고 사라지면 높이와 위치가 바뀐다.
-// 하단 실행 바가 키보드 바로 위·도구 막대 바로 위에 붙고, 아래에 빈 공간이 생기지 않는다.
+// 화상 키보드가 열리면 앱을 키보드 위 보이는 영역에 맞춘다(하단 바가 키보드 바로 위에 붙게).
+// 키보드가 닫혀 있으면 브라우저 영역 전체를 채운다: 브라우저마다(특히 iOS Chrome) 도구 막대가 접히고 펴질 때
+// visualViewport 높이가 실제 화면보다 짧게 잡혀 아래에 빈 공간이 생기기 때문이다.
 const vv = window.visualViewport;
 if (vv) {
   // 화상 키보드 열림: 지금까지 본 가장 큰 높이보다 150px 넘게 줄면 키보드로 본다(화면 회전 때 기준을 다시 잡는다)
@@ -16,12 +17,23 @@ if (vv) {
   const root = document.documentElement;
   const fit = () => {
     tallest = Math.max(tallest, vv.height);
-    if (vv.height < tallest - 150) root.dataset.keyboard = '';
-    else delete root.dataset.keyboard;
-    root.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
-    // iOS는 키보드가 올라오면 보이는 영역을 문서 아래쪽으로 옮긴다 → 앱을 그 위치에 따라 붙인다
-    root.style.setProperty('--app-top', `${Math.round(vv.offsetTop)}px`);
+    const keyboard = vv.height < tallest - 150;
+    if (keyboard) {
+      root.dataset.keyboard = '';
+      root.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+      // iOS는 키보드가 올라오면 보이는 영역을 아래로 옮긴다 → 앱을 그 위치에 따라 붙인다
+      root.style.setProperty('--app-top', `${Math.round(vv.offsetTop)}px`);
+    } else {
+      delete root.dataset.keyboard;
+      root.style.removeProperty('--app-h');
+      root.style.removeProperty('--app-top');
+      // 문서가 밀려 올라가 있으면(상단바가 잘려 보이면) 되돌린다
+      if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+    }
   };
+  window.addEventListener('scroll', () => {
+    if (!root.dataset.keyboard && (window.scrollX || window.scrollY)) window.scrollTo(0, 0);
+  });
   vv.addEventListener('resize', fit);
   vv.addEventListener('scroll', fit);
   fit();
