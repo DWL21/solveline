@@ -4,6 +4,7 @@ import type { Language, ProblemMode, Session } from '@codetest/shared';
 import { ApiError, api, qk } from './lib/api.ts';
 import { useRoute, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
+import { BootScreen, Spinner, WorkspaceSkeleton } from './components/Loading.tsx';
 import { Home, scopeList } from './components/Home.tsx';
 import { blankProblem } from './lib/blank.ts';
 
@@ -18,7 +19,7 @@ const prefetchWorkspace = () => {
 
 export function App() {
   const session = useQuery({ queryKey: qk.session, queryFn: api.session, staleTime: Infinity });
-  if (session.isPending) return <p className="p-6 text-[13px] text-dim">확인 중…</p>;
+  if (session.isPending) return <BootScreen />;
   if (session.isError)
     return (
       <div className="p-6 text-[13px]">
@@ -90,7 +91,7 @@ function Shell() {
       </header>
 
       {route.kind === 'problem' ? (
-        <Suspense fallback={<p className="p-6 text-[13px] text-dim">문제 화면을 불러오는 중…</p>}>
+        <Suspense fallback={<WorkspaceSkeleton />}>
         <Workspace
           problemId={route.id}
           onDeleted={() => go({ kind: 'home', scope: lastScope })}
@@ -212,7 +213,13 @@ function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose
             취소
           </button>
           <button type="submit" className="btn-primary" disabled={create.isPending}>
-            {create.isPending ? '만드는 중…' : '만들기'}
+            {create.isPending ? (
+              <>
+                <Spinner size={14} /> 만드는 중
+              </>
+            ) : (
+              '만들기'
+            )}
           </button>
         </div>
       </form>

@@ -1,3 +1,4 @@
+import { Spinner } from './Loading.tsx';
 import type { CaseResult, ProblemMode, RunResult, TestCase } from '@codetest/shared';
 
 export type RunState =
@@ -54,9 +55,16 @@ export function ResultPanel({ state }: { state: RunState }) {
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
   if (state.kind === 'running')
     return (
-      <p className="animate-pulse p-4 text-[13px] text-dim">
-        {state.ahead ? `대기 중… (앞에 ${state.ahead}개)` : state.submit ? '채점 중…' : '실행 중…'}
-      </p>
+      <div className="flex items-center gap-2.5 p-4 text-[13px] text-dim" role="status" aria-live="polite">
+        <Spinner size={16} className="text-accent" />
+        {state.ahead ? (
+          <span>
+            대기 중 <span className="text-faint">· 앞에 {state.ahead}개</span>
+          </span>
+        ) : (
+          <span>{state.submit ? '채점하는 중이에요' : '코드를 실행하는 중이에요'}</span>
+        )}
+      </div>
     );
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
   if (state.kind === 'cancelled') return <p className="p-4 text-[13px] font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;

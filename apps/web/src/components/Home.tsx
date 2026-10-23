@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@codetest/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { formatDuration } from '../lib/time.ts';
+import { ListSkeleton } from './Loading.tsx';
 import type { Scope } from '../lib/route.ts';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
@@ -57,7 +58,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
         </button>
       </div>
     );
-  if (!problems.data || !folders.data || !collections.data) return <p className="p-6 text-[13px] text-dim">불러오는 중…</p>;
+  if (!problems.data || !folders.data || !collections.data) return <ListSkeleton />;
 
   const all = problems.data;
   const folder = scope.kind === 'folder' && scope.id ? folders.data.find((f) => f.id === scope.id) : undefined;

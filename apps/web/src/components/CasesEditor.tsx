@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProblemMode, TestCase, TestsetRef } from '@codetest/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { newCase } from '../lib/blank.ts';
+import { LinesSkeleton, Spinner } from './Loading.tsx';
 
 export const MAX_CASES = 60;
 const MAX_HIDDEN = 200;
@@ -268,11 +269,13 @@ function HiddenCases({ problemId, mode, params, summary }: { problemId: string; 
           {open ? '접기' : count ? '펼쳐서 보기' : '추가하기'}
         </button>
         {open && state !== 'saved' && (
-          <span className={`text-[11.5px] ${state === 'error' ? 'text-bad' : 'text-faint'}`}>{state === 'error' ? '저장 실패' : '저장 중…'}</span>
+          <span className={`inline-flex items-center gap-1 text-[11.5px] ${state === 'error' ? 'text-bad' : 'text-faint'}`}>
+            {state === 'error' ? '저장 실패' : <><Spinner size={11} /> 저장 중</>}
+          </span>
         )}
       </div>
       {!open && count === 0 && <p className="py-2 text-[12.5px] text-faint">히든 케이스가 없으면 제출할 때 보이는 케이스로 채점해요.</p>}
-      {open && q.isPending && <p className="py-2 text-[12.5px] text-dim">불러오는 중…</p>}
+      {open && q.isPending && <LinesSkeleton />}
       {open && q.isError && <p className="py-2 text-[12.5px] text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>}
       {open && cases && (
         <div className="mt-1">

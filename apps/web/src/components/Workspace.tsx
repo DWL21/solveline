@@ -9,6 +9,7 @@ import { ResultPanel, type RunState } from './ResultPanel.tsx';
 import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
 import { SolvedDialog } from './SolvedDialog.tsx';
 import { DEFAULT_LAYOUT, Splitter, useLayout } from './Splitter.tsx';
+import { Spinner, WorkspaceSkeleton } from './Loading.tsx';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
@@ -36,7 +37,7 @@ const languageName = (l: Language) => (l === 'java' ? 'Java' : 'Python3');
 export function Workspace({ problemId, onDeleted, onNext, onList }: { problemId: string; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
   const q = useQuery({ queryKey: qk.problem(problemId), queryFn: () => api.problem(problemId), staleTime: Infinity });
 
-  if (q.isPending) return <p className="p-6 text-[13px] text-dim">불러오는 중…</p>;
+  if (q.isPending) return <WorkspaceSkeleton />;
   if (q.isError)
     return (
       <div className="p-6 text-[13px]">
@@ -401,14 +402,26 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
             <div className="ml-auto flex gap-2">
               {runMut.isPending && (
                 <button type="button" className="btn-ghost min-w-20 text-bad" disabled={stopping} onClick={() => void doStop()} title="실행·채점 중지">
-                  {stopping ? '중지 중…' : '■ 중지'}
+                  {stopping ? (
+                    <>
+                      <Spinner size={13} /> 중지 중
+                    </>
+                  ) : (
+                    '■ 중지'
+                  )}
                 </button>
               )}
               <button type="button" className="btn-ghost min-w-24" disabled={runMut.isPending} onClick={doRun} title="보이는 케이스로 실행 (⌘/Ctrl + Enter)">
                 코드 실행
               </button>
               <button type="button" className="btn-primary min-w-32" disabled={runMut.isPending} onClick={doSubmit} title={problem.hiddenTestset?.count ? `히든 케이스 ${problem.hiddenTestset.count}개로 채점` : '보이는 케이스로 채점'}>
-                {runMut.isPending ? (run.kind === 'running' && run.submit ? '채점 중…' : '실행 중…') : '제출 후 채점하기'}
+                {runMut.isPending ? (
+                  <>
+                    <Spinner size={14} /> {run.kind === 'running' && run.submit ? '채점 중' : '실행 중'}
+                  </>
+                ) : (
+                  '제출 후 채점하기'
+                )}
               </button>
             </div>
           </footer>
@@ -508,5 +521,9 @@ function SaveBadge({ state, onRetry }: { state: SaveState; onRetry: () => void }
         저장 실패 · 다시 시도
       </button>
     );
-  return <span className="text-[12px] text-faint">{state === 'saved' ? '저장됨' : '저장 중…'}</span>;
+  return (
+    <span className="inline-flex items-center gap-1 text-[12px] text-faint" aria-live="polite">
+      {state === 'saved' ? '✓ 저장됨' : <><Spinner size={11} /> 저장 중</>}
+    </span>
+  );
 }

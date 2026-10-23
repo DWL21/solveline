@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, qk } from '../lib/api.ts';
+import { Spinner } from './Loading.tsx';
 
 function loginMessage(e: unknown): string {
   if (e instanceof ApiError) {
@@ -61,7 +62,7 @@ export function LoginScreen() {
             />
           </label>
           <button type="submit" disabled={busy || !password} className="btn-primary mt-4 min-h-11 w-full text-[14px]">
-            {busy ? '확인 중…' : '로그인'}
+            {busy ? <Spinner size={16} label="로그인하는 중" /> : '로그인'}
           </button>
           {error && (
             <p role="alert" className="mt-3 rounded-md border border-bad/40 bg-bad/10 p-3 text-[13px] font-semibold text-bad">
