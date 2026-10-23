@@ -548,7 +548,7 @@ function SaveBadge({ state, onRetry }: { state: DraftState; onRetry: () => void 
     );
   return (
     <span className="inline-flex items-center gap-1 text-[12px] text-faint" aria-live="polite">
-      {state === 'saved' ? '✓ 저장됨' : state === 'local' ? '✓ 기기에 저장됨' : <><Spinner size={11} /> 동기화 중</>}
+      {state === 'saved' || state === 'local' ? '✓ 저장됨' : <><Spinner size={11} /> 동기화 중</>}
     </span>
   );
 }
