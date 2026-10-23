@@ -6,6 +6,7 @@ import { CasesEditor, MAX_CASES, newCase } from './CasesEditor.tsx';
 import { CodeEditor } from './CodeEditor.tsx';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
 import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
+import { SolvedDialog } from './SolvedDialog.tsx';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
@@ -46,7 +47,7 @@ export function blankProblem(title: string, mode: ProblemMode, language: Languag
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const languageName = (l: Language) => (l === 'java' ? 'Java' : 'Python3');
 
-export function Workspace({ problemId, onDeleted, onNext }: { problemId: string; onDeleted: () => void; onNext?: () => void }) {
+export function Workspace({ problemId, onDeleted, onNext, onList }: { problemId: string; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
   const q = useQuery({ queryKey: qk.problem(problemId), queryFn: () => api.problem(problemId), staleTime: Infinity });
 
   if (q.isPending) return <p className="p-6 text-[13px] text-dim">불러오는 중…</p>;
@@ -59,7 +60,7 @@ export function Workspace({ problemId, onDeleted, onNext }: { problemId: string;
         </button>
       </div>
     );
-  return <Editor key={problemId} problem={q.data} onDeleted={onDeleted} onNext={onNext} />;
+  return <Editor key={problemId} problem={q.data} onDeleted={onDeleted} onNext={onNext} onList={onList} />;
 }
 
 /** 실시간 저장: 짧은 지연 + 이탈 시 즉시. 요청은 순서대로 하나씩 보낸다. */
@@ -131,11 +132,12 @@ function useAutosave(problem: Problem, draft: ProblemInput) {
   return { state, markDirty, retry: () => (markDirty(), flush()) };
 }
 
-function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: () => void; onNext?: () => void }) {
+function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<ProblemInput>(() => toInput(problem));
   const save = useAutosave(problem, draft);
   const solve = useSolveTimer(problem);
+  const [solvedOpen, setSolvedOpen] = useState(false);
   const [tab, setTab] = useState<'desc' | 'cases'>(problem.description.trim() ? 'desc' : 'cases');
   const [editingDesc, setEditingDesc] = useState(false);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
@@ -194,7 +196,10 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
       if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
       if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs });
       setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
-      if (s.score === 100) solve.markSolved();
+      if (s.score === 100) {
+        solve.markSolved();
+        setSolvedOpen(true);
+      }
       // 점수는 서버가 기록한다 → 문제·목록을 다시 읽는다
       void qc.invalidateQueries({ queryKey: qk.problem(problem.id) });
       void qc.invalidateQueries({ queryKey: qk.problems });
@@ -301,6 +306,14 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
         </button>
       </div>
 
+      {solvedOpen && (
+        <SolvedDialog
+          solvedMs={solve.timer.solvedMs ?? solve.timer.elapsedMs}
+          onNext={onNext}
+          onList={onList}
+          onClose={() => setSolvedOpen(false)}
+        />
+      )}
       <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         {solve.timer.paused && solve.timer.solvedMs === null && <PausedOverlay elapsedMs={solve.timer.elapsedMs} onResume={solve.resume} />}
         {/* 왼쪽: 문제 설명 / 테스트 케이스 */}
@@ -363,7 +376,7 @@ function Editor({ problem, onDeleted, onNext }: { problem: Problem; onDeleted: (
           </div>
           <div className="pane-title border-t">{run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'}</div>
           <div className="min-h-[180px] flex-[2] overflow-y-auto bg-panel lg:min-h-0">
-            <ResultPanel state={run} onNext={onNext} />
+            <ResultPanel state={run} />
           </div>
           <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
             <button type="button" className="btn-ghost" onClick={reset}>

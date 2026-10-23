@@ -49,7 +49,7 @@ function Code({ children }: { children: React.ReactNode }) {
   return <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px] text-text">{children}</code>;
 }
 
-export function ResultPanel({ state, onNext }: { state: RunState; onNext?: () => void }) {
+export function ResultPanel({ state }: { state: RunState }) {
   if (state.kind === 'idle')
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
   if (state.kind === 'running')
@@ -61,7 +61,7 @@ export function ResultPanel({ state, onNext }: { state: RunState; onNext?: () =>
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
   if (state.kind === 'cancelled') return <p className="p-4 text-[13px] font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
   if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
-  if (state.kind === 'graded') return <Graded result={state.result} score={state.score} onNext={onNext} />;
+  if (state.kind === 'graded') return <Graded result={state.result} score={state.score} />;
 
   const { result, cases, mode, limitMs } = state;
 
@@ -149,7 +149,7 @@ const gradedLabel: Record<CaseResult['status'], string> = {
 };
 
 /** 기존 채점 결과 형식: 테스트별 통과/실패와 시간·메모리, 마지막에 점수 */
-function Graded({ result, score, onNext }: { result: RunResult; score: number; onNext?: () => void }) {
+function Graded({ result, score }: { result: RunResult; score: number }) {
   const passed = result.results.filter((r) => r.status === 'pass').length;
   return (
     <div className="p-4 font-mono text-[12.5px] leading-[1.9]">
@@ -184,18 +184,7 @@ function Graded({ result, score, onNext }: { result: RunResult; score: number; o
             ({result.results.length}개 중 {passed}개 통과)
           </span>
         </p>
-        {score === 100 && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-ok/40 bg-ok/10 px-3 py-2">
-            <span className="font-bold text-ok">✓ 정답입니다!</span>
-            {onNext ? (
-              <button type="button" className="btn-primary ml-auto" onClick={onNext} autoFocus>
-                다음 문제 →
-              </button>
-            ) : (
-              <span className="ml-auto text-[12px] text-faint">이 목록의 마지막 문제예요</span>
-            )}
-          </div>
-        )}
+        {score === 100 && <p className="mt-3 rounded-md border border-ok/40 bg-ok/10 px-3 py-2 font-bold text-ok">✓ 정답입니다!</p>}
       </div>
     </div>
   );

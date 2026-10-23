@@ -84,6 +84,7 @@ function Shell() {
           problemId={route.id}
           onDeleted={() => go({ kind: 'home', scope: lastScope })}
           onNext={nextId ? () => go({ kind: 'problem', id: nextId }) : undefined}
+          onList={() => go({ kind: 'home', scope: lastScope })}
         />
       ) : (
         <Home
