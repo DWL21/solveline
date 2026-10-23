@@ -3,7 +3,7 @@
 api만 이 서버를 호출한다. 서버는 root로 돌고, 사용자 코드는 항상 sandbox uid로
 낮춘 별도 프로세스 그룹에서 rlimit·시간 제한을 걸어 실행한다.
 서버에 남기는 capability(CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL)는 setuid 후 자식에 남지 않는다.
-Python 3.8 표준 라이브러리만 쓴다 (사용자 코드와 같은 인터프리터).
+Python 표준 라이브러리만 쓴다 (사용자 코드와 같은 인터프리터).
 """
 import hashlib
 import json
@@ -317,7 +317,7 @@ def prepare(lang, code, work, job=None):
     os.makedirs(os.path.join(work, "out"), exist_ok=True)
     if SANDBOX_UID >= 0:
         os.chown(os.path.join(work, "out"), SANDBOX_UID, SANDBOX_UID)
-    p = run_proc(["javac", "-J-Xmx384m", "-encoding", "UTF-8", "-nowarn", "-d", "out", "-cp", JAVA_HARNESS_CP, name],
+    p = run_proc(["javac", "-J-Xmx384m", "-encoding", "UTF-8", "-g:none", "-Xlint:deprecation", "-d", "out", "-cp", JAVA_HARNESS_CP, name],
                  work, timeout=COMPILE_TIMEOUT_S, job=job)
     if p.status != "ok":
         msg = p.stderr or p.stdout

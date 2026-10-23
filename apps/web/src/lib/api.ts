@@ -75,7 +75,6 @@ export const api = {
   signupPending: () => request(SignupPending, '/api/auth/signup'),
   signup: () => request(Session, '/api/auth/signup', json('POST', { agreeAge: true, agreeTerms: true, agreePrivacy: true })),
   signupCancel: () => request(z.object({ cancelled: z.boolean() }), '/api/auth/signup/cancel', json('POST')),
-  deleteAccount: () => request(z.object({ deleted: z.boolean() }), '/api/account', { method: 'DELETE' }),
   runtime: () => request(Runtime, '/api/runtime'),
   problems: () => request(z.array(ProblemSummary), '/api/problems'),
   problem: (id: string) => request(Problem, `/api/problems/${encodeURIComponent(id)}`),
@@ -115,6 +114,7 @@ export const adminApi = {
   setEditor: (id: string, editor: boolean) => request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}/role`, json('PUT', { editor })),
   setBlocked: (id: string, blocked: boolean, reason = '') =>
     request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}/block`, json('PUT', { blocked, reason })),
+  deleteUser: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   blocklist: () => request(z.array(BlockedEmail), '/api/admin/blocklist'),
   block: (email: string, reason: string) => request(z.array(BlockedEmail), '/api/admin/blocklist', json('POST', { email, reason })),
   unblock: (email: string) => request(z.array(BlockedEmail), `/api/admin/blocklist/${encodeURIComponent(email)}`, { method: 'DELETE' }),

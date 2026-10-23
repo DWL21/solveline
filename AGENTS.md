@@ -10,7 +10,7 @@
 |---|---|---|
 | `apps/api` | Hono REST API, Google 로그인·관리자 모드, 문제 저장(SQLite), 히든 테스트셋(해시 파일), 제출 큐·디스패처, 매일 백업 | Node 24 (Docker, pahidc) |
 | `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE | nginx (Docker, pahidc) — API와 같은 출처 |
-| `runner` | 코드 실행 서버(Python 3.8 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 17, Python 3.8) |
+| `runner` | 코드 실행 서버(Python 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 21.0.2, Python 3.13.13) |
 | `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
 | `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 이미지·nginx·배포 | pahidc |
 | `.github/workflows` | CI(`ci.yml`), 배포(`deploy.yml`) | GitHub-hosted / self-hosted(pahidc) |
@@ -59,7 +59,7 @@
 
 ## 기존 동등성
 
-- 기본 버전: **OpenJDK 17, Python 3.8** (`docker/runner.Dockerfile`의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자). 바꾸면 README와 이 문서를 같이 고친다.
+- 기본 버전: **OpenJDK 21.0.2, Python 3.13.13** (`docker/runner.Dockerfile`의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자). 바꾸면 README와 이 문서를 같이 고친다.
 - 함수형 문제: Java는 `class Solution`의 `solution(...)`, Python은 `solution(...)`을 테스트 케이스마다 새 프로세스로 한 번 호출한다. 결과는 타입까지 비교(bool≠int, 실수 1e-9 허용)한다.
 - 입출력형 문제: Java는 `static void main`이 있는 클래스, Python은 스크립트를 표준 입력과 함께 실행하고 줄 끝 공백을 무시해 비교한다.
 - 테스트 케이스당 10초, 제출 하나당 최대 600초, 히든 케이스 최대 200개. 채점은 비동기 큐라 Cloudflare 응답 제한과 무관하다.
@@ -87,7 +87,7 @@
 
 ## 코드 규칙
 
-- TypeScript strict. `any` 금지(불가피하면 이유 주석). runner는 Python 3.8 표준 라이브러리만.
+- TypeScript strict. `any` 금지(불가피하면 이유 주석). runner는 Python 표준 라이브러리만.
 - API 계약 변경 시 `packages/shared`의 스키마를 먼저 고치고 api·web을 함께 맞춘다.
 - 응답 형식: 성공 `{ data }`, 실패 `{ error: { code, message } }` + 적절한 4xx/5xx.
 - 사용자에게 보이는 문구는 한국어, 짧고 구체적으로.

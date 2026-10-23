@@ -2,8 +2,8 @@
   <b>Solveline</b> — 기존와 같은 Java·Python 코딩 테스트 연습 환경
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/Java-OpenJDK%2017-e76f00" alt="OpenJDK 17">
-  <img src="https://img.shields.io/badge/Python-3.8-3776ab" alt="Python 3.8">
+  <img src="https://img.shields.io/badge/Java-OpenJDK%2021-e76f00" alt="OpenJDK 21">
+  <img src="https://img.shields.io/badge/Python-3.13-3776ab" alt="Python 3.13">
   <img src="https://img.shields.io/badge/access-password%20only-21242e" alt="Password only">
 </p>
 
@@ -28,14 +28,14 @@
 * **실시간 저장**: 언어별 코드·내 케이스·메모를 입력 즉시(0.3초) 저장하고, 문제 전환·탭 닫기 때도 바로 저장.
 * **격리 실행**: 사용자 코드는 인터넷이 차단된 runner 컨테이너에서 권한을 낮춘 uid로 실행.
 * **Google 로그인**: 로그인과 회원가입 모두 Google 계정. 처음이면 약관 동의(만 14세 이상·이용약관·개인정보 수집·이용) 화면을 거친다.
-* **관리자 모드**(`/admin`): 마스터 비밀번호로만 연다. 사용자 목록·상세 현황을 보고, 편집 권한을 주거나 회수하고, 이용 정지·블랙리스트(이메일)를 관리한다.
+* **관리자 모드**(`/admin`): 마스터 비밀번호로만 연다. 사용자 목록·상세 현황을 보고, 편집 권한을 주거나 회수하고, 이용 정지·블랙리스트(이메일)·사용자 삭제를 관리한다.
 
 ## 실행 환경
 
 | | 버전 | 실행 |
 |---|---|---|
-| Java | OpenJDK 17 (Temurin) | `javac -encoding UTF-8` → `java -Xmx512m -XX:+UseSerialGC` |
-| Python3 | CPython 3.8 | `python3` (재귀 제한 등 기본값 그대로) |
+| Java | OpenJDK 21.0.2 (Temurin) | `javac -encoding UTF-8 -g:none -Xlint:deprecation` → `java -Xmx512m -XX:+UseSerialGC` |
+| Python3 | Python 3.13.13 | `python3` (재귀 제한 등 기본값 그대로) |
 
 버전은 [`docker/runner.Dockerfile`](docker/runner.Dockerfile)의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자로 바꿀 수 있습니다.
 기존는 공식 버전 표를 공개하지 않아, 기존에서 `System.getProperty("java.version")` / `sys.version`을 출력해 확인한 뒤 맞추세요.
@@ -100,11 +100,11 @@ $ pnpm dev
 | `GET` `POST` | `/api/auth/signup` | 가입 대기 중인 Google 계정 / 약관 동의 후 가입 |
 | `GET` | `/api/auth/session` | 세션 상태와 로그인한 계정(편집 권한 포함) |
 | `POST` | `/api/auth/logout` | 로그아웃 |
-| `DELETE` | `/api/account` | 회원 탈퇴(내 풀이 기록 모두 삭제) |
 | `GET` | `/api/public/config` | 공개 설정(문의 이메일, 약관 버전) |
 | `POST` | `/api/admin/login` | 관리자 모드(마스터 비밀번호) |
 | `GET` | `/api/admin/users`, `/api/admin/users/{id}` | 사용자 목록 / 상세 현황 |
 | `PUT` | `/api/admin/users/{id}/role`, `/api/admin/users/{id}/block` | 편집 권한 주기·회수 / 이용 정지·해제 |
+| `DELETE` | `/api/admin/users/{id}` | 사용자 삭제(풀이 기록 모두 삭제) |
 | `GET` `POST` `DELETE` | `/api/admin/blocklist` | 블랙리스트(이메일) |
 | `GET` | `/api/runtime` | runner 상태와 Java·Python 버전 |
 | `GET` `POST` | `/api/problems` | 문제 목록 / 만들기 |
@@ -126,7 +126,7 @@ $ pnpm dev
 |---|---|
 | Web | React 19 · Vite · TypeScript · Tailwind CSS v4 · TanStack Query · CodeMirror 6 |
 | API | Hono · Node 24 · SQLite |
-| Runner | Python 3.8 표준 라이브러리 HTTP 서버 · OpenJDK 17 |
+| Runner | Python 표준 라이브러리 HTTP 서버 · OpenJDK 21 |
 | 계약 | Zod (`packages/shared`) |
 | 배포 | Docker Compose on pahidc (nginx + api + runner) · Cloudflare Tunnel · GitHub Actions |
 

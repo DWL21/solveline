@@ -46,7 +46,7 @@ function setup(env: Record<string, string> = {}) {
         results: cases.map((c) => ({ status: c.expected === '"fail"' ? ('fail' as const) : ('pass' as const), actual: '1', stdout: '', stderr: '', timeMs: 1, memoryMb: 10 })),
       };
     },
-    runtime: async () => ({ runner: 'up' as const, versions: { java: '17', python: '3.8' } }),
+    runtime: async () => ({ runner: 'up' as const, versions: { java: '21.0.2', python: '3.13.13' } }),
     cancel: async (jobId: string) => {
       held.get(jobId)?.();
       return true;
@@ -277,21 +277,10 @@ describe('공용 문제·사용자별 풀이', () => {
     expect((await O('GET', '/api/problems/old')).body.data.code.java).toBe('내 풀이');
     expect((await O('GET', '/api/problems/old')).body.data.lastSubmission.score).toBe(100);
     expect((await O('GET', '/api/collections')).body.data.map((c: { name: string }) => c.name)).toEqual(['모의고사']);
-    expect((await O('GET', '/api/auth/session')).body.data.user.editor).toBe(true);
-    expect((await U('GET', '/api/auth/session')).body.data.user.editor).toBe(false);
+    expect((await O('GET', '/api/auth/session')).body.data.user).toMatchObject({ editor: true, owner: true });
+    expect((await U('GET', '/api/auth/session')).body.data.user).toMatchObject({ editor: false, owner: false });
   });
 
-  it('탈퇴하면 계정과 내 데이터가 지워지고 세션도 끝난다(공용 문제는 남는다)', async () => {
-    const s = setup();
-    const cookie = await login(s);
-    const E = as(s, cookie);
-    await E('POST', '/api/problems', problem);
-    expect((await E('DELETE', '/api/account')).status).toBe(200);
-    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
-    expect((s.db.prepare('SELECT COUNT(*) AS n FROM problems').get() as { n: number }).n).toBe(1);
-    expect((s.db.prepare('SELECT COUNT(*) AS n FROM user_problems').get() as { n: number }).n).toBe(0);
-    expect((await googleRoundTrip(s, OWNER)).location).toBe('/signup');
-  });
 });
 
 describe('관리자 모드(마스터 비밀번호)', () => {
@@ -326,6 +315,18 @@ describe('관리자 모드(마스터 비밀번호)', () => {
     const detail = (await A('GET', `/api/admin/users/${u.id}`)).body.data;
     expect(detail.termsVersion).toBeTruthy();
     expect(detail.recentSubmissions).toEqual([]);
+  });
+
+  it('사용자를 삭제하면 계정·풀이 기록·세션이 지워진다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    const cookie = await login(s, 'user@example.com');
+    const A = as(s, await masterLogin(s));
+    const id = ((await A('GET', '/api/admin/users')).body.data as { id: string }[])[0]!.id;
+    expect((await A('DELETE', `/api/admin/users/${id}`)).status).toBe(200);
+    expect((await A('GET', '/api/admin/users')).body.data).toEqual([]);
+    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
+    expect((await A('DELETE', `/api/admin/users/${id}`)).status).toBe(404);
+    expect((await googleRoundTrip(s, 'user@example.com')).location).toBe('/signup');
   });
 
   it('사용자를 정지하면 블랙리스트에 올라 바로 막히고, 해제하면 다시 들어온다', async () => {

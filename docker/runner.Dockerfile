@@ -1,6 +1,6 @@
 # 코드 실행 환경. 기존와 같은 계열의 버전을 빌드 인자로 고정한다.
-ARG PYTHON_VERSION=3.8
-ARG JAVA_VERSION=17
+ARG PYTHON_VERSION=3.13.13
+ARG JAVA_VERSION=21.0.2_13
 FROM eclipse-temurin:${JAVA_VERSION}-jdk AS jdk
 
 FROM python:${PYTHON_VERSION}-slim-bookworm

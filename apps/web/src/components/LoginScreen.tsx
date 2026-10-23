@@ -33,9 +33,6 @@ export function LoginScreen() {
       <a href="/" className="absolute top-3 left-4 text-[12px] text-faint hover:text-dim">
         ← 문제 둘러보기
       </a>
-      <a href="/admin" className="absolute top-3 right-4 text-[11.5px] text-faint/60 hover:text-faint">
-        관리자 모드
-      </a>
       <div className="flex flex-1 items-center justify-center px-4 py-10">
         <main className="w-full max-w-sm">
           <div className="mb-6 flex items-center gap-2.5">

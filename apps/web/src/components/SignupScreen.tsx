@@ -4,6 +4,7 @@ import { ApiError, api, qk } from '../lib/api.ts';
 import { BootScreen, Spinner } from './Loading.tsx';
 import { LegalFooter } from './Legal.tsx';
 import { startGoogleLogin } from './LoginScreen.tsx';
+import { Avatar } from './Avatar.tsx';
 
 type Agree = { age: boolean; terms: boolean; privacy: boolean };
 
@@ -61,11 +62,7 @@ export function SignupScreen() {
             ) : (
               <>
                 <div className="mt-4 flex items-center gap-3 rounded-lg border border-line bg-base/60 p-3">
-                  {pending.data.picture ? (
-                    <img src={pending.data.picture} alt="" className="size-9 rounded-full" referrerPolicy="no-referrer" />
-                  ) : (
-                    <span className="flex size-9 items-center justify-center rounded-full bg-raised text-[14px] font-bold">{pending.data.email[0]?.toUpperCase()}</span>
-                  )}
+                  <Avatar picture={pending.data.picture} email={pending.data.email} size={36} />
                   <div className="min-w-0">
                     <p className="truncate text-[14px] font-semibold">{pending.data.name || pending.data.email}</p>
                     <p className="truncate text-[12.5px] text-dim">{pending.data.email}</p>
@@ -101,7 +98,7 @@ export function SignupScreen() {
                     </tr>
                     <tr>
                       <th>보유 기간</th>
-                      <td>회원 탈퇴 시까지</td>
+                      <td>탈퇴할 때까지</td>
                     </tr>
                   </tbody>
                 </table>

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminSession, AdminUser, AdminUserDetail } from '@codetest/shared';
 import { ApiError, adminApi, qk } from '../lib/api.ts';
 import { formatDuration } from '../lib/time.ts';
+import { Avatar } from './Avatar.tsx';
 import { BootScreen, LinesSkeleton, ListSkeleton, Spinner } from './Loading.tsx';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
@@ -113,7 +114,7 @@ function Dashboard() {
         {tab === 'users' ? (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <UserList selected={selected} onSelect={setSelected} />
-            {selected ? <UserDetail id={selected} /> : <p className="hidden py-16 text-center text-[13px] text-faint lg:block">사용자를 고르세요</p>}
+            {selected ? <UserDetail id={selected} onDeleted={() => setSelected(null)} /> : <p className="hidden py-16 text-center text-[13px] text-faint lg:block">사용자를 고르세요</p>}
           </div>
         ) : (
           <Blocklist />
@@ -146,7 +147,7 @@ function UserList({ selected, onSelect }: { selected: string | null; onSelect: (
               onClick={() => onSelect(u.id)}
               className={`flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-raised ${selected === u.id ? 'bg-raised' : ''}`}
             >
-              <Avatar user={u} />
+              <Avatar picture={u.picture} email={u.email} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13.5px] font-semibold">{u.name || u.email}</span>
                 <span className="block truncate text-[12px] text-dim">{u.email}</span>
@@ -164,14 +165,6 @@ function UserList({ selected, onSelect }: { selected: string | null; onSelect: (
   );
 }
 
-function Avatar({ user }: { user: Pick<AdminUser, 'picture' | 'email'> }) {
-  return user.picture ? (
-    <img src={user.picture} alt="" className="size-8 shrink-0 rounded-full" referrerPolicy="no-referrer" />
-  ) : (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-raised text-[13px] font-bold">{user.email[0]?.toUpperCase()}</span>
-  );
-}
-
 function Badges({ user }: { user: AdminUser }) {
   return (
     <span className="flex shrink-0 gap-1">
@@ -181,7 +174,7 @@ function Badges({ user }: { user: AdminUser }) {
   );
 }
 
-function UserDetail({ id }: { id: string }) {
+function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   const qc = useQueryClient();
   const d = useQuery({ queryKey: qk.adminUser(id), queryFn: () => adminApi.user(id) });
   const done = (u: AdminUserDetail) => {
@@ -196,6 +189,16 @@ function UserDetail({ id }: { id: string }) {
     onError: (e) => alert(errMsg(e)),
   });
 
+  const remove = useMutation({
+    mutationFn: () => adminApi.deleteUser(id),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: qk.adminUser(id) });
+      void qc.invalidateQueries({ queryKey: qk.adminUsers });
+      onDeleted();
+    },
+    onError: (e) => alert(errMsg(e)),
+  });
+
   if (d.isPending)
     return (
       <section className="rounded-lg border border-line bg-panel p-4">
@@ -204,11 +207,11 @@ function UserDetail({ id }: { id: string }) {
     );
   if (d.isError) return <p className="text-[13px] text-bad">{errMsg(d.error)}</p>;
   const u = d.data;
-  const busy = role.isPending || block.isPending;
+  const busy = role.isPending || block.isPending || remove.isPending;
   return (
     <section className="rounded-lg border border-line bg-panel p-4">
       <div className="flex items-center gap-3">
-        <Avatar user={u} />
+        <Avatar picture={u.picture} email={u.email} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-bold">{u.name || u.email}</p>
           <p className="truncate text-[12.5px] text-dim">{u.email}</p>
@@ -256,6 +259,14 @@ function UserDetail({ id }: { id: string }) {
             이용 정지
           </button>
         )}
+        <button
+          type="button"
+          className="btn-quiet ml-auto text-[12px] text-faint hover:text-bad"
+          disabled={busy}
+          onClick={() => confirm(`${u.email} 사용자를 삭제할까요? 작성 코드·메모·제출 기록이 모두 지워지고 되돌릴 수 없어요.`) && remove.mutate()}
+        >
+          사용자 삭제
+        </button>
       </div>
 
       <h2 className="mt-5 mb-2 text-[13px] font-bold">풀이 현황 {u.problems.length}</h2>
