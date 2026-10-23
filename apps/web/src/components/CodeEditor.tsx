@@ -12,7 +12,7 @@ import {
   lineNumbers,
   rectangularSelection,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { cursorCharLeft, cursorCharRight, defaultKeymap, history, historyKeymap, indentLess, indentMore, indentWithTab, redo, undo } from '@codemirror/commands';
 import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
@@ -57,6 +57,26 @@ const editorSetup: Extension = [
   keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
 ];
 
+/** 휴대폰 키보드의 자동 대문자·자동 수정·맞춤법 검사를 끈다(코드가 바뀌지 않게). */
+const touchFriendly: Extension = [
+  EditorView.contentAttributes.of({ autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', autocomplete: 'off', 'aria-label': '코드 에디터' }),
+];
+
+/** 바깥(모바일 코딩 키 막대)에서 에디터를 다루는 손잡이 */
+export type EditorHandle = {
+  /** 커서 자리에 글자를 넣는다. 여는 괄호·따옴표는 짝을 함께 넣고 커서를 가운데 둔다. */
+  insert: (text: string) => void;
+  tab: () => void;
+  outdent: () => void;
+  undo: () => void;
+  redo: () => void;
+  left: () => void;
+  right: () => void;
+  focus: () => void;
+};
+
+const PAIRS: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'" };
+
 /** 바깥 값으로 문서를 바꾼 트랜잭션. 사용자의 편집이 아니므로 onChange를 부르지 않는다. */
 const external = Annotation.define<boolean>();
 
@@ -68,8 +88,14 @@ export function CodeEditor({
   onChange,
   onRun,
   readOnly = false,
+  handle,
+  visible = true,
 }: {
   readOnly?: boolean;
+  /** 코딩 키 막대가 쓰는 손잡이 */
+  handle?: { current: EditorHandle | null };
+  /** 탭 전환으로 다시 보일 때 크기를 다시 잰다 */
+  visible?: boolean;
   docKey: string;
   value: string;
   language: Language;
@@ -98,6 +124,7 @@ export function CodeEditor({
           lang.current.of(langExt(language)),
           oneDark,
           navy,
+          touchFriendly,
           EditorView.updateListener.of((u) => {
             if (u.docChanged && !u.transactions.some((t) => t.annotation(external))) cb.current.onChange(u.state.doc.toString());
           }),
@@ -105,7 +132,40 @@ export function CodeEditor({
       }),
     });
     view.current = v;
-    return () => v.destroy();
+    if (handle) {
+      const run = (cmd: (target: EditorView) => boolean) => () => {
+        cmd(v);
+        v.focus();
+      };
+      handle.current = {
+        insert: (text) => {
+          const close = PAIRS[text];
+          const sel = v.state.selection.main;
+          if (close && sel.empty) {
+            v.dispatch({ changes: { from: sel.from, insert: text + close }, selection: { anchor: sel.from + text.length }, userEvent: 'input' });
+          } else {
+            v.dispatch({ ...v.state.replaceSelection(text), userEvent: 'input' });
+          }
+          v.focus();
+        },
+        // 선택이 없으면 커서 자리에 들여쓰기 단위(공백 4칸)를, 있으면 줄 들여쓰기. 탭 문자는 넣지 않는다(Python 혼용 오류 방지).
+        tab: run((t) => {
+          if (!t.state.selection.main.empty) return indentMore(t);
+          t.dispatch({ ...t.state.replaceSelection(t.state.facet(indentUnit)), userEvent: 'input' });
+          return true;
+        }),
+        outdent: run(indentLess),
+        undo: run(undo),
+        redo: run(redo),
+        left: run(cursorCharLeft),
+        right: run(cursorCharRight),
+        focus: () => v.focus(),
+      };
+    }
+    return () => {
+      if (handle) handle.current = null;
+      v.destroy();
+    };
     // 최초 1회만 만든다. 이후 변경은 아래 effect가 반영한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -123,5 +183,9 @@ export function CodeEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
 
-  return <div ref={host} className="h-full min-h-0 overflow-hidden" />;
+  useEffect(() => {
+    if (visible) view.current?.requestMeasure();
+  }, [visible]);
+
+  return <div ref={host} className="code-editor h-full min-h-0 overflow-hidden" />;
 }

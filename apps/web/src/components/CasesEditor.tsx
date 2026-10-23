@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProblemMode, TestCase, TestsetRef } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { newCase } from '../lib/blank.ts';
+import { useNarrow } from '../lib/media.ts';
 import { LinesSkeleton, Spinner } from './Loading.tsx';
 
 export const MAX_CASES = 60;
@@ -70,13 +71,47 @@ function CaseList({
   readOnly?: boolean;
   onChange: (c: TestCase[]) => void;
 }) {
+  const narrow = useNarrow();
   const update = (id: string, patch: Partial<TestCase>) => onChange(cases.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const remove = (id: string) => onChange(cases.filter((c) => c.id !== id));
   const del = (n: number, id: string) =>
     readOnly ? null : (
-    <button type="button" className="btn-quiet min-h-7 px-1.5" aria-label={`${label} ${n} 삭제`} onClick={() => remove(id)}>
+    <button type="button" className="btn-quiet touch-target min-h-7 px-1.5" aria-label={`${label} ${n} 삭제`} onClick={() => remove(id)}>
       ✕
     </button>
+    );
+  // 휴대폰 폭: 표 대신 케이스마다 카드로 쌓는다(가로 스크롤 없이)
+  if (mode === 'function' && narrow)
+    return (
+      <div className="flex flex-col gap-2">
+        {cases.map((c, i) => (
+          <div key={c.id} className="rounded-md border border-line bg-base/50 p-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <b className="text-[12.5px] text-dim">
+                {label} {i + 1}
+              </b>
+              {del(i + 1, c.id)}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {params.map((p, j) => (
+                <label key={p} className="flex flex-col gap-1">
+                  <span className="font-mono text-[11.5px] text-faint">{p}</span>
+                  <Field
+                    readOnly={readOnly}
+                    value={c.args[j] ?? ''}
+                    label={`${label} ${i + 1} ${p}`}
+                    onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
+                  />
+                </label>
+              ))}
+              <label className="flex flex-col gap-1">
+                <span className="text-[11.5px] text-faint">기댓값 (return)</span>
+                <Field readOnly={readOnly} value={c.expected} label={`${label} ${i + 1} 기댓값`} onChange={(v) => update(c.id, { expected: v })} />
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
     );
   if (mode === 'function')
     return (

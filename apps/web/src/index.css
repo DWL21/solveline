@@ -22,10 +22,42 @@
   --color-warn: #f5b94a;
 }
 
+/* --app-h: 화상 키보드를 뺀 실제 보이는 높이(main.tsx가 visualViewport로 갱신). 없으면 동적 뷰포트 높이. */
 html,
-body,
-#root {
+body {
   height: 100%;
+  overscroll-behavior: none;
+}
+#root {
+  height: var(--app-h, 100dvh);
+}
+
+/* 안전 영역(노치·홈 막대) */
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* 터치 기기: 누르기 쉬운 크기, 탭 하이라이트 제거 */
+@media (pointer: coarse) {
+  button,
+  a,
+  select,
+  input,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+  .touch-target {
+    min-height: 40px;
+  }
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 body {
@@ -193,5 +225,13 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .skeleton {
     animation: none;
+  }
+}
+
+/* 터치 기기의 코드 에디터: 글자를 키워 손가락으로 커서를 잡기 쉽게 */
+@media (pointer: coarse) {
+  .code-editor .cm-content,
+  .code-editor .cm-gutters {
+    font-size: 15px;
   }
 }

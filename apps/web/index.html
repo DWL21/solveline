@@ -2,8 +2,16 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#1e2a38" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- iOS Safari는 16px보다 작은 입력칸에 초점이 가면 화면을 확대한다. iOS에서만 자동 확대를 막는다(손가락 확대는 그대로 된다). -->
+    <script>
+      if (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+        document.querySelector('meta[name=viewport]').content += ', maximum-scale=1';
+      }
+    </script>
+    <meta name="theme-color" content="#0f1922" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <title>Solveline</title>

@@ -104,7 +104,7 @@ export function Splitter({
       onPointerCancel={stop}
       onDoubleClick={() => onChange(defaultValue)}
       onKeyDown={onKeyDown}
-      className={`group relative z-10 hidden shrink-0 outline-none lg:block ${vertical ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize'} ${
+      className={`group relative z-10 hidden shrink-0 outline-none md:block ${vertical ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize'} ${
         dragging ? 'bg-accent' : 'bg-line hover:bg-accent/70 focus-visible:bg-accent'
       }`}
     />

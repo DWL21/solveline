@@ -30,7 +30,7 @@ function Detail({ id, onClose, onPickProblem }: { id: string; onClose: () => voi
           <h2 className="text-[15px] font-bold">{item?.problemTitle ?? '제출 상세'}</h2>
           {item && <p className="mt-1 text-[12px] text-dim">{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'} · {statusText(item)}</p>}
         </div>
-        <button type="button" className="btn-quiet" onClick={onClose} aria-label="상세 닫기">닫기</button>
+        <button type="button" className="btn-quiet touch-target shrink-0" onClick={onClose} aria-label="상세 닫기"><span className="lg:hidden">← 목록</span><span className="hidden lg:inline">닫기</span></button>
       </div>
       {query.isPending ? <p className="p-4 text-[13px] text-dim">불러오는 중이에요…</p> : query.isError ? (
         <div className="p-4 text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></div>
@@ -69,12 +69,13 @@ export function SubmissionHistoryPage({ onPickProblem }: { onPickProblem: (id: s
   });
   if (!me) return <div className="p-6 text-[13px]">제출 기록은 로그인 후 볼 수 있어요. <a className="text-accent underline" href={loginHref()}>로그인</a></div>;
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+    <main className="pb-safe min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
         <h1 className="text-[19px] font-bold">제출 기록</h1>
         <p className="mt-1 text-[12px] text-dim">제출한 코드와 채점 결과를 확인할 수 있어요. 완료된 기록은 30일 후 정리돼요.</p>
         <div className="mt-5 flex flex-col gap-4 lg:flex-row">
-          <section className="w-full shrink-0 lg:w-80" aria-label="제출 목록">
+          {/* 좁은 화면: 제출을 고르면 목록 대신 상세를 크게 보여 준다 */}
+          <section className={`w-full shrink-0 lg:block lg:w-80 ${selected ? 'hidden' : ''}`} aria-label="제출 목록">
             {query.isPending ? <p className="text-[13px] text-dim">불러오는 중이에요…</p> : query.isError ? (
               <p className="text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></p>
             ) : query.data.items.length === 0 && offset === 0 ? <p className="rounded-lg border border-line bg-panel p-5 text-[13px] text-dim">아직 제출한 내역이 없어요.</p> : (
@@ -94,7 +95,7 @@ export function SubmissionHistoryPage({ onPickProblem }: { onPickProblem: (id: s
               </>
             )}
           </section>
-          {selected ? <Detail key={selected} id={selected} onClose={() => setSelected(null)} onPickProblem={onPickProblem} /> : <div className="flex min-h-40 flex-1 items-center justify-center rounded-lg border border-line bg-panel p-4 text-[13px] text-faint">제출을 선택하면 당시 코드와 채점 결과를 볼 수 있어요.</div>}
+          {selected ? <Detail key={selected} id={selected} onClose={() => setSelected(null)} onPickProblem={onPickProblem} /> : <div className="hidden min-h-40 flex-1 items-center justify-center rounded-lg border border-line bg-panel p-4 text-[13px] text-faint lg:flex">제출을 선택하면 당시 코드와 채점 결과를 볼 수 있어요.</div>}
         </div>
       </div>
     </main>

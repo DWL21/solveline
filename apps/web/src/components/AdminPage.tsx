@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminUser, AdminUserDetail } from '@solveline/shared';
 import { ApiError, adminApi, qk } from '../lib/api.ts';
 import { formatDuration } from '../lib/time.ts';
+import { useMediaQuery } from '../lib/media.ts';
 import { Avatar } from './Avatar.tsx';
 import { BootScreen, LinesSkeleton, ListSkeleton, Spinner } from './Loading.tsx';
 
@@ -70,6 +71,7 @@ function AdminLogin() {
 }
 
 function Dashboard() {
+  const wide = useMediaQuery('(min-width: 1024px)');
   const qc = useQueryClient();
   const [tab, setTab] = useState<'users' | 'signup'>('users');
   const [selected, setSelected] = useState<string | null>(null);
@@ -110,11 +112,25 @@ function Dashboard() {
           나가기
         </button>
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+      <main className="pb-safe mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         {tab === 'users' ? (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <UserList selected={selected} onSelect={setSelected} />
-            {selected ? <UserDetail id={selected} onDeleted={() => setSelected(null)} /> : <p className="hidden py-16 text-center text-[13px] text-faint lg:block">사용자를 고르세요</p>}
+            {/* 좁은 화면: 목록과 상세를 번갈아 보여 준다 */}
+            <div className={selected && !wide ? 'hidden' : ''}>
+              <UserList selected={selected} onSelect={setSelected} />
+            </div>
+            {selected ? (
+              <div>
+                {!wide && (
+                  <button type="button" className="btn-quiet touch-target mb-2 px-1 text-[13px]" onClick={() => setSelected(null)}>
+                    ← 사용자 목록
+                  </button>
+                )}
+                <UserDetail id={selected} onDeleted={() => setSelected(null)} />
+              </div>
+            ) : (
+              <p className="hidden py-16 text-center text-[13px] text-faint lg:block">사용자를 고르세요</p>
+            )}
           </div>
         ) : (
           <SignupControl />

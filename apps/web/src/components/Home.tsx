@@ -81,7 +81,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const title = effective.kind === 'all' ? '전체 문제' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (collection?.name ?? '');
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <Sidebar
         scope={effective}
         onScope={onScope}
@@ -178,6 +178,7 @@ function Sidebar({
   collections: Collection[];
 }) {
   const me = useMe();
+  const [creating, setCreating] = useState(false);
   const scopes: ScopeItem[] = [
     { scope: { kind: 'all' }, label: '전체', count: total, group: 'all', key: 'all' },
     ...folders.map((f): ScopeItem => ({ scope: { kind: 'folder', id: f.id }, label: f.name, count: folderCount(f.id), group: 'folder', key: 'f' + f.id })),
@@ -206,8 +207,9 @@ function Sidebar({
 
   return (
     <>
-      {/* 모바일: 범위 선택 드롭다운 */}
-      <div className="border-b border-line bg-base px-4 py-2 lg:hidden">
+      {/* 휴대폰: 범위 선택 드롭다운 + 폴더·컬렉션 만들기 */}
+      <div className="border-b border-line bg-base px-4 py-2 md:hidden">
+        <div className="flex gap-2">
         <select
           aria-label="보기 범위"
           value={current}
@@ -215,7 +217,7 @@ function Sidebar({
             const s = scopes.find((x) => x.key === e.target.value);
             if (s) onScope(s.scope);
           }}
-          className="h-9 w-full rounded-md border border-line-strong bg-raised px-2 text-[13px] font-semibold outline-none"
+          className="h-10 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-[14px] font-semibold outline-none"
         >
           {scopes.map((s) => (
             <option key={s.key} value={s.key}>
@@ -224,8 +226,23 @@ function Sidebar({
             </option>
           ))}
         </select>
+        {me && (
+          <button
+            type="button"
+            className="btn-ghost h-10 w-10 shrink-0 px-0 text-[18px]"
+            aria-expanded={creating}
+            aria-label="폴더·컬렉션 만들기"
+            onClick={() => setCreating((v) => !v)}
+          >
+            {creating ? '×' : '+'}
+          </button>
+        )}
+        </div>
+        {creating && me && (
+          <QuickCreate editor={me.editor} onDone={() => setCreating(false)} />
+        )}
       </div>
-      <aside className="hidden w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-base px-3 py-4 lg:flex">
+      <aside className="hidden w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-base px-3 py-4 md:flex">
         <ul>{scopes.filter((s) => s.group === 'all').map(item)}</ul>
         <section>
           <SectionHeader kind="folder" />
@@ -239,6 +256,65 @@ function Sidebar({
         )}
       </aside>
     </>
+  );
+}
+
+/** 휴대폰: 컬렉션(누구나)·폴더(편집 권한)를 바로 만든다 */
+function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }) {
+  const qc = useQueryClient();
+  const [kind, setKind] = useState<'collection' | 'folder'>('collection');
+  const [name, setName] = useState('');
+  const create = useMutation({
+    mutationFn: async (): Promise<unknown> => (kind === 'folder' ? api.createFolder(name.trim()) : api.createCollection({ name: name.trim(), description: '' })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: kind === 'folder' ? qk.folders : qk.collections });
+      setName('');
+      onDone();
+    },
+  });
+  return (
+    <form
+      className="mt-2 flex flex-col gap-2 rounded-lg border border-line bg-panel p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (name.trim()) create.mutate();
+      }}
+    >
+      {editor && (
+        <div className="grid grid-cols-2 gap-1 rounded-md bg-base p-1" role="radiogroup" aria-label="만들 항목">
+          {(
+            [
+              ['collection', '◆ 내 컬렉션'],
+              ['folder', '▤ 폴더'],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={kind === k}
+              onClick={() => setKind(k)}
+              className={`h-9 rounded text-[13px] font-semibold ${kind === k ? 'bg-raised text-text' : 'text-dim'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input
+          className="field h-10 min-w-0 flex-1 font-sans text-[14px]"
+          placeholder={kind === 'folder' ? '새 폴더 이름' : '새 컬렉션 이름'}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+        />
+        <button type="submit" className="btn-primary h-10 shrink-0" disabled={!name.trim() || create.isPending}>
+          만들기
+        </button>
+      </div>
+      {create.isError && <p className="text-[12px] text-bad">{errMsg(create.error)}</p>}
+    </form>
   );
 }
 
@@ -269,7 +345,7 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
         {canAdd && (
         <button
           type="button"
-          className="rounded px-1.5 text-[15px] leading-6 text-faint hover:bg-raised hover:text-text"
+          className="touch-target rounded px-1.5 text-[15px] leading-6 text-faint hover:bg-raised hover:text-text"
           aria-label={`새 ${label}`}
           title={`새 ${label}`}
           onClick={() => setOpen((v) => !v)}

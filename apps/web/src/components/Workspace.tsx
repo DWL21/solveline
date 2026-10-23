@@ -4,7 +4,9 @@ import { type Language, type Problem, type ProblemInput, type ProblemMode, type 
 import { ApiError, api, qk } from '../lib/api.ts';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';
-import { CodeEditor } from './CodeEditor.tsx';
+import { CodeEditor, type EditorHandle } from './CodeEditor.tsx';
+import { CodeKeys } from './CodeKeys.tsx';
+import { useNarrow } from '../lib/media.ts';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
 import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
 import { SolvedDialog } from './SolvedDialog.tsx';
@@ -71,6 +73,23 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const [editing, setEditing] = useState(false);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [resets, setResets] = useState(0);
+  // 휴대폰 폭: 문제·코드·결과를 탭으로 나눠 한 번에 하나만 크게 보여 준다
+  const narrow = useNarrow();
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
+  const [pane, setPaneState] = useState<'problem' | 'code' | 'result'>('problem');
+  const paneRef = useRef(pane);
+  const [unseen, setUnseen] = useState(false);
+  const setPane = useCallback((p: 'problem' | 'code' | 'result') => {
+    paneRef.current = p;
+    setPaneState(p);
+    if (p === 'result') setUnseen(false);
+  }, []);
+  /** 결과를 보여 줄 때: 휴대폰이면 결과 탭으로 */
+  const showResult = useCallback(() => {
+    if (narrowRef.current) setPane('result');
+  }, [setPane]);
+  const editorHandle = useRef<EditorHandle | null>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
@@ -122,8 +141,12 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     onSettled: () => {
       current.current = { id: null, wake: () => {}, stopping: false };
       setStopping(false);
+      if (narrowRef.current && paneRef.current !== 'result') setUnseen(true);
     },
-    onMutate: ({ submit }) => setRun({ kind: 'running', submit, ahead: null }),
+    onMutate: ({ submit }) => {
+      setRun({ kind: 'running', submit, ahead: null });
+      showResult();
+    },
     onSuccess: (s, { cases, submit }) => {
       if (s.status === 'cancelled') {
         if (submit || !s.result) return setRun({ kind: 'cancelled', submit });
@@ -166,10 +189,11 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     if (cases.length === 0) {
       setTab('cases');
       setRun({ kind: 'error', message: '실행할 테스트 케이스가 없어요. 케이스를 추가하세요.' });
+      showResult();
       return;
     }
     runMut.mutate({ cases, submit: false });
-  }, [runMut]);
+  }, [runMut, showResult]);
 
   /** 제출 후 채점: 서버의 히든 테스트셋으로. 히든이 없으면 보이는 케이스로(기댓값 필요). */
   const doSubmit = useCallback(() => {
@@ -178,10 +202,11 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     if (!problem.hiddenTestset?.count && (cases.length === 0 || cases.some((c) => !c.expected.trim()))) {
       setTab('cases');
       setRun({ kind: 'error', message: '채점하려면 히든 케이스나 기댓값이 있는 테스트 케이스가 필요해요.' });
+      showResult();
       return;
     }
     runMut.mutate({ cases, submit: true });
-  }, [runMut, problem.hiddenTestset]);
+  }, [runMut, problem.hiddenTestset, showResult]);
 
   const delMut = useMutation({
     mutationFn: () => api.deleteProblem(problem.id),
@@ -206,13 +231,70 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     patch({ starterCode: { ...starter, [lang]: code } });
   };
 
+  /** 하단 실행 바. 휴대폰에서는 탭과 상관없이 늘 보이게 화면 맨 아래에 둔다. */
+  const footer = (
+guest ? (
+            <footer className="pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
+              <a href={loginHref()} className={`btn-primary touch-target ${narrow ? 'w-full' : 'ml-auto min-w-32'}`}>
+                로그인하기
+              </a>
+            </footer>
+          ) : (
+          <footer className={`pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4 ${narrow ? '' : 'flex-wrap'}`}>
+            <button type="button" className="btn-ghost touch-target" onClick={reset} aria-label="초기화" title="시작 코드로 되돌리기">
+              {narrow ? '↺' : '초기화'}
+            </button>
+            <button
+              type="button"
+              className={`btn-ghost touch-target ${narrow ? 'hidden' : ''}`}
+              onClick={() => {
+                setTab('cases');
+                if (draft.myCases.length < MAX_CASES) patch({ myCases: [...draft.myCases, newCase(draft.params.length)] });
+              }}
+            >
+              테스트 케이스 추가하기
+            </button>
+            {editing && !narrow && (
+              <button type="button" className="btn-quiet text-[12px]" onClick={saveAsStarter} title="모든 사용자의 시작 코드가 바뀌어요">
+                시작 코드로 저장
+              </button>
+            )}
+            <div className={`ml-auto flex gap-2 ${narrow ? 'flex-1 justify-end' : ''}`}>
+              {runMut.isPending && (
+                <button type="button" className="btn-ghost touch-target min-w-20 text-bad" disabled={stopping} onClick={() => void doStop()} title="실행·채점 중지">
+                  {stopping ? (
+                    <>
+                      <Spinner size={13} /> 중지 중
+                    </>
+                  ) : (
+                    '■ 중지'
+                  )}
+                </button>
+              )}
+              <button type="button" className={`btn-ghost touch-target ${narrow ? 'flex-1' : 'min-w-24'}`} disabled={runMut.isPending} onClick={doRun} title="보이는 케이스로 실행 (⌘/Ctrl + Enter)">
+                코드 실행
+              </button>
+              <button type="button" className={`btn-primary touch-target ${narrow ? 'flex-[1.4]' : 'min-w-32'}`} disabled={runMut.isPending} onClick={doSubmit} title={problem.hiddenTestset?.count ? `히든 케이스 ${problem.hiddenTestset.count}개로 채점` : '보이는 케이스로 채점'}>
+                {runMut.isPending ? (
+                  <>
+                    <Spinner size={14} /> {run.kind === 'running' && run.submit ? '채점 중' : '실행 중'}
+                  </>
+                ) : (
+                  narrow ? '제출 후 채점' : '제출 후 채점하기'
+                )}
+              </button>
+            </div>
+          </footer>
+          )
+  );
+
   const visibleCount = draft.cases.filter((c) => !c.hidden).length + draft.myCases.length;
   const sub = problem.lastSubmission;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* 문제 제목 줄 */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-base px-3 py-2 sm:px-4">
+      <div className={`flex items-center gap-2 border-b border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'flex-wrap gap-y-1.5' : 'flex-wrap'}`}>
         {editing ? (
           <input
             value={draft.title}
@@ -224,6 +306,8 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-[15px] font-bold">{draft.title}</h1>
         )}
         {!guest && <SaveBadge state={saveState} onRetry={() => void queue?.flush(problem.id)} />}
+        {/* 휴대폰: 도구는 한 줄로 두고 가로로 밀어서 본다 */}
+        <div className={narrow ? 'no-scrollbar -mx-3 flex w-[calc(100%+1.5rem)] shrink-0 items-center gap-2 overflow-x-auto px-3 whitespace-nowrap' : 'contents'}>
         {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
@@ -241,6 +325,11 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           <option value="java">Java</option>
           <option value="python">Python3</option>
         </select>
+        {editing && narrow && (
+          <button type="button" className="btn-quiet px-2 text-[12px]" onClick={saveAsStarter}>
+            시작 코드로 저장
+          </button>
+        )}
         {editing && (
           <button
             type="button"
@@ -266,9 +355,33 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
             {editing ? '편집 끝내기' : '편집 모드'}
           </button>
         )}
+        </div>
       </div>
       {editing && (
         <p className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-[12px] text-warn">편집 모드 · 바꾼 내용은 모든 사용자에게 적용돼요</p>
+      )}
+
+      {narrow && (
+        <nav className="grid shrink-0 grid-cols-3 border-b border-line bg-base" aria-label="문제 화면">
+          {(
+            [
+              ['problem', '문제'],
+              ['code', '코드'],
+              ['result', run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'],
+            ] as const
+          ).map(([p, label]) => (
+            <button
+              key={p}
+              type="button"
+              aria-pressed={pane === p}
+              onClick={() => setPane(p)}
+              className={`relative h-11 border-b-2 text-[13.5px] font-semibold ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
+            >
+              {label}
+              {p === 'result' && (runMut.isPending ? <Spinner size={11} /> : unseen && <span className="absolute top-3 ml-1 inline-block size-1.5 rounded-full bg-accent" aria-label="새 결과" />)}
+            </button>
+          ))}
+        </nav>
       )}
 
       {solvedOpen && (
@@ -279,17 +392,19 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           onClose={() => setSolvedOpen(false)}
         />
       )}
-      <div ref={rowRef} className="relative flex min-h-0 flex-1 flex-col lg:flex-row" style={{ '--left': `${layout.leftPct}%` } as React.CSSProperties}>
+      <div ref={rowRef} className="relative flex min-h-0 flex-1 flex-col md:flex-row" style={{ '--left': `${layout.leftPct}%` } as React.CSSProperties}>
         {solve.timer.paused && solve.timer.solvedMs === null && <PausedOverlay elapsedMs={solve.timer.elapsedMs} onResume={solve.resume} />}
         {/* 왼쪽: 문제 설명 / 테스트 케이스 */}
-        <section className="flex min-h-[260px] flex-col lg:w-(--left) lg:min-w-[280px] lg:shrink-0">
+        <section
+          className={narrow ? (pane === 'problem' ? 'flex min-h-0 flex-1 flex-col' : 'hidden') : 'flex min-h-[260px] flex-col md:w-(--left) md:min-w-[280px] md:shrink-0'}
+        >
           <div className="pane-title gap-0 px-1">
             {(guest ? (['desc', 'cases'] as const) : (['desc', 'cases', 'memo'] as const)).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
-                className={`h-full border-b-2 px-3 ${tab === t ? 'border-accent text-text' : 'border-transparent hover:text-text'}`}
+                className={`h-full shrink-0 border-b-2 px-3 ${tab === t ? 'border-accent text-text' : 'border-transparent hover:text-text'}`}
               >
                 {t === 'desc' ? '문제 설명' : t === 'cases' ? `테스트 케이스 ${visibleCount}` : draft.memo.trim() ? '메모 •' : '메모'}
               </button>
@@ -354,13 +469,19 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
         />
 
         {/* 오른쪽: 에디터 + 실행 결과 */}
-        <section ref={rightRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="pane-title">
-            <span>solution.{lang === 'java' ? 'java' : 'py'}</span>
+        <section ref={rightRef} className={narrow && pane === 'problem' ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'}>
+          {!narrow && (
+            <div className="pane-title">
+              <span>solution.{lang === 'java' ? 'java' : 'py'}</span>
+            </div>
+          )}
+          <div
+            className={narrow ? (pane === 'code' ? 'min-h-0 flex-1' : 'hidden') : 'min-h-[300px] md:min-h-0'}
+            style={narrow ? undefined : { flex: `${layout.editorPct} 1 0` }}
+          >
+            <CodeEditor handle={editorHandle} visible={!narrow || pane === 'code'} readOnly={guest} docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
           </div>
-          <div className="min-h-[300px] lg:min-h-0" style={{ flex: `${layout.editorPct} 1 0` }}>
-            <CodeEditor readOnly={guest} docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
-          </div>
+          {!narrow && (
           <Splitter
             direction="horizontal"
             container={rightRef}
@@ -369,65 +490,19 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
             label="에디터·실행 결과 높이"
             onChange={(v) => setLayout('editorPct', v)}
           />
-          <div className="pane-title">{run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'}</div>
-          <div className="min-h-[180px] overflow-y-auto bg-panel lg:min-h-0" style={{ flex: `${100 - layout.editorPct} 1 0` }}>
+          )}
+          {!narrow && <div className="pane-title">{run.kind === 'graded' || (run.kind === 'running' && run.submit) ? '채점 결과' : '실행 결과'}</div>}
+          <div
+            className={narrow ? (pane === 'result' ? 'min-h-0 flex-1 overflow-y-auto bg-panel' : 'hidden') : 'min-h-[180px] overflow-y-auto bg-panel md:min-h-0'}
+            style={narrow ? undefined : { flex: `${100 - layout.editorPct} 1 0` }}
+          >
             <ResultPanel state={run} />
           </div>
-          {guest ? (
-            <footer className="flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
-              <a href={loginHref()} className="btn-primary ml-auto min-w-32">
-                로그인하기
-              </a>
-            </footer>
-          ) : (
-          <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
-            <button type="button" className="btn-ghost" onClick={reset}>
-              초기화
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => {
-                setTab('cases');
-                if (draft.myCases.length < MAX_CASES) patch({ myCases: [...draft.myCases, newCase(draft.params.length)] });
-              }}
-            >
-              테스트 케이스 추가하기
-            </button>
-            {editing && (
-              <button type="button" className="btn-quiet text-[12px]" onClick={saveAsStarter} title="모든 사용자의 시작 코드가 바뀌어요">
-                시작 코드로 저장
-              </button>
-            )}
-            <div className="ml-auto flex gap-2">
-              {runMut.isPending && (
-                <button type="button" className="btn-ghost min-w-20 text-bad" disabled={stopping} onClick={() => void doStop()} title="실행·채점 중지">
-                  {stopping ? (
-                    <>
-                      <Spinner size={13} /> 중지 중
-                    </>
-                  ) : (
-                    '■ 중지'
-                  )}
-                </button>
-              )}
-              <button type="button" className="btn-ghost min-w-24" disabled={runMut.isPending} onClick={doRun} title="보이는 케이스로 실행 (⌘/Ctrl + Enter)">
-                코드 실행
-              </button>
-              <button type="button" className="btn-primary min-w-32" disabled={runMut.isPending} onClick={doSubmit} title={problem.hiddenTestset?.count ? `히든 케이스 ${problem.hiddenTestset.count}개로 채점` : '보이는 케이스로 채점'}>
-                {runMut.isPending ? (
-                  <>
-                    <Spinner size={14} /> {run.kind === 'running' && run.submit ? '채점 중' : '실행 중'}
-                  </>
-                ) : (
-                  '제출 후 채점하기'
-                )}
-              </button>
-            </div>
-          </footer>
-          )}
+          {narrow && pane === 'code' && !guest && <CodeKeys editor={editorHandle} />}
+          {!narrow && footer}
         </section>
       </div>
+      {narrow && footer}
     </div>
   );
 }
