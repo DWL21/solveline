@@ -235,7 +235,6 @@ function Sidebar({
         <section>
           <SectionHeader kind="collection" />
           <ul>{scopes.filter((s) => s.group === 'collection').map(item)}</ul>
-          {collections.length === 0 && <p className="px-2.5 text-[12px] text-faint">문제를 옮기지 않고 세트로 묶어요</p>}
         </section>
         )}
       </aside>
