@@ -10,7 +10,7 @@ const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 �
 const day = (iso: string) => new Date(iso).toLocaleDateString('ko-KR');
 const time = (iso: string) => new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 
-/** 관리자 모드: 마스터 비밀번호로만 연다. 사용자에게 편집 권한을 주고, 이용을 정지(블랙리스트)한다. */
+/** 관리자 모드: 마스터 비밀번호로만 연다. 사용자에게 편집 권한을 주고, 신규 가입 허용 여부를 관리한다. */
 export function AdminPage() {
   const session = useQuery({ queryKey: qk.admin, queryFn: adminApi.session, staleTime: Infinity, retry: false });
   if (session.isPending) return <BootScreen />;
@@ -71,7 +71,7 @@ function AdminLogin() {
 
 function Dashboard() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'users' | 'blocklist'>('users');
+  const [tab, setTab] = useState<'users' | 'signup'>('users');
   const [selected, setSelected] = useState<string | null>(null);
   const logout = useMutation({
     mutationFn: adminApi.logout,
@@ -83,24 +83,24 @@ function Dashboard() {
   });
   return (
     <div className="flex min-h-full flex-col bg-ink">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-[#0f1922] px-4">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 border-b border-line bg-[#0f1922] px-4 sm:h-12 sm:flex-nowrap">
         <a href="/" className="flex items-center gap-2">
           <img src="/icon.svg" alt="" className="size-6" />
           <span className="text-[15px] font-extrabold tracking-tight">Solveline</span>
         </a>
-        <span className="rounded bg-warn/15 px-2 py-0.5 text-[11.5px] font-bold text-warn">관리자 모드</span>
-        <nav className="ml-4 flex h-full gap-1">
+        <span className="shrink-0 whitespace-nowrap rounded bg-warn/15 px-2 py-0.5 text-[11.5px] font-bold text-warn">관리자 모드</span>
+        <nav className="order-last flex h-10 w-full gap-1 sm:order-none sm:ml-4 sm:h-full sm:w-auto">
           {(
             [
               ['users', '사용자'],
-              ['blocklist', '블랙리스트'],
+              ['signup', '신규 가입'],
             ] as const
           ).map(([t, label]) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`h-full border-b-2 px-3 text-[13px] font-semibold ${tab === t ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`}
+              className={`h-full whitespace-nowrap border-b-2 px-3 text-[13px] font-semibold ${tab === t ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`}
             >
               {label}
             </button>
@@ -117,7 +117,7 @@ function Dashboard() {
             {selected ? <UserDetail id={selected} onDeleted={() => setSelected(null)} /> : <p className="hidden py-16 text-center text-[13px] text-faint lg:block">사용자를 고르세요</p>}
           </div>
         ) : (
-          <Blocklist />
+          <SignupControl />
         )}
       </main>
     </div>
@@ -169,7 +169,6 @@ function Badges({ user }: { user: AdminUser }) {
   return (
     <span className="flex shrink-0 gap-1">
       {user.editor && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-bold text-accent">편집</span>}
-      {user.blocked && <span className="rounded bg-bad/15 px-1.5 py-0.5 text-[11px] font-bold text-bad">정지</span>}
     </span>
   );
 }
@@ -180,15 +179,8 @@ function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   const done = (u: AdminUserDetail) => {
     qc.setQueryData(qk.adminUser(id), u);
     void qc.invalidateQueries({ queryKey: qk.adminUsers });
-    void qc.invalidateQueries({ queryKey: qk.blocklist });
   };
   const role = useMutation({ mutationFn: (editor: boolean) => adminApi.setEditor(id, editor), onSuccess: done, onError: (e) => alert(errMsg(e)) });
-  const block = useMutation({
-    mutationFn: ({ blocked, reason }: { blocked: boolean; reason?: string }) => adminApi.setBlocked(id, blocked, reason),
-    onSuccess: done,
-    onError: (e) => alert(errMsg(e)),
-  });
-
   const remove = useMutation({
     mutationFn: () => adminApi.deleteUser(id),
     onSuccess: () => {
@@ -207,7 +199,7 @@ function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
     );
   if (d.isError) return <p className="text-[13px] text-bad">{errMsg(d.error)}</p>;
   const u = d.data;
-  const busy = role.isPending || block.isPending || remove.isPending;
+  const busy = role.isPending || remove.isPending;
   return (
     <section className="rounded-lg border border-line bg-panel p-4">
       <div className="flex items-center gap-3">
@@ -242,23 +234,6 @@ function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
         <button type="button" className={u.editor ? 'btn-ghost' : 'btn-primary'} disabled={busy} onClick={() => role.mutate(!u.editor)}>
           {u.editor ? '편집 권한 회수' : '편집 권한 주기'}
         </button>
-        {u.blocked ? (
-          <button type="button" className="btn-ghost" disabled={busy} onClick={() => block.mutate({ blocked: false })}>
-            정지 해제
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn-ghost text-bad"
-            disabled={busy}
-            onClick={() => {
-              const reason = prompt(`${u.email} 계정을 정지할까요? 사유(선택)`);
-              if (reason !== null) block.mutate({ blocked: true, reason });
-            }}
-          >
-            이용 정지
-          </button>
-        )}
         <button
           type="button"
           className="btn-quiet ml-auto text-[12px] text-faint hover:text-bad"
@@ -318,68 +293,36 @@ function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   );
 }
 
-function Blocklist() {
+function SignupControl() {
   const qc = useQueryClient();
-  const list = useQuery({ queryKey: qk.blocklist, queryFn: adminApi.blocklist });
-  const [email, setEmail] = useState('');
-  const [reason, setReason] = useState('');
-  const refresh = (data: unknown) => {
-    qc.setQueryData(qk.blocklist, data);
-    void qc.invalidateQueries({ queryKey: qk.adminUsers });
-    void qc.invalidateQueries({ queryKey: ['admin', 'user'] });
-  };
-  const add = useMutation({
-    mutationFn: () => adminApi.block(email.trim(), reason.trim()),
-    onSuccess: (d) => {
-      refresh(d);
-      setEmail('');
-      setReason('');
+  const settings = useQuery({ queryKey: qk.signupSettings, queryFn: adminApi.signupSettings, refetchOnWindowFocus: true });
+  const save = useMutation({
+    mutationFn: adminApi.setSignupEnabled,
+    onSuccess: (data) => {
+      qc.setQueryData(qk.signupSettings, data);
+      void qc.invalidateQueries({ queryKey: qk.publicConfig });
     },
   });
-  const remove = useMutation({ mutationFn: adminApi.unblock, onSuccess: refresh, onError: (e) => alert(errMsg(e)) });
+  if (settings.isPending) return <LinesSkeleton />;
+  if (settings.isError) return <p role="alert" className="text-[13px] text-bad">{errMsg(settings.error)}</p>;
+  const enabled = settings.data.signupEnabled;
   return (
-    <section className="max-w-3xl">
-      <h1 className="mb-3 text-[16px] font-bold">
-        블랙리스트 <span className="text-faint">{list.data?.length ?? ''}</span>
-      </h1>
-      <form
-        className="mb-4 flex flex-wrap gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (email.trim()) add.mutate();
-        }}
+    <section className="max-w-xl rounded-lg border border-line bg-panel p-5">
+      <h1 className="text-[16px] font-bold">신규 가입</h1>
+      <p role="status" className={`mt-4 font-semibold ${enabled ? 'text-ok' : 'text-warn'}`}>
+        {enabled ? '✓ 신규 가입 허용 중' : '✗ 신규 가입 중지 중'}
+      </p>
+      <p className="mt-2 text-[13px] text-dim">중지하면 새 계정을 만들 수 없어요. 가입 절차를 진행 중인 계정에도 적용돼요. 기존 회원은 계속 로그인하고 이용할 수 있어요.</p>
+      <button
+        type="button"
+        className="btn-primary mt-5"
+        disabled={save.isPending}
+        onClick={() => save.mutate(!enabled)}
       >
-        <input className="field w-64 font-sans" type="email" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="차단할 이메일" required />
-        <input className="field min-w-40 flex-1 font-sans" placeholder="사유 (선택)" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="사유" />
-        <button type="submit" className="btn-primary" disabled={add.isPending}>
-          차단
-        </button>
-      </form>
-      {add.isError && <p className="mb-3 text-[13px] text-bad">{errMsg(add.error)}</p>}
-      {list.isPending ? (
-        <ListSkeleton />
-      ) : list.isError ? (
-        <p className="text-[13px] text-bad">{errMsg(list.error)}</p>
-      ) : list.data.length === 0 ? (
-        <p className="py-10 text-center text-[13px] text-faint">차단한 이메일이 없어요</p>
-      ) : (
-        <ul className="overflow-hidden rounded-lg border border-line bg-panel">
-          {list.data.map((b) => (
-            <li key={b.email} className="flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-0">
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13.5px] font-semibold">{b.email}</span>
-                <span className="block truncate text-[12px] text-dim">
-                  {day(b.createdAt)}
-                  {b.reason && ` · ${b.reason}`}
-                </span>
-              </span>
-              <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" disabled={remove.isPending} onClick={() => remove.mutate(b.email)}>
-                해제
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        {save.isPending ? '저장 중…' : enabled ? '신규 가입 중지' : '신규 가입 허용'}
+      </button>
+      {save.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(save.error)}</p>}
+      {save.isSuccess && <p role="status" className="mt-3 text-[13px] text-dim">설정을 저장했어요.</p>}
     </section>
   );
 }

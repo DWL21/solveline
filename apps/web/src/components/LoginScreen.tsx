@@ -1,8 +1,10 @@
+import { useQuery } from '@tanstack/react-query';
+import { api, qk } from '../lib/api.ts';
 import { LegalFooter } from './Legal.tsx';
 
 const AUTH_ERRORS: Record<string, string> = {
   cancelled: 'Google 로그인을 취소했어요',
-  blocked: '이용이 제한된 계정이에요',
+  signup_closed: '신규 가입이 중지되어 있어요. 기존 회원은 로그인할 수 있어요',
   rate_limited: '시도가 너무 많아요. 잠시 후 다시 하세요',
   invalid_state: '로그인 시간이 지났어요. 다시 시도하세요',
   google_error: 'Google 로그인에 실패했어요. 다시 시도하세요',
@@ -27,6 +29,7 @@ export function GoogleMark() {
 }
 
 export function LoginScreen() {
+  const config = useQuery({ queryKey: qk.publicConfig, queryFn: api.publicConfig, refetchOnWindowFocus: true });
   const error = new URLSearchParams(location.search).get('auth_error');
   return (
     <div className="relative flex min-h-full flex-col bg-ink">
@@ -48,12 +51,14 @@ export function LoginScreen() {
             >
               <GoogleMark /> Google로 로그인
             </button>
-            <p className="mt-4 text-center text-[12.5px] text-dim">
-              처음이신가요?{' '}
-              <button type="button" className="font-semibold text-accent hover:underline" onClick={startGoogleLogin}>
-                Google로 회원가입
-              </button>
-            </p>
+            {config.data?.signupEnabled === false ? (
+              <p className="mt-4 text-center text-[12.5px] text-dim">신규 가입이 중지되어 있어요. 기존 회원은 로그인할 수 있어요.</p>
+            ) : (
+              <p className="mt-4 text-center text-[12.5px] text-dim">
+                처음이신가요?{' '}
+                <button type="button" className="font-semibold text-accent hover:underline" onClick={startGoogleLogin}>Google로 회원가입</button>
+              </p>
+            )}
             {error && (
               <p role="alert" className="mt-4 rounded-md border border-bad/40 bg-bad/10 p-3 text-[13px] font-semibold text-bad">
                 {AUTH_ERRORS[error] ?? '로그인하지 못했어요'}

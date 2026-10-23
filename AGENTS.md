@@ -80,8 +80,8 @@
 - **회원**: Google 로그인(Authorization Code + PKCE). 새 계정은 `/signup`에서 필수 동의(만 14세 이상·이용약관·개인정보 수집·이용) 후 가입. 세션은 SQLite + 서명 쿠키(HttpOnly·Secure·SameSite=Lax).
 - **편집 권한**(`users.role = editor`): 문제 추가·수정·삭제, 채점 케이스(보이는·히든), 시작 코드, 폴더. 바꾸면 모든 사용자에게 적용된다. 운영자(`OWNER_EMAIL`)는 가입할 때 편집 권한을 받고 비밀번호 시절의 풀이 기록(`legacy_state`)을 넘겨받는다.
 - **사용자별 데이터**: 작성 코드·언어·내 테스트 케이스·메모·풀이 시간·마지막 제출(`user_problems`), 컬렉션, 제출 기록. 탈퇴하면 CASCADE로 지운다.
-- **관리자 모드**(`/admin`): 마스터 비밀번호 `ACCESS_PASSWORD`로만 연다(상수 시간 비교, IP별 분당 5회·전체 시간당 60회, 12시간짜리 서명 쿠키). 사용자 목록·상세, 편집 권한 부여·회수, 이용 정지·블랙리스트.
-- **블랙리스트**(`blocked_emails`): 등록된 이메일은 가입·로그인할 수 없고, 로그인돼 있던 세션도 바로 끊긴다.
+- **관리자 모드**(`/admin`): 마스터 비밀번호 `ACCESS_PASSWORD`로만 연다(상수 시간 비교, IP별 분당 5회·전체 시간당 60회, 12시간짜리 서명 쿠키). 사용자 목록·상세, 편집 권한 부여·회수, 신규 가입 전체 허용·중지.
+- **신규 가입 제어**(`signup_settings`): 기본값은 허용. 마스터가 전체 중지하면 가입 대기 계정을 포함한 신규 가입만 막고, 기존 회원 로그인·세션은 유지한다. 설정은 DB에 저장한다. 이메일 블랙리스트는 사용하지 않는다.
 
 비밀 값(`ACCESS_PASSWORD`, `SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`)은 GitHub Environment `production` secret에만 두고 코드·이슈·PR·로그·Actions 출력에 남기지 않는다. 계약은 `packages/shared/src/index.ts`.
 

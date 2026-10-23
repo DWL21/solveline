@@ -27,9 +27,7 @@ import {
   AdminSession,
   AdminUser,
   AdminUserDetail,
-  BlockedEmail,
-  BlockedEmailInput,
-  BlockInput,
+  SignupSettings,
   CodeSet,
   RoleInput,
   SignupPending,
@@ -38,7 +36,7 @@ import {
   PRIVACY_VERSION,
 } from '@solveline/shared';
 import type { Config } from './config.ts';
-import { BlocklistStore, CollectionStore, FolderStore, ProblemStore, StoreError, UserStore, type Db, type GoogleProfile } from './db.ts';
+import { SignupSettingsStore, CollectionStore, FolderStore, ProblemStore, StoreError, UserStore, type Db, type GoogleProfile } from './db.ts';
 import { passwordMatches } from './auth/password.ts';
 import { challengeOf, GoogleAuthError, googleClient, newVerifier, type GoogleClient } from './auth/google.ts';
 import { RateLimiter } from './auth/rate-limit.ts';
@@ -123,7 +121,7 @@ export function createApp(deps: AppDeps) {
   const folders = new FolderStore(db);
   const collections = new CollectionStore(db);
   const users = new UserStore(db);
-  const blocklist = new BlocklistStore(db);
+  const signupSettings = new SignupSettingsStore(db);
   const google = deps.google !== undefined ? deps.google : config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null;
   const redirectUri = `${config.webOrigin}/api/auth/google/callback`;
   // 로그인 왕복 남용 방지: IP별 분당 20회
@@ -188,6 +186,7 @@ export function createApp(deps: AppDeps) {
   app.get('/api/public/config', (c) =>
     ok(c, PublicConfig, {
       googleEnabled: !!google,
+      signupEnabled: signupSettings.enabled(),
       contactEmail: config.contactEmail,
       termsVersion: TERMS_VERSION,
       privacyVersion: PRIVACY_VERSION,
@@ -230,11 +229,6 @@ export function createApp(deps: AppDeps) {
       log.warn(`[auth] Google 인증 실패: ${e instanceof GoogleAuthError ? e.message : String(e)}`);
       return back('google_error');
     }
-    if (blocklist.has(profile.email)) {
-      log.warn('[auth] 블랙리스트 계정의 로그인 시도');
-      return back('blocked');
-    }
-
     const user = users.byGoogleSub(profile.sub);
     if (user) {
       users.touch(user.id, profile);
@@ -243,6 +237,7 @@ export function createApp(deps: AppDeps) {
       log.info(`[auth] 로그인 user=${user.id}`);
       return c.redirect(flow.next, 302);
     }
+    if (!signupSettings.enabled()) return back('signup_closed');
     // 새 사용자: 약관 동의 화면으로. Google 프로필은 서명한 쿠키에 잠시 둔다.
     await setSignedCookie(c, SIGNUP_COOKIE, encode({ profile, next: flow.next, exp: now() + FLOW_TTL_S * 1000 }), config.sessionSecret, flowCookie);
     return c.redirect('/signup', 302);
@@ -254,6 +249,7 @@ export function createApp(deps: AppDeps) {
   };
 
   app.get('/api/auth/signup', async (c) => {
+    if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
     const p = await readPending(c);
     if (!p) return fail(c, 404, 'no_pending_signup', '가입 대기 중인 Google 계정이 없습니다. 다시 시도하세요.');
     return ok(c, SignupPending, { email: p.profile.email, name: p.profile.name, picture: p.profile.picture });
@@ -264,7 +260,8 @@ export function createApp(deps: AppDeps) {
     if (!p) return fail(c, 404, 'no_pending_signup', '가입 대기 중인 Google 계정이 없습니다. 다시 시도하세요.');
     const body = await readJson(c, SignupRequest);
     if (!body) return fail(c, 400, 'consent_required', '필수 항목에 모두 동의해야 가입할 수 있습니다.');
-    if (blocklist.has(p.profile.email)) return fail(c, 403, 'blocked', '이용이 제한된 계정입니다.');
+    // 본문을 읽는 동안 설정이 바뀔 수 있으므로 계정 생성 직전에 다시 검사한다.
+    if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
     // 운영자는 처음부터 편집 권한을 갖는다(공용 문제를 만들어 온 계정)
     const user = users.create(p.profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: isOwner(p.profile.email) });
     claimIfOwner(user.id, p.profile.email);
@@ -351,18 +348,6 @@ export function createApp(deps: AppDeps) {
     return ok(c, AdminUserDetail, users.detail(c.req.param('id'))!);
   });
 
-  /** 이용 정지·해제: 그 사용자의 이메일을 블랙리스트에 넣거나 뺀다 */
-  app.put('/api/admin/users/:id/block', async (c) => {
-    const body = await readJson(c, BlockInput);
-    if (!body) return fail(c, 400, 'invalid_request', 'blocked 값이 필요합니다.');
-    const u = users.byId(c.req.param('id'));
-    if (!u) return fail(c, 404, 'not_found', '없는 사용자입니다.');
-    if (body.blocked) blocklist.add(u.email, body.reason);
-    else blocklist.remove(u.email);
-    log.info(`[admin] 이용 ${body.blocked ? '정지' : '정지 해제'} user=${u.id}`);
-    return ok(c, AdminUserDetail, users.detail(u.id)!);
-  });
-
   /** 사용자 삭제: 계정과 작성 코드·컬렉션·제출 기록·세션을 모두 지운다(공용 문제는 남는다) */
   app.delete('/api/admin/users/:id', (c) => {
     if (!users.delete(c.req.param('id'))) return fail(c, 404, 'not_found', '없는 사용자입니다.');
@@ -370,20 +355,14 @@ export function createApp(deps: AppDeps) {
     return c.json({ data: { deleted: true } });
   });
 
-  app.get('/api/admin/blocklist', (c) => ok(c, z.array(BlockedEmail), blocklist.list()));
+  app.get('/api/admin/signup-settings', (c) => ok(c, SignupSettings, { signupEnabled: signupSettings.enabled() }));
 
-  app.post('/api/admin/blocklist', async (c) => {
-    const body = await readJson(c, BlockedEmailInput);
-    if (!body) return fail(c, 400, 'invalid_request', '올바른 이메일이 필요합니다.');
-    blocklist.add(body.email, body.reason);
-    log.info('[admin] 블랙리스트 추가');
-    return ok(c, z.array(BlockedEmail), blocklist.list());
-  });
-
-  app.delete('/api/admin/blocklist/:email', (c) => {
-    if (!blocklist.remove(decodeURIComponent(c.req.param('email')))) return fail(c, 404, 'not_found', '블랙리스트에 없는 이메일입니다.');
-    log.info('[admin] 블랙리스트 해제');
-    return ok(c, z.array(BlockedEmail), blocklist.list());
+  app.put('/api/admin/signup-settings', async (c) => {
+    const body = await readJson(c, SignupSettings);
+    if (!body) return fail(c, 400, 'invalid_request', 'signupEnabled 값이 필요합니다.');
+    signupSettings.setEnabled(body.signupEnabled);
+    log.info(`[admin] 신규 가입 ${body.signupEnabled ? '허용' : '중지'}`);
+    return ok(c, SignupSettings, { signupEnabled: signupSettings.enabled() });
   });
 
   /** 문제의 시작 코드 교체(스크립트용) */
@@ -402,10 +381,6 @@ export function createApp(deps: AppDeps) {
     if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/admin/')) return next();
     const s = await readSession(c);
     const u = s ? users.byId(s.userId) : null;
-    if (s && u && blocklist.has(u.email)) {
-      sessions.revoke(s.id);
-      return fail(c, 403, 'blocked', '이용이 제한된 계정입니다.');
-    }
     if (!s || !u) {
       if (!guestReadable(c.req.method, p)) return fail(c, 401, 'unauthorized', '로그인이 필요합니다.');
       (c as unknown as Context<GuestEnv>).set('userId', null);

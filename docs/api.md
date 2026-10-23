@@ -12,9 +12,9 @@
 | `GET` | `/api/public/config` | 공개 설정(문의 이메일, 약관 버전) |
 | `POST` | `/api/admin/login` | 관리자 모드(마스터 비밀번호) |
 | `GET` | `/api/admin/users`, `/api/admin/users/{id}` | 사용자 목록 / 상세 현황 |
-| `PUT` | `/api/admin/users/{id}/role`, `/api/admin/users/{id}/block` | 편집 권한 주기·회수 / 이용 정지·해제 |
+| `PUT` | `/api/admin/users/{id}/role` | 편집 권한 주기·회수 |
 | `DELETE` | `/api/admin/users/{id}` | 사용자 삭제(풀이 기록 모두 삭제) |
-| `GET` `POST` `DELETE` | `/api/admin/blocklist` | 블랙리스트(이메일) |
+| `GET` `PUT` | `/api/admin/signup-settings` | 신규 가입 허용 여부 조회·변경 (`{ signupEnabled: boolean }`, 마스터 전용) |
 | `GET` | `/api/runtime` | runner 상태와 Java·Python 버전 |
 | `GET` `POST` | `/api/problems` | 문제 목록 / 만들기 |
 | `GET` `PUT` `DELETE` | `/api/problems/{id}` | 문제 조회 / 저장 / 삭제 |
@@ -28,3 +28,5 @@
 | `GET` | `/api/submissions/{id}` | 제출 상태(queued·running·done·error), 대기 순번, 결과·점수 |
 | `POST` | `/api/run` | 동기 실행(스크립트용, 내부적으로 대기열 사용) |
 | `GET` | `/api/health` | 상태 확인 |
+
+신규 가입 중지 시 Google 신규 계정 콜백은 `/?auth_error=signup_closed`로 이동하고, 가입 대기 조회·가입 완료는 `403 signup_closed`를 반환합니다. 기존 회원 로그인은 유지합니다. `/api/public/config`의 `signupEnabled`로 현재 가입 허용 여부를 확인할 수 있습니다.

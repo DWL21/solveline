@@ -21,6 +21,8 @@ export type Session = z.infer<typeof Session>;
 /** 로그인 없이 읽는 공개 설정 */
 export const PublicConfig = z.object({
   googleEnabled: z.boolean(),
+  // 프론트가 먼저 배포되는 동안 이전 API의 응답도 읽는다. 실제 가입 허용은 서버가 결정한다.
+  signupEnabled: z.boolean().default(true),
   contactEmail: z.string().nullable(),
   termsVersion: z.string(),
   privacyVersion: z.string(),
@@ -267,7 +269,7 @@ export function templateFor(language: Language, mode: ProblemMode, params: strin
 
 // ─── 관리자 ───
 
-/** 관리자 모드는 Google 로그인과 별개로 마스터 비밀번호(ACCESS_PASSWORD)로만 연다. 사용자에게 편집 권한을 주고, 정지(블랙리스트)한다. */
+/** 관리자 모드는 Google 로그인과 별개로 마스터 비밀번호(ACCESS_PASSWORD)로만 연다. 사용자 편집 권한과 신규 가입 허용 여부를 관리한다. */
 export const AdminLogin = z.object({ password: z.string().min(1).max(256) });
 export const AdminSession = z.object({ authenticated: z.boolean(), expiresAt: z.string().nullable() });
 export type AdminSession = z.infer<typeof AdminSession>;
@@ -278,7 +280,6 @@ export const AdminUser = z.object({
   name: z.string(),
   picture: z.string(),
   editor: z.boolean(),
-  blocked: z.boolean(),
   createdAt: z.string(),
   lastLoginAt: z.string(),
   /** 100점 받은 문제 수 */
@@ -314,9 +315,6 @@ export const AdminUserDetail = AdminUser.extend({
 export type AdminUserDetail = z.infer<typeof AdminUserDetail>;
 
 export const RoleInput = z.object({ editor: z.boolean() });
-export const BlockInput = z.object({ blocked: z.boolean(), reason: z.string().trim().max(200).default('') });
-
-/** 블랙리스트: 이 이메일의 Google 계정은 가입·로그인할 수 없고, 로그인돼 있던 세션도 끊긴다. */
-export const BlockedEmail = z.object({ email: z.string(), reason: z.string(), createdAt: z.string() });
-export type BlockedEmail = z.infer<typeof BlockedEmail>;
-export const BlockedEmailInput = z.object({ email: z.string().trim().toLowerCase().email().max(254), reason: z.string().trim().max(200).default('') });
+/** 신규 가입만 제어한다. 기존 회원의 로그인·세션에는 영향을 주지 않는다. */
+export const SignupSettings = z.object({ signupEnabled: z.boolean() });
+export type SignupSettings = z.infer<typeof SignupSettings>;

@@ -8,10 +8,10 @@ import './index.css';
 
 const signedOut: Session = { authenticated: false, expiresAt: null, user: null };
 
-/** 로그인이 풀렸거나(401) 이용이 정지되면(403 blocked) 세션을 끊고 로그인 화면으로 돌아간다. 관리자 모드의 401은 따로 다룬다. */
+/** 로그인이 풀리면(401) 세션을 끊고 로그인 화면으로 돌아간다. 관리자 모드의 401은 따로 다룬다. */
 function onError(error: unknown) {
   if (!(error instanceof ApiError)) return;
-  const lost = (error.status === 401 && error.code !== 'admin_required' && error.code !== 'invalid_password') || error.code === 'blocked';
+  const lost = (error.status === 401 && error.code !== 'admin_required' && error.code !== 'invalid_password');
   // 이미 비회원이면 아무것도 하지 않는다(쿼리를 지우면 다시 요청해 401이 반복된다)
   if (lost && client.getQueryData<Session>(qk.session)?.authenticated) {
     client.setQueryData(qk.session, signedOut);

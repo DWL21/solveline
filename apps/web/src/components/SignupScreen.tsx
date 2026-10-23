@@ -11,8 +11,9 @@ type Agree = { age: boolean; terms: boolean; privacy: boolean };
 /** 회원가입: Google 인증을 마친 새 계정이 필수 항목에 동의하면 가입된다. */
 export function SignupScreen() {
   const qc = useQueryClient();
-  const pending = useQuery({ queryKey: qk.signup, queryFn: api.signupPending, retry: false, staleTime: Infinity });
+  const pending = useQuery({ queryKey: qk.signup, queryFn: api.signupPending, retry: false, refetchOnWindowFocus: true });
   const [agree, setAgree] = useState<Agree>({ age: false, terms: false, privacy: false });
+  const closed = pending.error instanceof ApiError && pending.error.code === 'signup_closed';
   const all = agree.age && agree.terms && agree.privacy;
 
   const signup = useMutation({
@@ -53,10 +54,10 @@ export function SignupScreen() {
             {pending.isError ? (
               <>
                 <p className="mt-3 text-[13px] text-dim">
-                  {pending.error instanceof ApiError && pending.error.status === 404 ? '가입 시간이 지났어요. Google 계정으로 다시 시작하세요.' : '가입 정보를 불러오지 못했어요.'}
+                  {pending.error instanceof ApiError ? pending.error.message : '가입 정보를 불러오지 못했어요.'}
                 </p>
-                <button type="button" className="btn-primary mt-4 min-h-11 w-full" onClick={startGoogleLogin}>
-                  Google로 다시 시작
+                <button type="button" className="btn-primary mt-4 min-h-11 w-full" onClick={closed ? () => location.assign('/') : startGoogleLogin}>
+                  {closed ? '문제 둘러보기' : 'Google로 다시 시작'}
                 </button>
               </>
             ) : (
@@ -108,7 +109,7 @@ export function SignupScreen() {
                     {signup.error instanceof ApiError ? signup.error.message : '가입하지 못했어요'}
                   </p>
                 )}
-                <button type="button" className="btn-primary mt-4 min-h-11 w-full text-[14px]" disabled={!all || signup.isPending} onClick={() => signup.mutate()}>
+                <button type="button" className="btn-primary mt-4 min-h-11 w-full text-[14px]" disabled={!all || signup.isPending || (signup.error instanceof ApiError && signup.error.code === 'signup_closed')} onClick={() => signup.mutate()}>
                   {signup.isPending ? <Spinner size={16} label="가입하는 중" /> : '동의하고 가입하기'}
                 </button>
                 <button type="button" className="btn-quiet mt-2 w-full" disabled={cancel.isPending} onClick={() => cancel.mutate()}>

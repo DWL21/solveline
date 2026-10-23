@@ -15,7 +15,7 @@ import {
   AdminSession,
   AdminUser,
   AdminUserDetail,
-  BlockedEmail,
+  SignupSettings,
   type CollectionInput,
   type SubmissionRequest,
   type TestCase,
@@ -112,12 +112,9 @@ export const adminApi = {
   users: () => request(z.array(AdminUser), '/api/admin/users'),
   user: (id: string) => request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}`),
   setEditor: (id: string, editor: boolean) => request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}/role`, json('PUT', { editor })),
-  setBlocked: (id: string, blocked: boolean, reason = '') =>
-    request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}/block`, json('PUT', { blocked, reason })),
   deleteUser: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  blocklist: () => request(z.array(BlockedEmail), '/api/admin/blocklist'),
-  block: (email: string, reason: string) => request(z.array(BlockedEmail), '/api/admin/blocklist', json('POST', { email, reason })),
-  unblock: (email: string) => request(z.array(BlockedEmail), `/api/admin/blocklist/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+  signupSettings: () => request(SignupSettings, '/api/admin/signup-settings'),
+  setSignupEnabled: (signupEnabled: boolean) => request(SignupSettings, '/api/admin/signup-settings', json('PUT', { signupEnabled })),
 };
 
 export const qk = {
@@ -127,7 +124,7 @@ export const qk = {
   admin: ['admin'] as const,
   adminUsers: ['admin', 'users'] as const,
   adminUser: (id: string) => ['admin', 'user', id] as const,
-  blocklist: ['admin', 'blocklist'] as const,
+  signupSettings: ['admin', 'signup-settings'] as const,
   runtime: ['runtime'] as const,
   problems: ['problems'] as const,
   problem: (id: string) => ['problem', id] as const,

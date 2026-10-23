@@ -9,7 +9,6 @@ import {
   Problem,
   type AdminUser,
   type AdminUserDetail,
-  type BlockedEmail,
   type CodeSet,
   type CollectionInput,
   type Language,
@@ -196,6 +195,13 @@ const migrations: Migration[] = [
       upd.run(JSON.stringify({ ...b, code: { java: templateFor('java', r.mode, params), python: templateFor('python', r.mode, params) } }), r.id);
     }
   },
+  // #49: 이메일별 차단을 없애고 신규 가입 전체 허용 여부를 영속적으로 관리한다.
+  `CREATE TABLE signup_settings (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
+   );
+   INSERT INTO signup_settings (id, enabled) VALUES (1, 1);
+   DROP TABLE blocked_emails;`,
 ];
 
 /** 이름 중복·없는 폴더처럼 요청을 고쳐야 하는 오류 */
@@ -696,14 +702,12 @@ export class UserStore {
       .prepare(
         `SELECT u.*,
            (SELECT COUNT(*) FROM user_problems s WHERE s.user_id = u.id AND json_extract(s.last_submission, '$.score') = 100) AS solved,
-           (SELECT COUNT(*) FROM submissions x WHERE x.user_id = u.id) AS submission_count,
-           EXISTS (SELECT 1 FROM blocked_emails b WHERE b.email = u.email) AS blocked
+           (SELECT COUNT(*) FROM submissions x WHERE x.user_id = u.id) AS submission_count
          FROM users u ${where} ORDER BY u.created_at`,
       )
-      .all(...args) as (UserRow & { solved: number; submission_count: number; blocked: number })[];
+      .all(...args) as (UserRow & { solved: number; submission_count: number })[];
     return rows.map((r) => ({
       ...this.toUser(r),
-      blocked: !!r.blocked,
       createdAt: r.created_at,
       lastLoginAt: r.last_login_at,
       solved: r.solved,
@@ -756,31 +760,15 @@ export class UserStore {
   }
 }
 
-/** 블랙리스트(이메일). 등록된 이메일은 가입·로그인할 수 없고, 로그인돼 있던 세션도 끊긴다. */
-export class BlocklistStore {
+/** 전체 신규 가입 정책. 기본값은 기존처럼 가입 허용이다. */
+export class SignupSettingsStore {
   constructor(private db: Db) {}
 
-  has(email: string): boolean {
-    return !!this.db.prepare('SELECT 1 FROM blocked_emails WHERE email = ?').get(email.toLowerCase());
+  enabled(): boolean {
+    return this.db.prepare('SELECT enabled FROM signup_settings WHERE id = 1').pluck().get() === 1;
   }
 
-  list(): BlockedEmail[] {
-    return (this.db.prepare('SELECT * FROM blocked_emails ORDER BY created_at DESC').all() as { email: string; reason: string; created_at: string }[]).map((r) => ({
-      email: r.email,
-      reason: r.reason,
-      createdAt: r.created_at,
-    }));
-  }
-
-  add(email: string, reason: string, now = new Date()) {
-    this.db
-      .prepare('INSERT INTO blocked_emails (email, reason, created_at) VALUES (?, ?, ?) ON CONFLICT (email) DO UPDATE SET reason = excluded.reason')
-      .run(email.toLowerCase(), reason, now.toISOString());
-    // 그 이메일의 세션을 바로 끊는다
-    this.db.prepare('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ?)').run(email.toLowerCase());
-  }
-
-  remove(email: string): boolean {
-    return this.db.prepare('DELETE FROM blocked_emails WHERE email = ?').run(email.toLowerCase()).changes > 0;
+  setEnabled(enabled: boolean) {
+    this.db.prepare('UPDATE signup_settings SET enabled = ? WHERE id = 1').run(enabled ? 1 : 0);
   }
 }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { templateFor, type ProblemInput, type TestCase } from '@solveline/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
-import { openDb, UserStore } from '../src/db.ts';
+import { openDb, UserStore, SignupSettingsStore } from '../src/db.ts';
 import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
 import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
 import { SubmissionStore } from '../src/dispatcher.ts';
@@ -173,17 +173,36 @@ describe('인증', () => {
     expect((await googleRoundTrip(s, OWNER, 'https://evil.example')).location).toBe('/');
   });
 
-  it('누구나 가입할 수 있지만 블랙리스트 이메일은 가입·로그인할 수 없다', async () => {
+  it('신규 가입 중지 중에도 기존 회원은 로그인하고 기존 세션을 쓸 수 있다', async () => {
     const s = setup({ ACCESS_PASSWORD: MASTER });
-    expect((await googleRoundTrip(s, 'stranger@example.com')).location).toBe('/signup');
-    const cookie = await login(s, 'bad@example.com');
-    const admin = await masterLogin(s);
-    await s.app.request('/api/admin/blocklist', { method: 'POST', headers: { cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ email: 'Bad@Example.com', reason: '도배' }) });
-    // 로그인돼 있던 세션도 바로 끊긴다
-    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
-    expect((await googleRoundTrip(s, 'bad@example.com')).location).toBe('/?auth_error=blocked');
-    await s.app.request(`/api/admin/blocklist/${encodeURIComponent('bad@example.com')}`, { method: 'DELETE', headers: { cookie: admin } });
-    expect((await googleRoundTrip(s, 'bad@example.com')).session).toBeDefined();
+    const cookie = await login(s, 'member@example.com');
+    const A = as(s, await masterLogin(s));
+    expect((await A('GET', '/api/admin/signup-settings')).body.data.signupEnabled).toBe(true);
+    expect((await A('PUT', '/api/admin/signup-settings', { signupEnabled: false })).status).toBe(200);
+    expect((await googleRoundTrip(s, 'new@example.com')).location).toBe('/?auth_error=signup_closed');
+    expect((await googleRoundTrip(s, 'member@example.com')).session).toBeDefined();
+    const session = await s.app.request('/api/auth/session', { headers: { cookie } });
+    expect((await session.json()).data.authenticated).toBe(true);
+    const config = await s.app.request('/api/public/config');
+    expect((await config.json()).data.signupEnabled).toBe(false);
+    expect(s.db.prepare('SELECT COUNT(*) FROM users').pluck().get()).toBe(1);
+    await A('PUT', '/api/admin/signup-settings', { signupEnabled: true });
+    expect((await login(s, 'new@example.com'))).toBeTruthy();
+  });
+
+  it('가입 대기 쿠키가 있어도 가입 중지 후에는 계정을 만들 수 없다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    const r = await googleRoundTrip(s, 'pending@example.com');
+    const A = as(s, await masterLogin(s));
+    await A('PUT', '/api/admin/signup-settings', { signupEnabled: false });
+    expect((await s.app.request('/api/auth/signup', { headers: { cookie: r.signup! } })).status).toBe(403);
+    const response = await s.app.request('/api/auth/signup', {
+      method: 'POST', headers: { cookie: r.signup!, 'content-type': 'application/json' }, body: JSON.stringify(agree),
+    });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe('signup_closed');
+    expect(cookieOf(response, 'solveline_session')).toBeUndefined();
+    expect(s.db.prepare('SELECT COUNT(*) FROM users').pluck().get()).toBe(0);
   });
 
   it('로그아웃하면 세션이 무효가 된다', async () => {
@@ -332,20 +351,52 @@ describe('관리자 모드(마스터 비밀번호)', () => {
     expect((await googleRoundTrip(s, 'user@example.com')).location).toBe('/signup');
   });
 
-  it('사용자를 정지하면 블랙리스트에 올라 바로 막히고, 해제하면 다시 들어온다', async () => {
+  it('신규 가입 설정은 마스터만 변경할 수 있고 boolean만 받는다', async () => {
     const s = setup({ ACCESS_PASSWORD: MASTER });
-    const cookie = await login(s, 'user@example.com');
+    const cookie = await login(s);
+    for (const auth of [undefined, cookie]) {
+      const headers = { ...(auth ? { cookie: auth } : {}), 'content-type': 'application/json' };
+      expect((await s.app.request('/api/admin/signup-settings', { headers })).status).toBe(401);
+      expect((await s.app.request('/api/admin/signup-settings', { method: 'PUT', headers, body: JSON.stringify({ signupEnabled: false }) })).status).toBe(401);
+    }
     const A = as(s, await masterLogin(s));
-    const id = ((await A('GET', '/api/admin/users')).body.data as { id: string }[])[0]!.id;
-    expect((await A('PUT', `/api/admin/users/${id}/block`, { blocked: true, reason: '부정 사용' })).body.data.blocked).toBe(true);
-    expect((await A('GET', '/api/admin/blocklist')).body.data[0]).toMatchObject({ email: 'user@example.com', reason: '부정 사용' });
-    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
-    await A('PUT', `/api/admin/users/${id}/block`, { blocked: false });
-    expect((await googleRoundTrip(s, 'user@example.com')).session).toBeDefined();
+    expect((await A('PUT', '/api/admin/signup-settings', { signupEnabled: 'false' })).status).toBe(400);
+    expect((await A('PUT', '/api/admin/signup-settings', {})).status).toBe(400);
+    expect((await A('GET', '/api/admin/signup-settings')).body.data.signupEnabled).toBe(true);
+    expect((await A('GET', '/api/admin/blocklist')).status).toBe(404);
+    expect((await A('POST', '/api/admin/blocklist', { email: 'user@example.com' })).status).toBe(404);
+    const id = new UserStore(s.db).byGoogleSub(`sub-${OWNER}`)!.id;
+    expect((await A('PUT', `/api/admin/users/${id}/block`, { blocked: true })).status).toBe(404);
+    expect((await A('GET', `/api/admin/users/${id}`)).body.data).not.toHaveProperty('blocked');
   });
 });
 
 describe('설정', () => {
+  it('가입 정책은 DB 재시작 후에도 유지되고 기존 블랙리스트 DB를 이전한다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'solveline-signup-'));
+    let db = openDb(dir);
+    try {
+      const user = new UserStore(db).create({ sub: 'old-sub', email: 'old@example.com', name: 'old', picture: '' }, { terms: 'old', privacy: 'old' });
+      // 마지막 마이그레이션 적용 전의 DB 구조를 재현한다.
+      db.exec(`DROP TABLE signup_settings;
+        CREATE TABLE blocked_emails (email TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+        INSERT INTO blocked_emails VALUES ('old@example.com', 'old', '2026-01-01');
+        DELETE FROM _migrations WHERE id = (SELECT MAX(id) FROM _migrations);`);
+      db.close();
+      db = openDb(dir);
+      expect(new UserStore(db).byId(user.id)?.email).toBe('old@example.com');
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'blocked_emails'").get()).toBeUndefined();
+      expect(new SignupSettingsStore(db).enabled()).toBe(true);
+      new SignupSettingsStore(db).setEnabled(false);
+      db.close();
+      db = openDb(dir);
+      expect(new SignupSettingsStore(db).enabled()).toBe(false);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('운영 환경은 SESSION_SECRET이 없으면 시작하지 않고, 짧은 마스터 비밀번호는 거부한다', () => {
     expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/SESSION_SECRET/);
     expect(() => loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 'short' })).toThrow(/32자/);
