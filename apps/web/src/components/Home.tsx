@@ -1,3 +1,4 @@
+import { Language } from '@solveline/shared';
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
@@ -106,7 +107,6 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             {folder && editor && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
-          {effective.kind === 'collection' && <p className="mb-1 text-[12.5px] text-faint">가상 묶음이에요. 문제는 원래 폴더에 그대로 있고, 여러 컬렉션에 함께 들어갈 수 있어요.</p>}
           {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
           <div className="mt-3 mb-4 flex flex-wrap items-center gap-2">
             <input
@@ -146,7 +146,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
                     {effective.kind !== 'folder' && p.folderId && (
                       <span className="hidden shrink-0 rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-dim sm:inline">{folderName.get(p.folderId)}</span>
                     )}
-                    <span className="hidden shrink-0 text-[11.5px] text-faint md:inline">{p.language === 'java' ? 'Java' : 'Python3'}</span>
+                    <span className="shrink-0 text-[11.5px] text-faint" aria-label="지원 언어">{Language.options.map((language) => language === 'java' ? 'Java' : 'Python').join(' · ')}</span>
                   </button>
                 </li>
               ))}

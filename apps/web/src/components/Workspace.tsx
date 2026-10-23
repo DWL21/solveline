@@ -286,9 +286,6 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
         )}
         {!guest && <SaveBadge state={save.state} onRetry={save.retry} />}
         {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}
-        <span className="text-[12px] text-faint" title="테스트당 시간 제한 (테스트 케이스 탭에서 변경)">
-          제한 {draft.timeLimitMs / 1000}초
-        </span>
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
             {sub.score === 100 ? '✓' : `△ ${sub.score}점`}
@@ -525,6 +522,19 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
   const qc = useQueryClient();
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
   const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const create = useMutation({
+    mutationFn: async () => {
+      const collection = await api.createCollection({ name: name.trim(), description: '' });
+      setName('');
+      try {
+        return await api.setCollectionItems(collection.id, [problemId]);
+      } catch {
+        throw new Error('컬렉션은 만들었지만 문제를 추가하지 못했어요. 목록에서 다시 선택해 주세요.');
+      }
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: qk.collections }),
+  });
   const box = useRef<HTMLDivElement>(null);
   const toggle = useMutation({
     mutationFn: ({ id, ids }: { id: string; ids: string[] }) => api.setCollectionItems(id, ids),
@@ -553,9 +563,7 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
       </button>
       {open && (
         <div className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-2 shadow-2xl">
-          {list.length === 0 ? (
-            <p className="p-2 text-[12.5px] text-faint">컬렉션이 없어요. 홈 화면 왼쪽에서 만들 수 있어요.</p>
-          ) : (
+          {list.length > 0 && (
             <ul className="max-h-72 overflow-y-auto">
               {list.map((c) => {
                 const checked = c.problemIds.includes(problemId);
@@ -577,6 +585,17 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
               })}
             </ul>
           )}
+          <form
+            className="mt-2 flex gap-1 border-t border-line pt-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (name.trim() && !create.isPending) create.mutate();
+            }}
+          >
+            <input className="field min-w-0 flex-1" aria-label="새 컬렉션 이름" placeholder="새 컬렉션 이름" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} disabled={create.isPending} />
+            <button type="submit" className="btn-primary shrink-0 px-2" disabled={!name.trim() || create.isPending}>만들기</button>
+          </form>
+          {create.isError && <p role="alert" className="mt-2 text-[12px] text-bad">{create.error.message}</p>}
         </div>
       )}
     </div>

@@ -182,40 +182,24 @@ export function CasesEditor({
 }) {
   return (
     <div className="flex flex-col gap-4 p-4">
-      {editing ? (
-        <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />
-      ) : (
-        <p className="text-[12px] text-dim">
-          <b>시간 제한</b> {timeLimitMs / 1000}초 <span className="text-faint">· 테스트당, solution 실행 시간 기준</span>
-        </p>
-      )}
-      {mode === 'function' ? (
-        <>
-          {editing && (
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-bold text-dim">매개변수 이름 (쉼표로 구분)</span>
-              <ParamsInput
-                params={params}
-                onChange={(next) => {
-                  onParams(next);
-                  onCases(cases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
-                  onMyCases(myCases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
-                }}
-              />
-            </label>
-          )}
-          <p className="text-[12px] leading-relaxed text-faint">
-            값은 기존 표기 그대로 적습니다: <code className="text-dim">[1, 2, 3]</code>, <code className="text-dim">"abc"</code>,{' '}
-            <code className="text-dim">[["a", 1]]</code>, <code className="text-dim">true</code>. 기댓값을 비우면 비교 없이 결과만 봅니다.
-          </p>
-        </>
-      ) : (
-        <p className="text-[12px] leading-relaxed text-faint">표준 입력과 기대 출력을 적습니다. 줄 끝 공백과 마지막 빈 줄은 무시하고 비교하며, 기대 출력을 비우면 결과만 봅니다.</p>
+      {editing && <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />}
+      {mode === 'function' && editing && (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-bold text-dim">매개변수 이름 (쉼표로 구분)</span>
+          <ParamsInput
+            params={params}
+            onChange={(next) => {
+              onParams(next);
+              onCases(cases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
+              onMyCases(myCases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
+            }}
+          />
+        </label>
       )}
 
       <section>
         <h3 className="mb-1 text-[12px] font-bold text-dim">
-          기본 케이스 {cases.length} <span className="font-normal text-faint">— 코드 실행{editing ? ' · 모든 사용자에게 적용' : ''}</span>
+          기본 케이스 {cases.length}
         </h3>
         {cases.length > 0 ? (
           <CaseList mode={mode} params={params} cases={cases} label="테스트" readOnly={!editing} onChange={onCases} />
@@ -232,7 +216,7 @@ export function CasesEditor({
       {!guest && (
       <section className="border-t border-line pt-3">
         <h3 className="mb-1 text-[12px] font-bold text-dim">
-          내 테스트 케이스 {myCases.length} <span className="font-normal text-faint">— 코드 실행 · 나만 보여요</span>
+          내 테스트 케이스 {myCases.length}
         </h3>
         {myCases.length > 0 && <CaseList mode={mode} params={params} cases={myCases} label="내 테스트" onChange={onMyCases} />}
         <button type="button" className="btn-ghost mt-2" disabled={myCases.length >= MAX_CASES} onClick={() => onMyCases([...myCases, newCase(params.length)])}>
@@ -241,13 +225,7 @@ export function CasesEditor({
       </section>
       )}
 
-      {editing ? (
-        <HiddenCases problemId={problemId} mode={mode} params={params} summary={hidden} />
-      ) : (
-        <p className="border-t border-line pt-3 text-[12px] text-faint">
-          {hidden?.count ? `채점용 히든 케이스 ${hidden.count}개는 제출 후 채점에만 쓰여요.` : '히든 케이스가 없어 제출할 때 기본 케이스로 채점해요.'}
-        </p>
-      )}
+      {editing && <HiddenCases problemId={problemId} mode={mode} params={params} summary={hidden} />}
     </div>
   );
 }
@@ -276,7 +254,6 @@ function TimeLimit({ value, onChange }: { value: number; onChange: (ms: number) 
         aria-label="시간 제한(초)"
       />
       <span className="text-[12px] text-dim">초</span>
-      <span className="text-[11.5px] text-faint">테스트당, solution 실행 시간 기준 (JVM 시작 제외)</span>
     </label>
   );
 }
