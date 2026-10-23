@@ -262,7 +262,7 @@ type HiddenState = 'saved' | 'dirty' | 'saving' | 'error';
 
 function HiddenCases({ problemId, mode, params, summary }: { problemId: string; mode: ProblemMode; params: string[]; summary: TestsetRef | null }) {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const q = useQuery({ queryKey: qk.hidden(problemId), queryFn: () => api.hidden(problemId), enabled: open, staleTime: Infinity });
   const [cases, setCases] = useState<TestCase[] | null>(null);
   const [state, setState] = useState<HiddenState>('saved');
@@ -315,7 +315,14 @@ function HiddenCases({ problemId, mode, params, summary }: { problemId: string; 
       </div>
       {!open && count === 0 && <p className="py-2 text-[12.5px] text-faint">히든 케이스가 없으면 제출할 때 보이는 케이스로 채점해요.</p>}
       {open && q.isPending && <LinesSkeleton />}
-      {open && q.isError && <p className="py-2 text-[12.5px] text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>}
+      {open && q.isError && (
+        <div className="flex flex-wrap items-center gap-2 py-2">
+          <p className="text-[12.5px] text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>
+          <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" onClick={() => void q.refetch()}>
+            다시 시도
+          </button>
+        </div>
+      )}
       {open && cases && (
         <div className="mt-1">
           {cases.length > 0 && <CaseList mode={mode} params={params} cases={cases} label="히든 테스트" onChange={change} />}
