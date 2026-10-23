@@ -212,15 +212,40 @@ export function CodeEditor({
     if (!el || !compact) return;
     let start: { dist: number; font: number } | null = null;
     const dist = (t: TouchList) => Math.hypot(t[0]!.clientX - t[1]!.clientX, t[0]!.clientY - t[1]!.clientY);
-    const current = () => parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || 14;
+    const current = () => parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || 13;
+    const clampFont = (v: number) => Math.round(Math.min(MAX_FONT, Math.max(MIN_FONT, v)));
+    // iOS(Safari·Chrome)는 두 손가락 동작을 화면 확대 제스처로 먼저 가져간다 → 제스처 이벤트로 받아 코드 글자에만 적용한다.
+    // 키보드가 열려 있든 닫혀 있든 같게 동작한다.
+    if ('ongesturestart' in window) {
+      let base = 0;
+      const gStart = (e: Event) => {
+        e.preventDefault();
+        base = current();
+      };
+      const gChange = (e: Event) => {
+        e.preventDefault();
+        if (base) setFontPx(clampFont(base * (e as Event & { scale: number }).scale));
+      };
+      const gEnd = (e: Event) => {
+        e.preventDefault();
+        base = 0;
+      };
+      el.addEventListener('gesturestart', gStart, { passive: false });
+      el.addEventListener('gesturechange', gChange, { passive: false });
+      el.addEventListener('gestureend', gEnd, { passive: false });
+      return () => {
+        el.removeEventListener('gesturestart', gStart);
+        el.removeEventListener('gesturechange', gChange);
+        el.removeEventListener('gestureend', gEnd);
+      };
+    }
     const onStart = (e: TouchEvent) => {
       if (e.touches.length === 2) start = { dist: dist(e.touches), font: current() };
     };
     const onMove = (e: TouchEvent) => {
       if (!start || e.touches.length !== 2) return;
       e.preventDefault(); // 화면 전체 확대 대신 코드 글자만 키운다
-      const next = Math.round(Math.min(MAX_FONT, Math.max(MIN_FONT, (start.font * dist(e.touches)) / start.dist)));
-      setFontPx(next);
+      setFontPx(clampFont((start.font * dist(e.touches)) / start.dist));
     };
     const onEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) start = null;
@@ -258,8 +283,9 @@ export function CodeEditor({
   );
 }
 
-const FONT_KEY = 'solveline.codeFont.v1';
-const MIN_FONT = 11;
+// v2: 기본 글자를 13px로 줄이면서 예전에 저장한 크기는 쓰지 않는다
+const FONT_KEY = 'solveline.codeFont.v2';
+const MIN_FONT = 9;
 const MAX_FONT = 22;
 
 /**
