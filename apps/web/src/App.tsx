@@ -10,6 +10,7 @@ import { AdminPage } from './components/AdminPage.tsx';
 import { Avatar } from './components/Avatar.tsx';
 import { BootScreen, Spinner, WorkspaceSkeleton } from './components/Loading.tsx';
 import { Home, scopeList } from './components/Home.tsx';
+import { SubmissionHistoryPage } from './components/SubmissionHistoryPage.tsx';
 import { blankProblem } from './lib/blank.ts';
 import { useDraftSync } from './lib/drafts.ts';
 import { loginHref, useMe } from './lib/me.ts';
@@ -107,6 +108,7 @@ function Shell() {
             ← 문제 목록
           </button>
         )}
+        {me && <a href="#/submissions" className={`btn-quiet ml-auto ${route.kind === 'submissions' ? 'text-accent' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>}
         <UserMenu onLogout={() => logout.mutate()} />
       </header>
 
@@ -119,6 +121,8 @@ function Shell() {
           onList={() => go({ kind: 'home', scope: lastScope })}
         />
         </Suspense>
+      ) : route.kind === 'submissions' ? (
+        <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Home

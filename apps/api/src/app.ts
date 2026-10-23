@@ -18,6 +18,8 @@ import {
   RunRequest,
   RunResult,
   Submission,
+  SubmissionDetail,
+  SubmissionHistory,
   SubmissionRequest,
   Runtime,
   Session,
@@ -564,6 +566,17 @@ export function createApp(deps: AppDeps) {
     dispatcher.kick();
     c.status(202);
     return ok(c, Submission, submissions.get(id)!);
+  });
+
+  app.get('/api/submissions', (c) => {
+    const raw = c.req.query('offset') ?? '0';
+    if (!/^(0|[1-9]\d*)$/.test(raw) || Number(raw) > 100_000) return fail(c, 400, 'invalid_offset', '조회 위치가 올바르지 않습니다.');
+    return ok(c, SubmissionHistory, submissions.history(c.get('userId'), Number(raw)));
+  });
+
+  app.get('/api/submissions/:id/detail', (c) => {
+    const detail = submissions.detail(c.req.param('id'), c.get('userId'));
+    return detail ? ok(c, SubmissionDetail, detail) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
   app.get('/api/submissions/:id', (c) => {

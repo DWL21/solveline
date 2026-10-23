@@ -131,6 +131,7 @@ describe('인증', () => {
     expect((await app.request(`/api/problems/${p}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(problem) })).status).toBe(401);
     expect((await app.request(`/api/problems/${p}/hidden`)).status).toBe(401);
     expect((await app.request('/api/submissions', { method: 'POST' })).status).toBe(401);
+    expect((await app.request('/api/submissions')).status).toBe(401);
     expect((await app.request('/api/run', { method: 'POST' })).status).toBe(401);
     expect((await app.request('/api/health')).status).toBe(200);
     expect((await app.request('/api/public/config')).status).toBe(200);
@@ -291,6 +292,11 @@ describe('공용 문제·사용자별 풀이', () => {
     expect((await U('GET', '/api/problems')).body.data[0].lastSubmission.score).toBe(100);
     expect((await E('GET', '/api/problems')).body.data[0].lastSubmission).toBeNull();
     expect((await E('GET', `/api/submissions/${sub}`)).status).toBe(404);
+    expect((await E('GET', '/api/submissions')).body.data.items).toEqual([]);
+    expect((await E('GET', `/api/submissions/${sub}/detail`)).status).toBe(404);
+    expect((await U('GET', '/api/submissions')).body.data.items).toMatchObject([{ id: sub, problemTitle: '두 수의 합', score: 100 }]);
+    expect((await U('GET', `/api/submissions/${sub}/detail`)).body.data).toMatchObject({ id: sub, code: 'x', score: 100 });
+    expect((await U('GET', '/api/submissions?offset=-1')).status).toBe(400);
     expect((await E('POST', `/api/submissions/${sub}/cancel`)).status).toBe(404);
   });
 
@@ -518,6 +524,21 @@ describe('풀이 시간', () => {
 });
 
 describe('제출 큐', () => {
+  it('채점 제출만 최신순으로 20개씩 조회한다', () => {
+    const db = openDb(':memory:');
+    const store = new SubmissionStore(db);
+    const user = new UserStore(db).create({ sub: 'history', email: 'history@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
+    const base = { userId: user.id, problemId: null, language: 'python' as const, mode: 'function' as const, code: 'submitted code', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
+    const ids = Array.from({ length: 21 }, (_, i) => store.insert({ ...base, kind: 'submit' }, new Date(2026, 0, 1, 0, 0, i)));
+    store.insert({ ...base, kind: 'run' }, new Date(2026, 0, 1, 0, 1));
+    const first = store.history(user.id, 0);
+    expect(first.items).toHaveLength(20);
+    expect(first.items[0]?.id).toBe(ids[20]);
+    expect(first.nextOffset).toBe(20);
+    expect(store.history(user.id, 20).items.map((item) => item.id)).toEqual([ids[0]]);
+    expect(store.history(user.id, 20).nextOffset).toBeNull();
+  });
+
   it('코드 실행은 보이는 케이스만, 결과는 제출 id로 조회한다', async () => {
     const call = await authed();
     const p = (await call('POST', '/api/problems', problem)).body.data;

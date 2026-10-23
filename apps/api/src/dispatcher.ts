@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Submission, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
+import { Submission, SubmissionDetail, SubmissionHistory, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
 import type { Db, ProblemStore } from './db.ts';
 import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
@@ -117,6 +117,24 @@ export class SubmissionStore {
       createdAt: r.created_at,
       finishedAt: r.finished_at,
     });
+  }
+
+  history(userId: string, offset: number) {
+    const rows = this.db.prepare(`SELECT s.id, s.problem_id, p.title AS problem_title, s.language, s.status, s.score, s.created_at, s.finished_at
+      FROM submissions s LEFT JOIN problems p ON p.id = s.problem_id
+      WHERE s.user_id = ? AND s.kind = 'submit'
+      ORDER BY s.created_at DESC, s.rowid DESC LIMIT 21 OFFSET ?`).all(userId, offset) as (Pick<Row, 'id' | 'language' | 'status' | 'score' | 'created_at' | 'finished_at'> & { problem_id: string | null; problem_title: string | null })[];
+    return SubmissionHistory.parse({
+      items: rows.slice(0, 20).map((r) => ({ id: r.id, problemId: r.problem_id, problemTitle: r.problem_title, language: r.language, status: r.status, score: r.score, createdAt: r.created_at, finishedAt: r.finished_at })),
+      nextOffset: rows.length > 20 ? offset + 20 : null,
+    });
+  }
+
+  detail(id: string, userId: string) {
+    const row = this.db.prepare(`SELECT s.code, p.title AS problem_title FROM submissions s
+      LEFT JOIN problems p ON p.id = s.problem_id WHERE s.id = ? AND s.user_id = ? AND s.kind = 'submit'`).get(id, userId) as { code: string; problem_title: string | null } | undefined;
+    const submission = row ? this.get(id) : null;
+    return row && submission ? SubmissionDetail.parse({ ...submission, code: row.code, problemTitle: row.problem_title }) : null;
   }
 
   /** 다음 제출을 꺼내 running으로 바꾼다(없으면 null). 한 프로세스 안에서만 부르므로 경쟁이 없다. */

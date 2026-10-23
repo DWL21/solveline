@@ -26,6 +26,8 @@
 | `GET` `PUT` | `/api/problems/{id}/hidden` | 히든 테스트셋 읽기 / 바꾸기 (내용 해시 파일로 저장) |
 | `POST` | `/api/submissions` | 코드 실행(`run`) 또는 제출 채점(`submit`)을 대기열에 넣고 id 반환 (202) |
 | `GET` | `/api/submissions/{id}` | 제출 상태(queued·running·done·error), 대기 순번, 결과·점수 |
+| `GET` | `/api/submissions?offset=0` | 로그인한 사용자의 채점 제출 기록을 최신순으로 20개씩 조회 (`items`, `nextOffset`) |
+| `GET` | `/api/submissions/{id}/detail` | 본인 채점 제출의 당시 코드·결과·문제 제목 조회 |
 | `POST` | `/api/run` | 동기 실행(스크립트용, 내부적으로 대기열 사용) |
 | `GET` | `/api/health` | 상태 확인 |
 

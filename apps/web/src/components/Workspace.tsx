@@ -130,6 +130,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
       if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
       if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs });
       setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
+      void qc.invalidateQueries({ queryKey: ['submission-history'] });
       if (s.score === 100) {
         solve.markSolved();
         setSolvedOpen(true);

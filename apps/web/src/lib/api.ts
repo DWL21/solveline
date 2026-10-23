@@ -10,6 +10,8 @@ import {
   Runtime,
   Session,
   Submission,
+  SubmissionDetail,
+  SubmissionHistory,
   PublicConfig,
   SignupPending,
   AdminSession,
@@ -90,6 +92,8 @@ export const api = {
   /** 제출 큐: 바로 id를 받고, submission(id)로 결과를 조회한다 */
   submit: (r: SubmissionRequest) => request(Submission, '/api/submissions', json('POST', r)),
   submission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}`),
+  submissionHistory: (offset = 0) => request(SubmissionHistory, `/api/submissions?offset=${offset}`),
+  submissionDetail: (id: string) => request(SubmissionDetail, `/api/submissions/${encodeURIComponent(id)}/detail`),
   cancelSubmission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}/cancel`, json('POST')),
   saveTimer: (id: string, t: ProblemTimer, opts: { keepalive?: boolean } = {}) =>
     request(ProblemTimer, `/api/problems/${encodeURIComponent(id)}/timer`, { ...json('PUT', t), keepalive: opts.keepalive }),
@@ -134,4 +138,6 @@ export const qk = {
   folders: ['folders'] as const,
   collections: ['collections'] as const,
   hidden: (id: string) => ['hidden', id] as const,
+  submissionHistory: (offset: number) => ['submission-history', offset] as const,
+  submissionDetail: (id: string) => ['submission-detail', id] as const,
 };

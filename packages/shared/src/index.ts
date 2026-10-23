@@ -233,6 +233,16 @@ export const Submission = z.object({
 });
 export type Submission = z.infer<typeof Submission>;
 
+/** 목록에는 코드·히든 케이스 정보를 담지 않는다. */
+export const SubmissionHistoryItem = Submission.pick({ id: true, problemId: true, language: true, status: true, score: true, createdAt: true, finishedAt: true }).extend({
+  problemTitle: z.string().nullable(),
+});
+export type SubmissionHistoryItem = z.infer<typeof SubmissionHistoryItem>;
+export const SubmissionHistory = z.object({ items: z.array(SubmissionHistoryItem), nextOffset: z.number().int().min(0).nullable() });
+export type SubmissionHistory = z.infer<typeof SubmissionHistory>;
+export const SubmissionDetail = Submission.extend({ code: z.string(), problemTitle: z.string().nullable() });
+export type SubmissionDetail = z.infer<typeof SubmissionDetail>;
+
 export const RunRequest = z.object({
   language: Language,
   mode: ProblemMode,
