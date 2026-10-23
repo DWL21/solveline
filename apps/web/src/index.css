@@ -272,13 +272,3 @@ html[data-typing] .typing-hide {
   display: none;
 }
 
-/* 터치 기기의 코드 에디터: 한 줄에 더 많이 보이도록 기본 13px(두 손가락으로 9~22px), 줄 간격은 넉넉히 */
-@media (pointer: coarse) {
-  .code-editor .cm-content,
-  .code-editor .cm-gutters {
-    font-size: var(--code-font, 13px);
-  }
-  .code-editor .cm-line {
-    line-height: 1.6;
-  }
-}

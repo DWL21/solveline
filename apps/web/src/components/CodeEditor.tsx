@@ -144,6 +144,16 @@ export function CodeEditor({
   const view = useRef<EditorView | null>(null);
   const lang = useRef(new Compartment());
   const layout = useRef(new Compartment());
+  const font = useRef(new Compartment());
+  // 좁은 화면: 두 손가락으로 벌리고 오므려 글자 크기 조절(이 기기에 기억)
+  const [fontPx, setFontPx] = useState(() => {
+    try {
+      return Number(localStorage.getItem(FONT_KEY)) || 0;
+    } catch {
+      return 0;
+    }
+  });
+
   const cb = useRef({ onChange, onRun, onFocusChange });
   cb.current = { onChange, onRun, onFocusChange };
 
@@ -158,6 +168,7 @@ export function CodeEditor({
           ]),
           editorSetup,
           layout.current.of(layoutFor(compact)),
+          font.current.of(fontFor(compact, fontPx)),
           EditorState.readOnly.of(readOnly),
           indentUnit.of('    '),
           EditorState.tabSize.of(4),
@@ -199,20 +210,12 @@ export function CodeEditor({
     view.current?.dispatch({ effects: layout.current.reconfigure(layoutFor(compact)) });
   }, [compact]);
 
-  // 좁은 화면: 두 손가락으로 벌리고 오므려 글자 크기 조절(이 기기에 기억)
-  const [fontPx, setFontPx] = useState(() => {
-    try {
-      return Number(localStorage.getItem(FONT_KEY)) || 0;
-    } catch {
-      return 0;
-    }
-  });
   useEffect(() => {
     const el = host.current;
     if (!el || !compact) return;
     let start: { dist: number; font: number } | null = null;
     const dist = (t: TouchList) => Math.hypot(t[0]!.clientX - t[1]!.clientX, t[0]!.clientY - t[1]!.clientY);
-    const current = () => parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || 13;
+    const current = () => parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || DEFAULT_FONT;
     const clampFont = (v: number) => Math.round(Math.min(MAX_FONT, Math.max(MIN_FONT, v)));
     // iOS(Safari·Chrome)는 두 손가락 동작을 화면 확대 제스처로 먼저 가져간다 → 제스처 이벤트로 받아 코드 글자에만 적용한다.
     // 키보드가 열려 있든 닫혀 있든 같게 동작한다.
@@ -262,21 +265,21 @@ export function CodeEditor({
     };
   }, [compact]);
   useEffect(() => {
+    // 글자 크기는 에디터 설정(테마)으로 바꾼다: 그래야 CodeMirror가 줄 높이·줄 번호 위치를 함께 다시 잰다
+    view.current?.dispatch({ effects: font.current.reconfigure(fontFor(compact, fontPx)) });
     if (!fontPx) return;
     try {
       localStorage.setItem(FONT_KEY, String(fontPx));
     } catch {
       /* 저장소를 쓸 수 없는 환경 */
     }
-    view.current?.requestMeasure();
-  }, [fontPx]);
+  }, [fontPx, compact]);
 
   return (
     <div className="relative h-full min-h-0">
       <div
         ref={host}
         className="code-editor h-full min-h-0 overflow-hidden"
-        style={compact && fontPx ? ({ '--code-font': `${fontPx}px` } as React.CSSProperties) : undefined}
       />
       {compact && <FastScroll view={view} />}
     </div>
@@ -285,6 +288,16 @@ export function CodeEditor({
 
 // v2: 기본 글자를 13px로 줄이면서 예전에 저장한 크기는 쓰지 않는다
 const FONT_KEY = 'solveline.codeFont.v2';
+const DEFAULT_FONT = 13;
+
+/** 좁은 화면 에디터 글자 크기(기본 13px). 넓은 화면은 기본 테마 그대로. */
+const fontFor = (compact: boolean, px: number): Extension =>
+  compact
+    ? EditorView.theme({
+        '.cm-content, .cm-gutters': { fontSize: `${px || DEFAULT_FONT}px` },
+        '.cm-line, .cm-gutterElement': { lineHeight: '1.6' },
+      })
+    : [];
 const MIN_FONT = 9;
 const MAX_FONT = 22;
 
