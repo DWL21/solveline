@@ -93,7 +93,7 @@ function Shell() {
 
   return (
     <div className="flex h-full flex-col bg-ink">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-[#0f1922] px-3 sm:px-4">
+      <header className="code-focus-hide flex h-12 shrink-0 items-center gap-2 border-b border-line bg-[#0f1922] px-3 sm:px-4">
         <a
           href="#/"
           className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-raised"

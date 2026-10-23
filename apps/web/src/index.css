@@ -27,9 +27,12 @@ html,
 body {
   height: 100%;
   overscroll-behavior: none;
+  /* iOS가 커서를 보이게 하려고 화면을 옆으로 밀지 않도록 가로 넘침을 자른다 */
+  overflow-x: clip;
 }
 #root {
   height: var(--app-h, 100dvh);
+  overflow-x: clip;
 }
 
 /* 안전 영역(노치·홈 막대) */
@@ -228,10 +231,26 @@ body {
   }
 }
 
-/* 터치 기기의 코드 에디터: 글자를 키워 손가락으로 커서를 잡기 쉽게 */
+/* 휴대폰 코드 탭(main.tsx·Workspace가 html에 표시): 상단바를 숨겨 에디터를 넓게 */
+html[data-code-focus] .code-focus-hide {
+  display: none;
+}
+/* 화상 키보드가 열려 있으면 하단 실행 바를 숨겨 에디터 공간을 확보한다 */
+html[data-keyboard] .keyboard-hide {
+  display: none;
+}
+/* 휴대폰에서 코드를 쓰는 중(에디터 초점): 탭·실행 바까지 숨기고 코드만 보여 준다 */
+html[data-typing] .typing-hide {
+  display: none;
+}
+
+/* 터치 기기의 코드 에디터: 한 줄에 더 많이 보이도록 14px, 줄 간격은 넉넉히(손가락으로 줄 잡기 쉽게) */
 @media (pointer: coarse) {
   .code-editor .cm-content,
   .code-editor .cm-gutters {
-    font-size: 15px;
+    font-size: var(--code-font, 14px);
+  }
+  .code-editor .cm-line {
+    line-height: 1.6;
   }
 }

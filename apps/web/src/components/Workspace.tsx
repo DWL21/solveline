@@ -4,8 +4,7 @@ import { type Language, type Problem, type ProblemInput, type ProblemMode, type 
 import { ApiError, api, qk } from '../lib/api.ts';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';
-import { CodeEditor, type EditorHandle } from './CodeEditor.tsx';
-import { CodeKeys } from './CodeKeys.tsx';
+import { CodeEditor } from './CodeEditor.tsx';
 import { useNarrow } from '../lib/media.ts';
 import { ResultPanel, type RunState } from './ResultPanel.tsx';
 import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx';
@@ -89,7 +88,22 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const showResult = useCallback(() => {
     if (narrowRef.current) setPane('result');
   }, [setPane]);
-  const editorHandle = useRef<EditorHandle | null>(null);
+  // 휴대폰 코드 탭: 앱 상단바·문제 제목 줄을 숨겨 에디터를 최대한 넓게(문제·결과 탭으로 가면 다시 보인다)
+  const codeFocus = narrow && pane === 'code';
+  // 코드를 쓰는 중(에디터 초점 = 화상 키보드 열림): 탭·실행 바까지 숨겨 코드만 보여 준다
+  const [typingRaw, setTyping] = useState(false);
+  const typing = codeFocus && typingRaw;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (codeFocus) root.dataset.codeFocus = '';
+    else delete root.dataset.codeFocus;
+    if (typing) root.dataset.typing = '';
+    else delete root.dataset.typing;
+    return () => {
+      delete root.dataset.codeFocus;
+      delete root.dataset.typing;
+    };
+  }, [codeFocus, typing]);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
@@ -240,7 +254,7 @@ guest ? (
               </a>
             </footer>
           ) : (
-          <footer className={`pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4 ${narrow ? '' : 'flex-wrap'}`}>
+          <footer className={`pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'keyboard-hide typing-hide' : 'flex-wrap'}`}>
             <button type="button" className="btn-ghost touch-target" onClick={reset} aria-label="초기화" title="시작 코드로 되돌리기">
               {narrow ? '↺' : '초기화'}
             </button>
@@ -294,7 +308,7 @@ guest ? (
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* 문제 제목 줄 */}
-      <div className={`flex items-center gap-2 border-b border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'flex-wrap gap-y-1.5' : 'flex-wrap'}`}>
+      <div className={`flex items-center gap-2 border-b border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'flex-wrap gap-y-1.5' : 'flex-wrap'} ${codeFocus ? 'hidden' : ''}`}>
         {editing ? (
           <input
             value={draft.title}
@@ -307,7 +321,7 @@ guest ? (
         )}
         {!guest && <SaveBadge state={saveState} onRetry={() => void queue?.flush(problem.id)} />}
         {/* 휴대폰: 도구는 한 줄로 두고 가로로 밀어서 본다 */}
-        <div className={narrow ? 'no-scrollbar -mx-3 flex w-[calc(100%+1.5rem)] shrink-0 items-center gap-2 overflow-x-auto px-3 whitespace-nowrap' : 'contents'}>
+        <div className={narrow ? 'no-scrollbar flex w-full min-w-0 basis-full items-center gap-2 overflow-x-auto whitespace-nowrap' : 'contents'}>
         {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
@@ -357,12 +371,12 @@ guest ? (
         )}
         </div>
       </div>
-      {editing && (
+      {editing && !codeFocus && (
         <p className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-[12px] text-warn">편집 모드 · 바꾼 내용은 모든 사용자에게 적용돼요</p>
       )}
 
       {narrow && (
-        <nav className="grid shrink-0 grid-cols-3 border-b border-line bg-base" aria-label="문제 화면">
+        <nav className="typing-hide grid shrink-0 grid-cols-3 border-b border-line bg-base" aria-label="문제 화면">
           {(
             [
               ['problem', '문제'],
@@ -375,7 +389,7 @@ guest ? (
               type="button"
               aria-pressed={pane === p}
               onClick={() => setPane(p)}
-              className={`relative h-11 border-b-2 text-[13.5px] font-semibold ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
+              className={`relative border-b-2 text-[13.5px] font-semibold ${codeFocus ? 'h-10' : 'h-11'} ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
             >
               {label}
               {p === 'result' && (runMut.isPending ? <Spinner size={11} /> : unseen && <span className="absolute top-3 ml-1 inline-block size-1.5 rounded-full bg-accent" aria-label="새 결과" />)}
@@ -479,7 +493,7 @@ guest ? (
             className={narrow ? (pane === 'code' ? 'min-h-0 flex-1' : 'hidden') : 'min-h-[300px] md:min-h-0'}
             style={narrow ? undefined : { flex: `${layout.editorPct} 1 0` }}
           >
-            <CodeEditor handle={editorHandle} visible={!narrow || pane === 'code'} readOnly={guest} docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
+            <CodeEditor compact={narrow} onFocusChange={setTyping} visible={!narrow || pane === 'code'} readOnly={guest} docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
           </div>
           {!narrow && (
           <Splitter
@@ -498,7 +512,6 @@ guest ? (
           >
             <ResultPanel state={run} />
           </div>
-          {narrow && pane === 'code' && !guest && <CodeKeys editor={editorHandle} />}
           {!narrow && footer}
         </section>
       </div>
