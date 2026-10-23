@@ -1,23 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { EMPTY_TIMER, type Problem, type ProblemTimer } from '@solveline/shared';
-import { api, qk } from '../lib/api.ts';
+import type { DraftQueue } from '../lib/draft-queue.ts';
 import { formatDuration } from '../lib/time.ts';
 
-const SAVE_EVERY_MS = 10_000;
 /** 타이머가 늦게 깨어나도(절전·백그라운드 제한) 한 번에 크게 늘지 않게 */
 const MAX_TICK_MS = 5_000;
 
 /**
  * 풀이 시간 자동 측정. 문제 화면이 열려 있고 탭이 보일 때만 늘어난다.
- * 100점을 받으면 멈추고(solvedMs), 초기화하면 0부터 다시. 10초마다·탭 숨김·이탈 때 서버에 저장한다.
+ * 100점을 받으면 멈추고(solvedMs), 초기화하면 0부터 다시. 로컬에 보관하고 공통 동기화 큐가 60초마다 전송한다.
  */
-/** enabled가 false면(비회원) 재지도 저장하지도 않는다 */
-export function useSolveTimer(problem: Problem, enabled = true) {
-  const qc = useQueryClient();
-  const [timer, setTimer] = useState<ProblemTimer>(problem.timer);
-  const ref = useRef(timer);
-  ref.current = timer;
+/** 큐가 없으면(비회원) 재지도 저장하지도 않는다 */
+export function useSolveTimer(problem: Problem, queue: DraftQueue | null) {
+  const enabled = !!queue;
+  const [timer, setTimer] = useState<ProblemTimer>(() => queue?.read(problem.id)?.patch.timer ?? problem.timer);
   const saved = useRef(JSON.stringify(problem.timer));
   const running = enabled && timer.solvedMs === null && !timer.paused;
 
@@ -34,45 +30,19 @@ export function useSolveTimer(problem: Problem, enabled = true) {
     return () => clearInterval(id);
   }, [running]);
 
-  const persist = useCallback(
-    (opts: { keepalive?: boolean; refreshList?: boolean } = {}) => {
-      if (!enabled) return;
-      const cur = ref.current;
-      const json = JSON.stringify(cur);
-      if (json === saved.current) return;
-      saved.current = json;
-      qc.setQueryData<Problem>(qk.problem(problem.id), (old) => (old ? { ...old, timer: cur } : old));
-      api
-        .saveTimer(problem.id, cur, { keepalive: opts.keepalive })
-        .then(() => {
-          if (opts.refreshList) void qc.invalidateQueries({ queryKey: qk.problems });
-        })
-        .catch(() => {
-          saved.current = ''; // 다음 기회에 다시 저장
-        });
-    },
-    [problem.id, qc, enabled],
-  );
-
   useEffect(() => {
-    const id = setInterval(() => persist(), SAVE_EVERY_MS);
-    const onHide = () => document.visibilityState === 'hidden' && persist({ keepalive: true });
-    const onPageHide = () => persist({ keepalive: true });
-    document.addEventListener('visibilitychange', onHide);
-    window.addEventListener('pagehide', onPageHide);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener('visibilitychange', onHide);
-      window.removeEventListener('pagehide', onPageHide);
-      persist({ refreshList: true });
-    };
-  }, [persist]);
+    if (!queue) return;
+    const json = JSON.stringify(timer);
+    if (json === saved.current) return;
+    saved.current = json;
+    queue.edit(problem.id, { timer });
+  }, [timer, problem.id, queue]);
 
-  // 맞춤·초기화는 바로 저장하고 목록도 갱신
+  // 맞춤·초기화·일시정지는 바로 동기화한다.
   const [bump, setBump] = useState(0);
   useEffect(() => {
-    if (bump) persist({ refreshList: true });
-  }, [bump, persist]);
+    if (bump) void queue?.flush(problem.id);
+  }, [bump, queue, problem.id]);
 
   const markSolved = useCallback(() => {
     setTimer((t) => (t.solvedMs === null ? { ...t, solvedMs: t.elapsedMs, paused: false } : t));

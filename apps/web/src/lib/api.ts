@@ -20,6 +20,7 @@ import {
   type SubmissionRequest,
   type TestCase,
   type ProblemInput,
+  type ProblemPatch,
   type RunRequest,
 } from '@solveline/shared';
 
@@ -82,6 +83,8 @@ export const api = {
   /** keepalive: 페이지를 떠나는 중에도 요청을 끝까지 보낸다(본문 64KB 이하일 때만 브라우저가 허용). */
   saveProblem: (id: string, p: ProblemInput, opts: { keepalive?: boolean } = {}) =>
     request(Problem, `/api/problems/${encodeURIComponent(id)}`, { ...json('PUT', p), keepalive: opts.keepalive }),
+  patchProblem: (id: string, patch: ProblemPatch, owner: string, opts: { keepalive?: boolean; signal?: AbortSignal } = {}) =>
+    request(Problem, `/api/problems/${encodeURIComponent(id)}`, { ...json('PATCH', patch), ...opts, headers: { 'X-Draft-Owner': owner } }),
   deleteProblem: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/problems/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   run: (r: RunRequest) => request(RunResult, '/api/run', json('POST', r)),
   /** 제출 큐: 바로 id를 받고, submission(id)로 결과를 조회한다 */

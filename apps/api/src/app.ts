@@ -11,6 +11,7 @@ import {
   FolderInput,
   Problem,
   ProblemInput,
+  ProblemPatch,
   ProblemSummary,
   HiddenCases,
   ProblemTimer,
@@ -135,7 +136,7 @@ export function createApp(deps: AppDeps) {
   const app = new Hono<Env>();
 
   app.use('*', secureHeaders());
-  app.use('/api/*', cors({ origin: config.webOrigin, credentials: true, allowMethods: ['GET', 'POST', 'PUT', 'DELETE'], allowHeaders: ['content-type'] }));
+  app.use('/api/*', cors({ origin: config.webOrigin, credentials: true, allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowHeaders: ['content-type', 'x-draft-owner'] }));
   app.onError((err, c) => {
     if (err instanceof StoreError) return fail(c, err.code === 'duplicate_name' ? 409 : 400, err.code, err.message);
     log.error(`[api] ${c.req.path}`, err);
@@ -426,6 +427,17 @@ export function createApp(deps: AppDeps) {
     const body = await readJson(c, ProblemInput);
     if (!body) return fail(c, 400, 'invalid_request', '문제 형식이 올바르지 않습니다.');
     const p = problems.update(c.req.param('id'), body, c.get('userId'), c.get('editor'));
+    return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
+  });
+
+  app.patch('/api/problems/:id', async (c) => {
+    // 다른 탭에서 계정이 바뀌어도 이전 계정의 초안을 저장하지 않는다.
+    const user = users.byId(c.get('userId'));
+    if (!user || c.req.header('x-draft-owner') !== user.email)
+      return fail(c, 409, 'draft_owner_mismatch', '계정이 변경되어 동기화를 중지했어요. 다시 로그인해 주세요.');
+    const body = await readJson(c, ProblemPatch);
+    if (!body) return fail(c, 400, 'invalid_request', '변경 내용의 형식이 올바르지 않습니다.');
+    const p = problems.patch(c.req.param('id'), body, c.get('userId'), c.get('editor'));
     return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 

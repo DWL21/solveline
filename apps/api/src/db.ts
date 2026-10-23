@@ -14,6 +14,7 @@ import {
   type Language,
   type LastSubmission,
   type ProblemInput,
+  type ProblemPatch,
   type ProblemSummary,
   type ProblemMode,
   type ProblemTimer,
@@ -431,6 +432,24 @@ export class ProblemStore {
     }
     this.upsertState(id, userId, { language: input.language, code: JSON.stringify(input.code), my_cases: JSON.stringify(input.myCases.map((c) => ({ ...c, hidden: false }))), memo: input.memo }, now);
     return this.get(id, userId);
+  }
+
+  /** 변경 필드만 최신 데이터에 합친다. 코드도 언어별로 합쳐 다른 언어의 풀이를 보존한다. */
+  patch(id: string, patch: ProblemPatch, userId: string, editor: boolean): Problem | null {
+    return this.db.transaction(() => {
+      const current = this.get(id, userId);
+      if (!current) return null;
+      const { timer, ...fields } = patch;
+      if (Object.keys(fields).length) {
+        this.update(id, {
+          ...current, ...fields,
+          code: { ...current.code, ...fields.code },
+          starterCode: fields.starterCode ? { ...current.starterCode, ...fields.starterCode } : undefined,
+        }, userId, editor);
+      }
+      if (timer) this.setTimer(id, timer, userId);
+      return this.get(id, userId);
+    })();
   }
 
   /** 시작 코드만 바꾼다(마스터·편집 권한자) */

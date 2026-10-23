@@ -220,6 +220,29 @@ const as = (s: ReturnType<typeof setup>, cookie: string) => async (method: strin
 };
 
 describe('공용 문제·사용자별 풀이', () => {
+  it('변경분 저장은 최신 공용 내용·다른 언어·메모를 유지하고 계정을 확인한다', async () => {
+    const s = setup();
+    const ownerCookie = await login(s);
+    const E = as(s, ownerCookie);
+    const id = (await E('POST', '/api/problems', problem)).body.data.id;
+    await E('PUT', `/api/problems/${id}`, { ...problem, title: '최신 제목', memo: '서버 메모', code: { java: 'java old', python: 'python latest' } });
+    const patch = (body: unknown, owner = OWNER, cookie = ownerCookie) => s.app.request(`/api/problems/${id}`, {
+      method: 'PATCH', headers: { cookie, 'content-type': 'application/json', 'x-draft-owner': owner }, body: JSON.stringify(body),
+    });
+    const response = await patch({ code: { java: 'java draft' } });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toMatchObject({ title: '최신 제목', memo: '서버 메모', code: { java: 'java draft', python: 'python latest' } });
+    expect((await patch({ memo: 'wrong' }, 'other@example.com')).status).toBe(409);
+    const member = await login(s, 'member@example.com');
+    expect((await patch({ memo: 'old account' }, OWNER, member)).status).toBe(409);
+    const memberPatch = await patch({ title: '금지된 변경', code: { python: 'member code' }, timer: { elapsedMs: 1000, solvedMs: null, paused: false } }, 'member@example.com', member);
+    expect(memberPatch.status).toBe(200);
+    expect((await memberPatch.json()).data).toMatchObject({ title: '최신 제목', code: { python: 'member code' }, timer: { elapsedMs: 1000 } });
+    expect((await E('GET', `/api/problems/${id}`)).body.data.code.java).toBe('java draft');
+    expect((await patch({ code: { java: 123 } })).status).toBe(400);
+    expect((await patch({ timer: { elapsedMs: -1 } })).status).toBe(400);
+  });
+
   it('문제·폴더는 모두가 같이 보고, 편집 권한이 없으면 만들거나 바꿀 수 없다', async () => {
     const s = setup();
     const E = as(s, await login(s)); // 운영자: 편집 권한

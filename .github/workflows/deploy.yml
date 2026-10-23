@@ -46,7 +46,7 @@ jobs:
           sudo chmod 600 /etc/solveline/api.env.new
           sudo mv /etc/solveline/api.env.new /etc/solveline/api.env
           echo "env keys: $(sudo cut -d= -f1 /etc/solveline/api.env | tr '\n' ' ')"
-      - name: Build and deploy web (Cloudflare Pages)
+      - name: Build web (Cloudflare Pages)
         env:
           PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
@@ -56,10 +56,14 @@ jobs:
           export PATH="$RUNNER_TEMP/corepack-bin:$PATH"
           pnpm install --frozen-lockfile --filter @solveline/web...
           pnpm --filter @solveline/web build
-          cd apps/web
-          npx --yes wrangler@4.151.0 pages deploy dist --project-name solveline --branch main --commit-hash "$GITHUB_SHA"
       - name: Deploy API and runner
         run: bash scripts/deploy-production.sh
+      - name: Deploy web (Cloudflare Pages)
+        # 새 프론트가 호출하는 API를 먼저 배포한다. 기존 프론트 API는 호환성을 유지한다.
+        env:
+          PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+        working-directory: apps/web
+        run: npx --yes wrangler@4.151.0 pages deploy dist --project-name solveline --branch main --commit-hash "$GITHUB_SHA"
       - name: Verify public deployment
         run: |
           curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline-api.simplyimg.com/api/health

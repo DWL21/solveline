@@ -147,6 +147,20 @@ export const ProblemInput = z.object({
 });
 export type ProblemInput = z.infer<typeof ProblemInput>;
 
+/** 로컬 임시 저장의 변경분. 보내지 않은 필드는 최신 서버 값을 유지한다. */
+export const ProblemPatch = ProblemInput.omit({ lastSubmission: true }).partial().extend({
+  // 부분 업데이트에서는 기존 생성용 기본값을 채우면 안 된다.
+  folderId: ProblemInput.shape.folderId.removeDefault().optional(),
+  timeLimitMs: ProblemInput.shape.timeLimitMs.removeDefault().optional(),
+  myCases: ProblemInput.shape.myCases.removeDefault().optional(),
+  memo: ProblemInput.shape.memo.removeDefault().optional(),
+  code: CodeSet.partial().optional(),
+  starterCode: CodeSet.partial().optional(),
+  timer: ProblemTimer.optional(),
+});
+export type ProblemPatch = z.infer<typeof ProblemPatch>;
+
+
 /** 히든 테스트셋: 내용은 서버의 해시 파일에 있고 문제에는 해시와 개수만 둔다. */
 export const TestsetRef = z.object({ hash: z.string(), count: z.number().int().min(0) });
 export type TestsetRef = z.infer<typeof TestsetRef>;

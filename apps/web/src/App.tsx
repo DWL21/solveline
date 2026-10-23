@@ -11,6 +11,7 @@ import { Avatar } from './components/Avatar.tsx';
 import { BootScreen, Spinner, WorkspaceSkeleton } from './components/Loading.tsx';
 import { Home, scopeList } from './components/Home.tsx';
 import { blankProblem } from './lib/blank.ts';
+import { useDraftSync } from './lib/drafts.ts';
 import { loginHref, useMe } from './lib/me.ts';
 
 // 문제 화면(에디터)은 무거우므로 열 때만 받는다. 목록 화면이 뜨면 미리 받아 둔다(prefetchWorkspace).
@@ -54,11 +55,12 @@ function Main() {
     );
   // 로그인 오류로 돌아왔으면 로그인 화면, 아니면 비회원도 문제를 둘러볼 수 있다
   if (!session.data.authenticated && new URLSearchParams(location.search).has('auth_error')) return <LoginScreen />;
-  return <Shell />;
+  return <Shell key={session.data.user?.email ?? 'guest'} />;
 }
 
 function Shell() {
   const me = useMe();
+  const sync = useDraftSync(me?.email);
   const qc = useQueryClient();
   const [route, go] = useRoute();
   const [creating, setCreating] = useState(false);
@@ -70,7 +72,7 @@ function Shell() {
   }, [route]);
 
   const logout = useMutation({
-    mutationFn: api.logout,
+    mutationFn: () => { sync?.stop(); return api.logout(); },
     onSettled: () => {
       const out: Session = { authenticated: false, expiresAt: null, user: null };
       qc.setQueryData(qk.session, out);

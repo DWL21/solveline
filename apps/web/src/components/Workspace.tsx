@@ -10,14 +10,9 @@ import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx'
 import { SolvedDialog } from './SolvedDialog.tsx';
 import { DEFAULT_LAYOUT, Splitter, useLayout } from './Splitter.tsx';
 import { Spinner, WorkspaceSkeleton } from './Loading.tsx';
+import { draftQueue, inputChanges, useDraftState } from '../lib/drafts.ts';
+import { applyPatch, type DraftState } from '../lib/draft-queue.ts';
 import { loginHref, useMe } from '../lib/me.ts';
-
-type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
-
-/** 입력이 멈추고 이만큼 지나면 저장한다. 문제 전환·탭 숨김·페이지 이탈 때는 바로 저장한다. */
-const SAVE_DELAY_MS = 300;
-/** 브라우저가 keepalive 요청 본문을 64KB로 제한한다 */
-const KEEPALIVE_LIMIT = 60_000;
 
 const toInput = (p: Problem): ProblemInput => ({
   title: p.title,
@@ -29,6 +24,7 @@ const toInput = (p: Problem): ProblemInput => ({
   cases: p.cases,
   language: p.language,
   code: p.code,
+  starterCode: p.starterCode,
   myCases: p.myCases,
   memo: p.memo,
   lastSubmission: p.lastSubmission,
@@ -53,83 +49,15 @@ export function Workspace({ problemId, onDeleted, onNext, onList }: { problemId:
   return <Editor key={problemId} problem={q.data} onDeleted={onDeleted} onNext={onNext} onList={onList} />;
 }
 
-/** 실시간 저장: 짧은 지연 + 이탈 시 즉시. 요청은 순서대로 하나씩 보낸다. */
-function useAutosave(problem: Problem, draft: ProblemInput) {
-  const qc = useQueryClient();
-  const [state, setState] = useState<SaveState>('saved');
-  const dirty = useRef(false);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const chain = useRef<Promise<unknown>>(Promise.resolve());
-
-  const flush = useCallback(
-    (opts: { keepalive?: boolean } = {}) => {
-      if (!dirty.current) return;
-      dirty.current = false;
-      const sent = draftRef.current;
-      // 다시 열었을 때 최신 내용이 보이도록 캐시를 먼저 바꾼다
-      qc.setQueryData<Problem>(qk.problem(problem.id), (old) => (old ? { ...old, ...sent } : old));
-      setState('saving');
-      const keepalive = !!opts.keepalive && JSON.stringify(sent).length < KEEPALIVE_LIMIT;
-      chain.current = chain.current
-        .then(() => api.saveProblem(problem.id, sent, { keepalive }))
-        .then((saved) => {
-          if (draftRef.current === sent) qc.setQueryData(qk.problem(problem.id), saved);
-          void qc.invalidateQueries({ queryKey: qk.problems });
-          if (!dirty.current) setState('saved');
-        })
-        .catch(() => {
-          dirty.current = true;
-          setState('error');
-        });
-    },
-    [problem.id, qc],
-  );
-
-  const markDirty = useCallback(() => {
-    dirty.current = true;
-    setState('dirty');
-  }, []);
-
-  // 입력 후 짧은 지연
-  useEffect(() => {
-    if (!dirty.current) return;
-    const t = setTimeout(() => flush(), SAVE_DELAY_MS);
-    return () => clearTimeout(t);
-  }, [draft, flush]);
-
-  // 탭 숨김·페이지 이탈·문제 전환(언마운트) 때 즉시 저장
-  useEffect(() => {
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') flush({ keepalive: true });
-    };
-    const onPageHide = () => flush({ keepalive: true });
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      flush({ keepalive: true });
-      if (state === 'error') e.preventDefault();
-    };
-    document.addEventListener('visibilitychange', onHide);
-    window.addEventListener('pagehide', onPageHide);
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => {
-      document.removeEventListener('visibilitychange', onHide);
-      window.removeEventListener('pagehide', onPageHide);
-      window.removeEventListener('beforeunload', onBeforeUnload);
-    };
-  }, [flush, state]);
-  useEffect(() => () => flush(), [flush]);
-
-  return { state, markDirty, retry: () => (markDirty(), flush()) };
-}
-
 function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<ProblemInput>(() => toInput(problem));
   // 비회원: 문제를 볼 수만 있다(코드 작성·실행·저장은 로그인 후)
   const me = useMe();
   const guest = !me;
-  const save = useAutosave(problem, draft);
-  const solve = useSolveTimer(problem, !guest);
+  const queue = draftQueue(me?.email);
+  const [draft, setDraft] = useState<ProblemInput>(() => toInput(applyPatch(problem, queue?.read(problem.id)?.patch)));
+  const saveState = useDraftState(queue, problem.id);
+  const solve = useSolveTimer(problem, queue);
   const { layout, set: setLayout } = useLayout();
   const rowRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLElement>(null);
@@ -146,10 +74,13 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
 
   const patch = useCallback(
     (p: Partial<ProblemInput>) => {
-      setDraft((d) => ({ ...d, ...p }));
-      if (!guest) save.markDirty();
+      const previous = draftRef.current;
+      const next = { ...previous, ...p };
+      draftRef.current = next;
+      setDraft(next);
+      queue?.edit(problem.id, inputChanges(previous, next));
     },
-    [save, guest],
+    [queue, problem.id],
   );
 
   const lang = draft.language;
@@ -162,6 +93,10 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   /** 제출 큐에 넣고 끝날 때까지 조회한다(처음엔 빠르게, 점점 느리게). */
   const runMut = useMutation({
     mutationFn: async ({ cases, submit }: { cases: TestCase[]; submit: boolean }) => {
+      // 채점은 서버의 공용 케이스를 사용하므로 편집한 내용부터 반영한다.
+      while (queue?.read(problem.id) && Object.keys(queue.read(problem.id)!.patch).some((key) => key !== 'timer')) {
+        if (!await queue.flush(problem.id)) throw new ApiError(0, 'sync_failed', '변경 내용을 동기화하지 못했어요. 연결을 확인해 주세요.');
+      }
       const d = draftRef.current;
       let s = await api.submit({ problemId: problem.id, kind: submit ? 'submit' : 'run', language: d.language, mode: d.mode, code: d.code[d.language], cases });
       current.current.id = s.id;
@@ -248,6 +183,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const delMut = useMutation({
     mutationFn: () => api.deleteProblem(problem.id),
     onSuccess: () => {
+      queue?.discard(problem.id);
       qc.removeQueries({ queryKey: qk.problem(problem.id) });
       void qc.invalidateQueries({ queryKey: qk.problems });
       void qc.invalidateQueries({ queryKey: qk.collections });
@@ -284,7 +220,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
         ) : (
           <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-[15px] font-bold">{draft.title}</h1>
         )}
-        {!guest && <SaveBadge state={save.state} onRetry={save.retry} />}
+        {!guest && <SaveBadge state={saveState} onRetry={() => void queue?.flush(problem.id)} />}
         {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
@@ -602,16 +538,16 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
   );
 }
 
-function SaveBadge({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
-  if (state === 'error')
+function SaveBadge({ state, onRetry }: { state: DraftState; onRetry: () => void }) {
+  if (state === 'error' || state === 'storage-error')
     return (
       <button type="button" onClick={onRetry} className="text-[12px] font-semibold text-bad underline">
-        저장 실패 · 다시 시도
+        {state === 'storage-error' ? '로컬 저장 실패 · 서버 저장' : '기기에 보관 중 · 동기화 재시도'}
       </button>
     );
   return (
     <span className="inline-flex items-center gap-1 text-[12px] text-faint" aria-live="polite">
-      {state === 'saved' ? '✓ 저장됨' : <><Spinner size={11} /> 저장 중</>}
+      {state === 'saved' ? '✓ 저장됨' : state === 'local' ? '✓ 기기에 저장됨' : <><Spinner size={11} /> 동기화 중</>}
     </span>
   );
 }

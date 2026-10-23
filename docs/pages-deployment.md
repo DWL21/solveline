@@ -5,8 +5,8 @@
 ## CI/CD
 
 - PR: 기존 `check`(타입·테스트·빌드), `docker`(이미지·격리 검사), `secret-scan` 유지.
-- main: 기존 `deploy.yml`의 self-hosted runner가 web을 빌드하고 `apps/web/dist`만 Wrangler로 Pages에 업로드한 다음 서버 이미지를 배포합니다.
-- Pages 업로드가 실패하면 서버 배포를 시작하지 않습니다. Pages의 Git 자동 빌드는 연결하지 않아 중복 배포를 막습니다.
+- main: 기존 `deploy.yml`의 self-hosted runner가 web을 빌드하고 서버 이미지를 먼저 배포한 다음 `apps/web/dist`만 Wrangler로 Pages에 업로드합니다. 새 API가 준비되기 전에 새 프론트가 노출되지 않도록 기존 API의 하위 호환성을 유지합니다.
+- 프론트 빌드가 실패하면 서버 배포를 시작하지 않습니다. Pages 업로드가 실패하면 기존 프론트 배포가 유지됩니다. Pages의 Git 자동 빌드는 연결하지 않아 중복 배포를 막습니다.
 - 배포 runner의 기존 Wrangler 인증을 사용합니다(같은 서버의 Pages 배포와 동일). 인증이 만료되면 해당 OS 사용자로 Wrangler 인증을 갱신합니다. 인증 파일·토큰은 출력하거나 저장소에 넣지 않습니다.
 - production 환경·main/repository 제한·배포 동시성 제어를 유지합니다.
 

@@ -17,7 +17,7 @@
 | `GET` `PUT` | `/api/admin/signup-settings` | 신규 가입 허용 여부 조회·변경 (`{ signupEnabled: boolean }`, 마스터 전용) |
 | `GET` | `/api/runtime` | runner 상태와 Java·Python 버전 |
 | `GET` `POST` | `/api/problems` | 문제 목록 / 만들기 |
-| `GET` `PUT` `DELETE` | `/api/problems/{id}` | 문제 조회 / 저장 / 삭제 |
+| `GET` `PUT` `PATCH` `DELETE` | `/api/problems/{id}` | 문제 조회 / 전체 저장 / 변경분 저장 / 삭제 |
 | `GET` `POST` | `/api/folders` | 폴더 목록 / 만들기 |
 | `PUT` `DELETE` | `/api/folders/{id}` | 폴더 이름 바꾸기 / 삭제 (문제는 폴더 없음으로) |
 | `GET` `POST` | `/api/collections` | 컬렉션 목록(문제 id 순서 포함) / 만들기 |
@@ -30,3 +30,5 @@
 | `GET` | `/api/health` | 상태 확인 |
 
 신규 가입 중지 시 Google 신규 계정 콜백은 `/?auth_error=signup_closed`로 이동하고, 가입 대기 조회·가입 완료는 `403 signup_closed`를 반환합니다. 기존 회원 로그인은 유지합니다. `/api/public/config`의 `signupEnabled`로 현재 가입 허용 여부를 확인할 수 있습니다.
+
+`PATCH /api/problems/{id}`는 `ProblemPatch`의 명시된 필드만 반영합니다. `code`·`starterCode`는 언어별로 합치고 `timer`도 함께 저장할 수 있습니다. `X-Draft-Owner` 헤더에 현재 로그인 계정 이메일을 보내야 하며, 세션과 다르면 `409 draft_owner_mismatch`입니다. 공용 필드는 기존처럼 편집 권한이 있어야 반영됩니다. 생성용 기본값은 부분 업데이트에 채우지 않습니다.
