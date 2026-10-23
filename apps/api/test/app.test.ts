@@ -2,18 +2,29 @@ import { describe, expect, it, vi } from 'vitest';
 import { templateFor, type ProblemInput, type TestCase } from '@codetest/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
-import { openDb } from '../src/db.ts';
+import { openDb, UserStore } from '../src/db.ts';
+import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
 import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
 import { SubmissionStore } from '../src/dispatcher.ts';
 
-const PASSWORD = 'test-password-0123456789abcdef';
+const OWNER = 'owner@example.com';
+const MASTER = 'master-password-0123456789abcdef';
+
+/** 가짜 Google: code가 곧 이메일이다. sub는 이메일에서 만든다. */
+const fakeGoogle: GoogleClient = {
+  authUrl: ({ state, redirectUri }) => `https://accounts.google.com/o/oauth2/v2/auth?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`,
+  exchange: async ({ code }) => {
+    if (code === 'bad') throw new GoogleAuthError('토큰 교환 실패');
+    return { sub: `sub-${code}`, email: code, name: code.split('@')[0]!, picture: '' };
+  },
+};
 
 /**
  * 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다.
  * 코드가 'hold'면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
  */
-function setup() {
-  const config = loadConfig({ ACCESS_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' });
+function setup(env: Record<string, string> = {}) {
+  const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:', OWNER_EMAIL: OWNER, ...env });
   const calls: RunJob[] = [];
   const uploads: string[] = [];
   const held = new Map<string, () => void>();
@@ -41,16 +52,48 @@ function setup() {
       return true;
     },
   };
-  const { app, dispatcher } = createApp({ config, db: openDb(':memory:'), runners: [runner] });
-  return { app, dispatcher, calls, uploads, held };
+  const db = openDb(':memory:');
+  const { app, dispatcher } = createApp({ config, db, runners: [runner], google: fakeGoogle });
+  return { app, db, dispatcher, calls, uploads, held };
 }
 
-function login(s: ReturnType<typeof setup>, password = PASSWORD) {
-  return s.app.request('/api/auth/login', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password }),
-  });
+const cookieOf = (res: Response, name: string) =>
+  res.headers
+    .getSetCookie()
+    .map((c) => c.split(';')[0]!)
+    .find((c) => c.startsWith(`${name}=`) && c.length > name.length + 1);
+
+/** Google 왕복을 흉내 낸다. 결과: 돌아간 위치와 받은 쿠키 */
+async function googleRoundTrip(s: ReturnType<typeof setup>, code: string, next = '/') {
+  const start = await s.app.request(`/api/auth/google/start?next=${encodeURIComponent(next)}`);
+  expect(start.status).toBe(302);
+  const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
+  const oauth = cookieOf(start, 'solveline_oauth')!;
+  const cb = await s.app.request(`/api/auth/google/callback?code=${encodeURIComponent(code)}&state=${state}`, { headers: { cookie: oauth } });
+  return { location: cb.headers.get('location'), session: cookieOf(cb, 'codetest_session'), signup: cookieOf(cb, 'solveline_signup') };
+}
+
+function masterRequest(s: ReturnType<typeof setup>, password: string) {
+  return s.app.request('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+}
+
+/** 관리자 모드 쿠키 */
+async function masterLogin(s: ReturnType<typeof setup>) {
+  const res = await masterRequest(s, MASTER);
+  expect(res.status).toBe(200);
+  return cookieOf(res, 'solveline_admin')!;
+}
+
+const agree = { agreeAge: true, agreeTerms: true, agreePrivacy: true };
+
+/** 처음이면 약관에 동의해 가입하고, 이미 있으면 로그인한다. 세션 쿠키를 돌려준다. */
+async function login(s: ReturnType<typeof setup>, email = OWNER): Promise<string> {
+  const r = await googleRoundTrip(s, email);
+  if (r.session) return r.session;
+  expect(r.location).toBe('/signup');
+  const res = await s.app.request('/api/auth/signup', { method: 'POST', headers: { cookie: r.signup!, 'content-type': 'application/json' }, body: JSON.stringify(agree) });
+  expect(res.status).toBe(200);
+  return cookieOf(res, 'codetest_session')!;
 }
 
 const problem: ProblemInput = {
@@ -63,53 +106,260 @@ const problem: ProblemInput = {
   cases: [{ id: 'a', args: ['[1, 2]'], stdin: '', expected: '3', hidden: false }],
   language: 'python',
   code: { java: templateFor('java', 'function'), python: templateFor('python', 'function') },
+  myCases: [],
+  memo: '',
   lastSubmission: null,
 };
 
 describe('인증', () => {
-  it('세션 없이는 문제·실행 API를 막는다', async () => {
-    const { app } = setup();
-    expect((await app.request('/api/problems')).status).toBe(401);
+  it('비회원은 문제·폴더를 볼 수만 있고, 저장·실행은 막는다', async () => {
+    const s = setup();
+    const { app } = s;
+    const E = as(s, await login(s));
+    const p = (await E('POST', '/api/problems', problem)).body.data.id;
+    await E('PUT', `/api/problems/${p}`, { ...problem, memo: '운영자 메모', code: { java: '운영자 코드', python: '' } });
+    const list = (await (await app.request('/api/problems')).json()) as { data: { id: string; lastSubmission: unknown }[] };
+    expect(list.data.map((x) => x.id)).toEqual([p]);
+    const one = (await (await app.request(`/api/problems/${p}`)).json()) as { data: { code: { python: string; java: string }; memo: string } };
+    expect(one.data.code.python).toBe(problem.code.python);
+    expect(one.data.memo).toBe('');
+    expect((await app.request('/api/folders')).status).toBe(200);
+    expect(((await (await app.request('/api/collections')).json()) as { data: unknown[] }).data).toEqual([]);
+    expect((await app.request(`/api/problems/${p}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(problem) })).status).toBe(401);
+    expect((await app.request(`/api/problems/${p}/hidden`)).status).toBe(401);
+    expect((await app.request('/api/submissions', { method: 'POST' })).status).toBe(401);
     expect((await app.request('/api/run', { method: 'POST' })).status).toBe(401);
     expect((await app.request('/api/health')).status).toBe(200);
+    expect((await app.request('/api/public/config')).status).toBe(200);
   });
 
-  it('틀린 비밀번호는 거부하고 세션을 주지 않는다', async () => {
+  it('처음 로그인하면 약관 동의 화면으로 보내고, 동의해야 가입된다', async () => {
     const s = setup();
-    const res = await login(s, 'wrong-password');
-    expect(res.status).toBe(401);
-    expect(res.headers.get('set-cookie')).toBeNull();
+    const r = await googleRoundTrip(s, OWNER, '/p/abc');
+    expect(r.location).toBe('/signup');
+    expect(r.session).toBeUndefined();
+    const pending = await s.app.request('/api/auth/signup', { headers: { cookie: r.signup! } });
+    expect(((await pending.json()) as { data: { email: string } }).data.email).toBe(OWNER);
+    const post = (body: unknown) =>
+      s.app.request('/api/auth/signup', { method: 'POST', headers: { cookie: r.signup!, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await post({ ...agree, agreePrivacy: false })).status).toBe(400);
+    const ok = await post(agree);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { data: { user: { email: string } } }).data.user.email).toBe(OWNER);
+    // 두 번째부터는 동의 없이 바로 로그인하고 원래 경로로 돌아간다
+    const again = await googleRoundTrip(s, OWNER, '/p/abc');
+    expect(again.location).toBe('/p/abc');
+    expect(again.session).toBeDefined();
   });
 
-  it('IP별로 로그인 시도를 제한한다', async () => {
+  it('state가 다르거나 Google 인증이 실패하면 세션을 주지 않는다', async () => {
     const s = setup();
-    for (let i = 0; i < 5; i++) expect((await login(s, 'wrong')).status).toBe(401);
-    expect((await login(s)).status).toBe(429);
+    const start = await s.app.request('/api/auth/google/start');
+    const oauth = cookieOf(start, 'solveline_oauth')!;
+    const forged = await s.app.request('/api/auth/google/callback?code=a@x.com&state=forged', { headers: { cookie: oauth } });
+    expect(forged.headers.get('location')).toBe('/?auth_error=invalid_state');
+    expect(cookieOf(forged, 'codetest_session')).toBeUndefined();
+    const bad = await googleRoundTrip(s, 'bad');
+    expect(bad.location).toBe('/?auth_error=google_error');
+  });
+
+  it('바깥 주소로는 돌려보내지 않는다', async () => {
+    const s = setup();
+    await login(s);
+    expect((await googleRoundTrip(s, OWNER, '//evil.example')).location).toBe('/');
+    expect((await googleRoundTrip(s, OWNER, 'https://evil.example')).location).toBe('/');
+  });
+
+  it('누구나 가입할 수 있지만 블랙리스트 이메일은 가입·로그인할 수 없다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    expect((await googleRoundTrip(s, 'stranger@example.com')).location).toBe('/signup');
+    const cookie = await login(s, 'bad@example.com');
+    const admin = await masterLogin(s);
+    await s.app.request('/api/admin/blocklist', { method: 'POST', headers: { cookie: admin, 'content-type': 'application/json' }, body: JSON.stringify({ email: 'Bad@Example.com', reason: '도배' }) });
+    // 로그인돼 있던 세션도 바로 끊긴다
+    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
+    expect((await googleRoundTrip(s, 'bad@example.com')).location).toBe('/?auth_error=blocked');
+    await s.app.request(`/api/admin/blocklist/${encodeURIComponent('bad@example.com')}`, { method: 'DELETE', headers: { cookie: admin } });
+    expect((await googleRoundTrip(s, 'bad@example.com')).session).toBeDefined();
   });
 
   it('로그아웃하면 세션이 무효가 된다', async () => {
     const s = setup();
-    const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
+    const cookie = await login(s);
     expect((await s.app.request('/api/problems', { headers: { cookie } })).status).toBe(200);
     await s.app.request('/api/auth/logout', { method: 'POST', headers: { cookie } });
-    expect((await s.app.request('/api/problems', { headers: { cookie } })).status).toBe(401);
+    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
+  });
+});
+
+const as = (s: ReturnType<typeof setup>, cookie: string) => async (method: string, path: string, body?: unknown) => {
+  const res = await s.app.request(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: res.status, body: (await res.json()) as { data: any; error?: { code: string } } }; // eslint-disable-line @typescript-eslint/no-explicit-any -- 테스트 응답 파싱
+};
+
+describe('공용 문제·사용자별 풀이', () => {
+  it('문제·폴더는 모두가 같이 보고, 편집 권한이 없으면 만들거나 바꿀 수 없다', async () => {
+    const s = setup();
+    const E = as(s, await login(s)); // 운영자: 편집 권한
+    const U = as(s, await login(s, 'user@example.com'));
+    const folder = (await E('POST', '/api/folders', { name: '그래프' })).body.data.id;
+    const p = (await E('POST', '/api/problems', { ...problem, folderId: folder })).body.data.id;
+    expect((await U('GET', '/api/problems')).body.data.map((x: { id: string }) => x.id)).toEqual([p]);
+    expect((await U('GET', '/api/folders')).body.data).toHaveLength(1);
+    expect((await U('POST', '/api/problems', problem)).status).toBe(403);
+    expect((await U('DELETE', `/api/problems/${p}`)).status).toBe(403);
+    expect((await U('POST', '/api/folders', { name: 'x' })).status).toBe(403);
+    expect((await U('PUT', `/api/folders/${folder}`, { name: 'x' })).status).toBe(403);
+    expect((await U('GET', `/api/problems/${p}/hidden`)).status).toBe(403);
+    expect((await U('PUT', `/api/problems/${p}/hidden`, { cases: [] })).status).toBe(403);
+    // 권한 없는 사용자의 자동 저장은 내 코드만 반영하고 문제 내용은 그대로 둔다
+    await U('PUT', `/api/problems/${p}`, { ...problem, folderId: folder, title: '바꿔 보기', code: { java: 'mine', python: 'mine' } });
+    expect((await E('GET', `/api/problems/${p}`)).body.data.title).toBe('두 수의 합');
+    expect((await U('GET', `/api/problems/${p}`)).body.data.code.java).toBe('mine');
+    // 편집 권한자가 바꾼 채점 케이스·제목은 모두에게 적용된다
+    await E('PUT', `/api/problems/${p}`, { ...problem, folderId: folder, title: '새 제목', cases: [{ id: 'b', args: ['[5, 5]'], stdin: '', expected: '10', hidden: false }] });
+    const seen = (await U('GET', `/api/problems/${p}`)).body.data;
+    expect(seen.title).toBe('새 제목');
+    expect(seen.cases.map((x: { id: string }) => x.id)).toEqual(['b']);
+  });
+
+  it('작성 코드·내 테스트 케이스·메모·풀이 시간·채점 결과는 사용자마다 따로다', async () => {
+    const s = setup();
+    const E = as(s, await login(s));
+    const U = as(s, await login(s, 'user@example.com'));
+    const p = (await E('POST', '/api/problems', problem)).body.data.id;
+    const mine = { id: 'm1', args: ['[9, 9]'], stdin: '', expected: '18', hidden: false };
+    await U('PUT', `/api/problems/${p}`, { ...problem, code: { java: 'u', python: 'u' }, myCases: [mine], memo: '투 포인터' });
+    await U('PUT', `/api/problems/${p}/timer`, { elapsedMs: 5000, solvedMs: null, paused: false });
+    const u = (await U('GET', `/api/problems/${p}`)).body.data;
+    expect(u.myCases).toEqual([mine]);
+    expect(u.memo).toBe('투 포인터');
+    expect(u.timer.elapsedMs).toBe(5000);
+    const e = (await E('GET', `/api/problems/${p}`)).body.data;
+    expect(e.code.python).toBe(problem.code.python);
+    expect(e.myCases).toEqual([]);
+    expect(e.memo).toBe('');
+    expect(e.timer.elapsedMs).toBe(0);
+
+    const sub = (await U('POST', '/api/submissions', { problemId: p, kind: 'submit', language: 'python', mode: 'function', code: 'x', cases: problem.cases })).body.data.id;
+    await s.dispatcher.wait(sub);
+    expect((await U('GET', '/api/problems')).body.data[0].lastSubmission.score).toBe(100);
+    expect((await E('GET', '/api/problems')).body.data[0].lastSubmission).toBeNull();
+    expect((await E('GET', `/api/submissions/${sub}`)).status).toBe(404);
+    expect((await E('POST', `/api/submissions/${sub}/cancel`)).status).toBe(404);
+  });
+
+  it('컬렉션은 사용자마다 따로 만든다', async () => {
+    const s = setup();
+    const E = as(s, await login(s));
+    const U = as(s, await login(s, 'user@example.com'));
+    const p = (await E('POST', '/api/problems', problem)).body.data.id;
+    const col = (await U('POST', '/api/collections', { name: '세트', description: '' })).body.data.id;
+    expect((await E('POST', '/api/collections', { name: '세트', description: '' })).status).toBe(200);
+    expect((await U('PUT', `/api/collections/${col}/items`, { problemIds: [p] })).body.data.problemIds).toEqual([p]);
+    expect((await E('GET', '/api/collections')).body.data[0].problemIds).toEqual([]);
+    expect((await E('PUT', `/api/collections/${col}/items`, { problemIds: [p] })).status).toBe(404);
+  });
+
+  it('운영자가 가입하면 예전 작성 코드·채점 결과·컬렉션을 넘겨받고 편집 권한을 갖는다', async () => {
+    const s = setup();
+    const legacyBody = JSON.stringify({ description: '', params: ['a'], timeLimitMs: 1000, cases: [], code: { java: '내 풀이', python: '' }, hiddenTestset: null });
+    s.db.prepare("INSERT INTO problems (id, title, mode, language, body, created_at, updated_at) VALUES ('old', '예전 문제', 'function', 'java', ?, '2026-01-01', '2026-01-01')").run(legacyBody);
+    s.db.prepare("INSERT INTO legacy_state (problem_id, language, code, last_submission) VALUES ('old', 'java', ?, ?)").run(
+      JSON.stringify({ java: '내 풀이', python: '' }),
+      JSON.stringify({ score: 100, passed: 1, total: 1, language: 'java', at: '2026-01-01' }),
+    );
+    s.db.prepare("INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES ('c', NULL, '모의고사', '', '2026-01-01', '2026-01-01')").run();
+    const U = as(s, await login(s, 'other@example.com'));
+    const O = as(s, await login(s));
+    expect((await U('GET', '/api/problems/old')).body.data.lastSubmission).toBeNull();
+    expect((await U('GET', '/api/collections')).body.data).toEqual([]);
+    expect((await O('GET', '/api/problems/old')).body.data.code.java).toBe('내 풀이');
+    expect((await O('GET', '/api/problems/old')).body.data.lastSubmission.score).toBe(100);
+    expect((await O('GET', '/api/collections')).body.data.map((c: { name: string }) => c.name)).toEqual(['모의고사']);
+    expect((await O('GET', '/api/auth/session')).body.data.user.editor).toBe(true);
+    expect((await U('GET', '/api/auth/session')).body.data.user.editor).toBe(false);
+  });
+
+  it('탈퇴하면 계정과 내 데이터가 지워지고 세션도 끝난다(공용 문제는 남는다)', async () => {
+    const s = setup();
+    const cookie = await login(s);
+    const E = as(s, cookie);
+    await E('POST', '/api/problems', problem);
+    expect((await E('DELETE', '/api/account')).status).toBe(200);
+    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
+    expect((s.db.prepare('SELECT COUNT(*) AS n FROM problems').get() as { n: number }).n).toBe(1);
+    expect((s.db.prepare('SELECT COUNT(*) AS n FROM user_problems').get() as { n: number }).n).toBe(0);
+    expect((await googleRoundTrip(s, OWNER)).location).toBe('/signup');
+  });
+});
+
+describe('관리자 모드(마스터 비밀번호)', () => {
+  it('비밀번호가 맞아야 열리고, IP별로 시도를 제한한다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    expect((await s.app.request('/api/admin/users')).status).toBe(401);
+    const bad = await masterRequest(s, 'wrong');
+    expect(bad.status).toBe(401);
+    expect(cookieOf(bad, 'solveline_admin')).toBeUndefined();
+    for (let i = 0; i < 4; i++) await masterRequest(s, 'wrong');
+    expect((await masterRequest(s, MASTER)).status).toBe(429);
+  });
+
+  it('Google 로그인 세션으로는 관리자 API를 쓸 수 없다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    const cookie = await login(s);
+    expect((await s.app.request('/api/admin/users', { headers: { cookie } })).status).toBe(401);
+  });
+
+  it('사용자 목록·상세를 보고 편집 권한을 주고 회수한다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    const U = as(s, await login(s, 'user@example.com'));
+    const A = as(s, await masterLogin(s));
+    const list = (await A('GET', '/api/admin/users')).body.data as { id: string; email: string; editor: boolean }[];
+    const u = list.find((x) => x.email === 'user@example.com')!;
+    expect(u.editor).toBe(false);
+    expect((await U('POST', '/api/folders', { name: '새 폴더' })).status).toBe(403);
+    expect((await A('PUT', `/api/admin/users/${u.id}/role`, { editor: true })).body.data.editor).toBe(true);
+    expect((await U('POST', '/api/folders', { name: '새 폴더' })).status).toBe(200);
+    await A('PUT', `/api/admin/users/${u.id}/role`, { editor: false });
+    expect((await U('POST', '/api/folders', { name: '또 폴더' })).status).toBe(403);
+    const detail = (await A('GET', `/api/admin/users/${u.id}`)).body.data;
+    expect(detail.termsVersion).toBeTruthy();
+    expect(detail.recentSubmissions).toEqual([]);
+  });
+
+  it('사용자를 정지하면 블랙리스트에 올라 바로 막히고, 해제하면 다시 들어온다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    const cookie = await login(s, 'user@example.com');
+    const A = as(s, await masterLogin(s));
+    const id = ((await A('GET', '/api/admin/users')).body.data as { id: string }[])[0]!.id;
+    expect((await A('PUT', `/api/admin/users/${id}/block`, { blocked: true, reason: '부정 사용' })).body.data.blocked).toBe(true);
+    expect((await A('GET', '/api/admin/blocklist')).body.data[0]).toMatchObject({ email: 'user@example.com', reason: '부정 사용' });
+    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie } })).status).toBe(401);
+    await A('PUT', `/api/admin/users/${id}/block`, { blocked: false });
+    expect((await googleRoundTrip(s, 'user@example.com')).session).toBeDefined();
   });
 });
 
 describe('설정', () => {
-  it('운영 환경은 비밀번호가 없거나 짧으면 시작하지 않는다', () => {
-    const base = { NODE_ENV: 'production', SESSION_SECRET: 'x'.repeat(40) };
-    expect(() => loadConfig(base)).toThrow(/ACCESS_PASSWORD/);
-    expect(() => loadConfig({ ...base, ACCESS_PASSWORD: 'short' })).toThrow(/24자/);
+  it('운영 환경은 SESSION_SECRET이 없으면 시작하지 않고, 짧은 마스터 비밀번호는 거부한다', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/SESSION_SECRET/);
+    expect(() => loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 'short' })).toThrow(/32자/);
+    expect(() => loadConfig({ ACCESS_PASSWORD: 'short' })).toThrow(/24자/);
+  });
+
+  it('Google 설정이 없으면 로그인을 시작하지 않는다', async () => {
+    const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40) });
+    const { app } = createApp({ config, db: openDb(':memory:'), runners: [] });
+    expect((await app.request('/api/auth/google/start')).status).toBe(503);
+    expect(((await (await app.request('/api/public/config')).json()) as { data: { googleEnabled: boolean } }).data.googleEnabled).toBe(false);
   });
 });
 
 describe('문제·실행', () => {
   it('로그인 후 문제를 만들고 고치고 지운다', async () => {
     const s = setup();
-    const res = await login(s);
-    expect(res.status).toBe(200);
-    const cookie = res.headers.get('set-cookie')!.split(';')[0]!;
+    const cookie = await login(s);
     const headers = { cookie, 'content-type': 'application/json' };
 
     const created = (await (await s.app.request('/api/problems', { method: 'POST', headers, body: JSON.stringify(problem) })).json()) as { data: { id: string } };
@@ -124,7 +374,7 @@ describe('문제·실행', () => {
 
   it('잘못된 입력값은 400으로 알린다', async () => {
     const s = setup();
-    const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
+    const cookie = await login(s);
     const body = { language: 'python', mode: 'function', code: 'x', cases: [{ id: 'a', args: ['[1, 2'], stdin: '', expected: '3', hidden: false }] };
     const res = await s.app.request('/api/run', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(res.status).toBe(400);
@@ -133,7 +383,7 @@ describe('문제·실행', () => {
 
 async function authed() {
   const s = setup();
-  const cookie = (await login(s)).headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = await login(s);
   const call = async (method: string, path: string, body?: unknown) => {
     const res = await s.app.request(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: (await res.json()) as { data: any; error?: { code: string } } }; // eslint-disable-line @typescript-eslint/no-explicit-any -- 테스트 응답 파싱
@@ -260,7 +510,8 @@ describe('제출 큐', () => {
   it('코드 실행이 제출 채점보다 먼저 꺼내진다', () => {
     const db = openDb(':memory:');
     const store = new SubmissionStore(db);
-    const base = { problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
+    const user = new UserStore(db).create({ sub: 's', email: 'u@example.com', name: 'u', picture: '' }, { terms: 'v', privacy: 'v' });
+    const base = { userId: user.id, problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
     const sub = store.insert({ ...base, kind: 'submit' }, new Date('2026-01-01T00:00:00Z'));
     const run = store.insert({ ...base, kind: 'run' }, new Date('2026-01-01T00:00:01Z'));
     expect(store.get(sub)!.ahead).toBe(1);

@@ -4,9 +4,13 @@ import type { Language, ProblemMode, Session } from '@codetest/shared';
 import { ApiError, api, qk } from './lib/api.ts';
 import { useRoute, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
+import { LegalFooter, PrivacyPage, TermsPage } from './components/Legal.tsx';
+import { SignupScreen } from './components/SignupScreen.tsx';
+import { AdminPage } from './components/AdminPage.tsx';
 import { BootScreen, Spinner, WorkspaceSkeleton } from './components/Loading.tsx';
 import { Home, scopeList } from './components/Home.tsx';
 import { blankProblem } from './lib/blank.ts';
+import { loginHref, useMe } from './lib/me.ts';
 
 // 문제 화면(에디터)은 무거우므로 열 때만 받는다. 목록 화면이 뜨면 미리 받아 둔다(prefetchWorkspace).
 const loadWorkspace = () => import('./components/Workspace.tsx');
@@ -17,7 +21,25 @@ const prefetchWorkspace = () => {
   else setTimeout(run, 1500);
 };
 
+/** 경로로 여는 화면(로그인 없이도 열림). 나머지는 해시 라우터(#/...)가 다룬다. */
 export function App() {
+  switch (location.pathname) {
+    case '/terms':
+      return <TermsPage />;
+    case '/privacy':
+      return <PrivacyPage />;
+    case '/signup':
+      return <SignupScreen />;
+    case '/admin':
+      return <AdminPage />;
+    case '/login':
+      return <LoginScreen />;
+    default:
+      return <Main />;
+  }
+}
+
+function Main() {
   const session = useQuery({ queryKey: qk.session, queryFn: api.session, staleTime: Infinity });
   if (session.isPending) return <BootScreen />;
   if (session.isError)
@@ -29,7 +51,9 @@ export function App() {
         </button>
       </div>
     );
-  return session.data.authenticated ? <Shell /> : <LoginScreen />;
+  // 로그인 오류로 돌아왔으면 로그인 화면, 아니면 비회원도 문제를 둘러볼 수 있다
+  if (!session.data.authenticated && new URLSearchParams(location.search).has('auth_error')) return <LoginScreen />;
+  return <Shell />;
 }
 
 function Shell() {
@@ -47,7 +71,7 @@ function Shell() {
   const logout = useMutation({
     mutationFn: api.logout,
     onSettled: () => {
-      const out: Session = { authenticated: false, expiresAt: null };
+      const out: Session = { authenticated: false, expiresAt: null, user: null };
       qc.setQueryData(qk.session, out);
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== qk.session[0] });
     },
@@ -83,11 +107,9 @@ function Shell() {
         )}
         <span className="ml-auto hidden items-center gap-1.5 text-[11.5px] text-faint md:flex" title="실행 환경">
           <span className={`size-1.5 rounded-full ${v?.runner === 'up' ? 'bg-ok' : 'bg-bad'}`} aria-hidden />
-          {v?.runner === 'up' ? `Java ${v.versions.java ?? '?'} · Python ${v.versions.python ?? '?'}` : runtime.isPending ? '실행 환경 확인 중' : '실행 서버 연결 안 됨'}
+          {v?.runner === 'up' ? 'Java · Python' : runtime.isPending ? '' : '실행 서버 연결 안 됨'}
         </span>
-        <button type="button" className="btn-quiet ml-auto px-2 text-[12px] md:ml-0" onClick={() => logout.mutate()}>
-          로그아웃
-        </button>
+        <UserMenu onLogout={() => logout.mutate()} />
       </header>
 
       {route.kind === 'problem' ? (
@@ -100,12 +122,15 @@ function Shell() {
         />
         </Suspense>
       ) : (
-        <Home
-          scope={route.scope}
-          onScope={(scope) => go({ kind: 'home', scope })}
-          onPick={(id) => go({ kind: 'problem', id })}
-          onNew={() => setCreating(true)}
-        />
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <Home
+            scope={route.scope}
+            onScope={(scope) => go({ kind: 'home', scope })}
+            onPick={(id) => go({ kind: 'problem', id })}
+            onNew={() => setCreating(true)}
+          />
+          <LegalFooter admin />
+        </div>
       )}
 
       {creating && (
@@ -117,6 +142,72 @@ function Shell() {
             go({ kind: 'problem', id: pid });
           }}
         />
+      )}
+    </div>
+  );
+}
+
+/** 상단바 오른쪽: 로그인한 계정. 누르면 로그아웃·회원 탈퇴. */
+function UserMenu({ onLogout }: { onLogout: () => void }) {
+  const qc = useQueryClient();
+  const me = useMe();
+  const [open, setOpen] = useState(false);
+  const withdraw = useMutation({
+    mutationFn: api.deleteAccount,
+    onSuccess: () => {
+      const out: Session = { authenticated: false, expiresAt: null, user: null };
+      qc.setQueryData(qk.session, out);
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== qk.session[0] });
+    },
+    onError: (e) => alert(e instanceof ApiError ? e.message : '탈퇴하지 못했어요'),
+  });
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element).closest('[data-user-menu]')) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [open]);
+  if (!me)
+    return (
+      <a href={loginHref()} className="btn-primary ml-auto min-h-8 px-3 text-[12.5px] md:ml-0">
+        로그인
+      </a>
+    );
+  return (
+    <div className="relative ml-auto md:ml-0" data-user-menu>
+      <button type="button" className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-raised" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {me.picture ? (
+          <img src={me.picture} alt="" className="size-6 rounded-full" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="flex size-6 items-center justify-center rounded-full bg-raised text-[11px] font-bold">{me.email[0]?.toUpperCase()}</span>
+        )}
+        <span className="hidden max-w-56 truncate text-[12.5px] text-dim sm:inline">{me.email}</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-1.5 shadow-2xl">
+          <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
+            <p className="truncate text-[13px] font-semibold">{me.name || me.email}</p>
+            <p className="truncate text-[12px] text-dim">{me.email}</p>
+            {me.editor && <p className="mt-1 text-[11.5px] font-bold text-accent">편집 권한</p>}
+          </div>
+          <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-raised" onClick={onLogout}>
+            로그아웃
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-md px-2.5 py-2 text-left text-[12.5px] text-faint hover:bg-raised hover:text-bad"
+            disabled={withdraw.isPending}
+            onClick={() => confirm('탈퇴하면 작성한 코드·메모·제출 기록이 모두 지워지고 되돌릴 수 없어요. 탈퇴할까요?') && withdraw.mutate()}
+          >
+            회원 탈퇴
+          </button>
+        </div>
       )}
     </div>
   );

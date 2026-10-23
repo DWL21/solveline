@@ -28,9 +28,13 @@ jobs:
           SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS }}
           ACCESS_PASSWORD: ${{ secrets.ACCESS_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          OWNER_EMAIL: ${{ vars.OWNER_EMAIL }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
         run: |
-          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS"
-          REQUIRED="ACCESS_PASSWORD SESSION_SECRET"
+          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL"
+          REQUIRED="ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET"
           for k in $REQUIRED; do
             [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }
           done

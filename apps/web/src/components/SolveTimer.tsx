@@ -12,13 +12,14 @@ const MAX_TICK_MS = 5_000;
  * 풀이 시간 자동 측정. 문제 화면이 열려 있고 탭이 보일 때만 늘어난다.
  * 100점을 받으면 멈추고(solvedMs), 초기화하면 0부터 다시. 10초마다·탭 숨김·이탈 때 서버에 저장한다.
  */
-export function useSolveTimer(problem: Problem) {
+/** enabled가 false면(비회원) 재지도 저장하지도 않는다 */
+export function useSolveTimer(problem: Problem, enabled = true) {
   const qc = useQueryClient();
   const [timer, setTimer] = useState<ProblemTimer>(problem.timer);
   const ref = useRef(timer);
   ref.current = timer;
   const saved = useRef(JSON.stringify(problem.timer));
-  const running = timer.solvedMs === null && !timer.paused;
+  const running = enabled && timer.solvedMs === null && !timer.paused;
 
   useEffect(() => {
     if (!running) return;
@@ -35,6 +36,7 @@ export function useSolveTimer(problem: Problem) {
 
   const persist = useCallback(
     (opts: { keepalive?: boolean; refreshList?: boolean } = {}) => {
+      if (!enabled) return;
       const cur = ref.current;
       const json = JSON.stringify(cur);
       if (json === saved.current) return;
@@ -49,7 +51,7 @@ export function useSolveTimer(problem: Problem) {
           saved.current = ''; // 다음 기회에 다시 저장
         });
     },
-    [problem.id, qc],
+    [problem.id, qc, enabled],
   );
 
   useEffect(() => {
@@ -105,7 +107,7 @@ export function SolveTimerBadge({
     <span className="inline-flex items-center gap-1">
       <span
         className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : 'bg-raised text-text'}`}
-        title={solved ? '맞춘 순간의 풀이 시간 (타이머 멈춤)' : '풀이 시간 — 이 화면이 보일 때만 자동으로 잽니다'}
+        title={solved ? '맞춘 순간의 풀이 시간' : '풀이 시간'}
         aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}에 맞춤` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >
         {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `${timer.paused ? '⏸' : '⏱'} ${formatDuration(timer.elapsedMs)}`}
@@ -125,7 +127,7 @@ export function SolveTimerBadge({
         className="btn-quiet min-h-7 px-1.5 text-[13px]"
         title="풀이 시간 초기화"
         aria-label="풀이 시간 초기화"
-        onClick={() => confirm('풀이 시간을 0:00으로 초기화할까요? 맞춘 기록이 있으면 다시 잽니다.') && onReset()}
+        onClick={() => confirm('풀이 시간을 초기화할까요?') && onReset()}
       >
         ↺
       </button>
@@ -143,7 +145,6 @@ export function PausedOverlay({ elapsedMs, onResume }: { elapsedMs: number; onRe
         <button type="button" className="btn-primary min-h-11 px-6 text-[15px]" onClick={onResume} autoFocus>
           ▶ 다시 시작
         </button>
-        <p className="text-[11.5px] text-faint">멈춘 시간부터 이어서 잽니다</p>
       </div>
     </div>
   );

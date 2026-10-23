@@ -67,7 +67,9 @@ export function CodeEditor({
   language,
   onChange,
   onRun,
+  readOnly = false,
 }: {
+  readOnly?: boolean;
   docKey: string;
   value: string;
   language: Language;
@@ -90,6 +92,7 @@ export function CodeEditor({
             { key: 'Mod-Enter', preventDefault: true, run: () => (cb.current.onRun(), true) },
           ]),
           editorSetup,
+          EditorState.readOnly.of(readOnly),
           indentUnit.of('    '),
           EditorState.tabSize.of(4),
           lang.current.of(langExt(language)),

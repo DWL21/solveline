@@ -4,12 +4,33 @@ import { z } from 'zod';
 
 export const SESSION_COOKIE = 'codetest_session';
 
-/** 비밀번호 로그인. 값은 GitHub Environment secret(ACCESS_PASSWORD)에만 있다. */
-export const LoginRequest = z.object({ password: z.string().min(1).max(256) });
-export type LoginRequest = z.infer<typeof LoginRequest>;
+/** 약관·개인정보처리방침 버전(시행일). 내용을 바꾸면 올리고, 가입 때 동의한 버전을 저장한다. */
+export const TERMS_VERSION = '2026-10-23';
+export const PRIVACY_VERSION = '2026-10-23';
 
-export const Session = z.object({ authenticated: z.boolean(), expiresAt: z.string().nullable() });
+/** editor: 편집 권한(문제 추가·수정, 채점 케이스, 폴더). 관리자 모드(마스터 비밀번호)에서 준다. */
+export const SessionUser = z.object({ email: z.string(), name: z.string(), picture: z.string(), editor: z.boolean() });
+export type SessionUser = z.infer<typeof SessionUser>;
+
+export const Session = z.object({ authenticated: z.boolean(), expiresAt: z.string().nullable(), user: SessionUser.nullable() });
 export type Session = z.infer<typeof Session>;
+
+/** 로그인 없이 읽는 공개 설정 */
+export const PublicConfig = z.object({
+  googleEnabled: z.boolean(),
+  contactEmail: z.string().nullable(),
+  termsVersion: z.string(),
+  privacyVersion: z.string(),
+});
+export type PublicConfig = z.infer<typeof PublicConfig>;
+
+/** 회원가입 대기: Google 인증은 끝났고 약관 동의만 남은 상태 */
+export const SignupPending = z.object({ email: z.string(), name: z.string(), picture: z.string() });
+export type SignupPending = z.infer<typeof SignupPending>;
+
+/** 회원가입 동의: 모두 필수 */
+export const SignupRequest = z.object({ agreeAge: z.literal(true), agreeTerms: z.literal(true), agreePrivacy: z.literal(true) });
+export type SignupRequest = z.infer<typeof SignupRequest>;
 
 // ─── 실행 환경 ───
 
@@ -91,6 +112,13 @@ export const LastSubmission = z.object({
 });
 export type LastSubmission = z.infer<typeof LastSubmission>;
 
+export const CodeSet = z.object({ java: z.string().max(MAX_TEXT), python: z.string().max(MAX_TEXT) });
+export type CodeSet = z.infer<typeof CodeSet>;
+
+/**
+ * 문제 내용(제목·설명·채점 케이스·시간 제한·폴더·시작 코드)은 공용이고 편집 권한이 있는 사용자만 바꾼다.
+ * 작성 코드·언어·내 테스트 케이스·메모·풀이 시간·마지막 제출은 사용자별.
+ */
 export const ProblemInput = z.object({
   title: z.string().trim().min(1).max(200),
   /** 폴더 id. null이면 폴더 없음 */
@@ -102,7 +130,14 @@ export const ProblemInput = z.object({
   timeLimitMs: z.number().int().min(100).max(10_000).default(10_000),
   cases: z.array(TestCase).max(60),
   language: Language,
-  code: z.object({ java: z.string().max(MAX_TEXT), python: z.string().max(MAX_TEXT) }),
+  /** 내가 작성 중인 코드(사용자별로 저장) */
+  code: CodeSet,
+  /** 시작 코드(공용). 편집 권한이 있어야 바꿀 수 있고, 없으면 그대로 둔다. */
+  starterCode: CodeSet.optional(),
+  /** 내가 추가한 테스트 케이스(사용자별, 코드 실행에만 쓴다) */
+  myCases: z.array(TestCase).max(60).default([]),
+  /** 내 메모(사용자별) */
+  memo: z.string().max(MAX_TEXT).default(''),
   lastSubmission: LastSubmission.nullable().default(null),
 });
 export type ProblemInput = z.infer<typeof ProblemInput>;
@@ -118,6 +153,7 @@ export type TestsetRef = z.infer<typeof TestsetRef>;
  */
 export const Problem = ProblemInput.extend({
   id: z.string(),
+  starterCode: CodeSet,
   hiddenTestset: TestsetRef.nullable(),
   timer: ProblemTimer,
   createdAt: z.string(),
@@ -225,3 +261,59 @@ export function templateFor(language: Language, mode: ProblemMode, params: strin
   }
   return `def solution(${params.join(', ')}):\n    answer = 0\n    return answer\n`;
 }
+
+// ─── 관리자 ───
+
+/** 관리자 모드는 Google 로그인과 별개로 마스터 비밀번호(ACCESS_PASSWORD)로만 연다. 사용자에게 편집 권한을 주고, 정지(블랙리스트)한다. */
+export const AdminLogin = z.object({ password: z.string().min(1).max(256) });
+export const AdminSession = z.object({ authenticated: z.boolean(), expiresAt: z.string().nullable() });
+export type AdminSession = z.infer<typeof AdminSession>;
+
+export const AdminUser = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string(),
+  picture: z.string(),
+  editor: z.boolean(),
+  blocked: z.boolean(),
+  createdAt: z.string(),
+  lastLoginAt: z.string(),
+  /** 100점 받은 문제 수 */
+  solved: z.number().int(),
+  submissions: z.number().int(),
+});
+export type AdminUser = z.infer<typeof AdminUser>;
+
+export const AdminUserProblem = z.object({
+  problemId: z.string(),
+  title: z.string(),
+  score: z.number().int().nullable(),
+  elapsedMs: z.number(),
+  solvedMs: z.number().nullable(),
+  updatedAt: z.string(),
+});
+export const AdminSubmission = z.object({
+  id: z.string(),
+  problemTitle: z.string().nullable(),
+  kind: z.enum(['run', 'submit']),
+  language: Language,
+  status: z.string(),
+  score: z.number().int().nullable(),
+  createdAt: z.string(),
+});
+export const AdminUserDetail = AdminUser.extend({
+  termsVersion: z.string(),
+  privacyVersion: z.string(),
+  agreedAt: z.string(),
+  problems: z.array(AdminUserProblem),
+  recentSubmissions: z.array(AdminSubmission),
+});
+export type AdminUserDetail = z.infer<typeof AdminUserDetail>;
+
+export const RoleInput = z.object({ editor: z.boolean() });
+export const BlockInput = z.object({ blocked: z.boolean(), reason: z.string().trim().max(200).default('') });
+
+/** 블랙리스트: 이 이메일의 Google 계정은 가입·로그인할 수 없고, 로그인돼 있던 세션도 끊긴다. */
+export const BlockedEmail = z.object({ email: z.string(), reason: z.string(), createdAt: z.string() });
+export type BlockedEmail = z.infer<typeof BlockedEmail>;
+export const BlockedEmailInput = z.object({ email: z.string().trim().toLowerCase().email().max(254), reason: z.string().trim().max(200).default('') });

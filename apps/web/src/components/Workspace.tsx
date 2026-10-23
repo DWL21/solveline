@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { templateFor, type Language, type Problem, type ProblemInput, type ProblemMode, type TestCase } from '@codetest/shared';
+import { type Language, type Problem, type ProblemInput, type ProblemMode, type TestCase } from '@codetest/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';
@@ -10,6 +10,7 @@ import { PausedOverlay, SolveTimerBadge, useSolveTimer } from './SolveTimer.tsx'
 import { SolvedDialog } from './SolvedDialog.tsx';
 import { DEFAULT_LAYOUT, Splitter, useLayout } from './Splitter.tsx';
 import { Spinner, WorkspaceSkeleton } from './Loading.tsx';
+import { loginHref, useMe } from '../lib/me.ts';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
 
@@ -28,6 +29,8 @@ const toInput = (p: Problem): ProblemInput => ({
   cases: p.cases,
   language: p.language,
   code: p.code,
+  myCases: p.myCases,
+  memo: p.memo,
   lastSubmission: p.lastSubmission,
 });
 
@@ -122,13 +125,19 @@ function useAutosave(problem: Problem, draft: ProblemInput) {
 function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<ProblemInput>(() => toInput(problem));
+  // 비회원: 문제를 볼 수만 있다(코드 작성·실행·저장은 로그인 후)
+  const me = useMe();
+  const guest = !me;
   const save = useAutosave(problem, draft);
-  const solve = useSolveTimer(problem);
+  const solve = useSolveTimer(problem, !guest);
   const { layout, set: setLayout } = useLayout();
   const rowRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLElement>(null);
   const [solvedOpen, setSolvedOpen] = useState(false);
-  const [tab, setTab] = useState<'desc' | 'cases'>(problem.description.trim() ? 'desc' : 'cases');
+  const [tab, setTab] = useState<'desc' | 'cases' | 'memo'>(problem.description.trim() ? 'desc' : 'cases');
+  // 편집 모드: 편집 권한이 있는 사용자만. 켜면 문제 내용·채점 케이스·폴더를 바꿀 수 있고 모든 사용자에게 적용된다.
+  const canEdit = !!me?.editor;
+  const [editing, setEditing] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [resets, setResets] = useState(0);
@@ -138,9 +147,9 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const patch = useCallback(
     (p: Partial<ProblemInput>) => {
       setDraft((d) => ({ ...d, ...p }));
-      save.markDirty();
+      if (!guest) save.markDirty();
     },
-    [save],
+    [save, guest],
   );
 
   const lang = draft.language;
@@ -215,10 +224,10 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   /** 코드 실행: 보이는 케이스만 */
   const doRun = useCallback(() => {
     if (runMut.isPending) return;
-    const cases = draftRef.current.cases.filter((c) => !c.hidden);
+    const cases = [...draftRef.current.cases.filter((c) => !c.hidden), ...draftRef.current.myCases];
     if (cases.length === 0) {
       setTab('cases');
-      setRun({ kind: 'error', message: '보이는 테스트 케이스가 없어요. 케이스를 추가하세요.' });
+      setRun({ kind: 'error', message: '실행할 테스트 케이스가 없어요. 케이스를 추가하세요.' });
       return;
     }
     runMut.mutate({ cases, submit: false });
@@ -246,37 +255,47 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     },
   });
 
+  const starter = draft.starterCode ?? problem.starterCode;
   const reset = () => {
-    if (!confirm(`${languageName(lang)} 코드를 기본 템플릿으로 되돌릴까요?`)) return;
-    patch({ code: { ...draft.code, [lang]: templateFor(lang, draft.mode, draft.params) } });
+    if (!confirm(`${languageName(lang)} 코드를 시작 코드로 되돌릴까요?`)) return;
+    patch({ code: { ...draft.code, [lang]: starter[lang] } });
     setResets((n) => n + 1);
   };
+  /** 편집 모드: 지금 에디터의 코드를 이 문제의 시작 코드(모든 사용자 공용)로 */
+  const saveAsStarter = () => {
+    if (!confirm(`지금 ${languageName(lang)} 코드를 모든 사용자의 시작 코드로 저장할까요?`)) return;
+    patch({ starterCode: { ...starter, [lang]: code } });
+  };
 
-  const visibleCount = draft.cases.filter((c) => !c.hidden).length;
+  const visibleCount = draft.cases.filter((c) => !c.hidden).length + draft.myCases.length;
   const sub = problem.lastSubmission;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* 문제 제목 줄 */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-base px-3 py-2 sm:px-4">
-        <input
-          value={draft.title}
-          onChange={(e) => patch({ title: e.target.value })}
-          aria-label="문제 제목"
-          className="min-w-0 flex-1 basis-56 rounded bg-transparent px-1 py-1 text-[15px] font-bold outline-none hover:bg-raised/60 focus:bg-raised"
-        />
-        <SaveBadge state={save.state} onRetry={save.retry} />
-        <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />
+        {editing ? (
+          <input
+            value={draft.title}
+            onChange={(e) => patch({ title: e.target.value })}
+            aria-label="문제 제목"
+            className="min-w-0 flex-1 basis-56 rounded bg-raised/60 px-1 py-1 text-[15px] font-bold outline-none focus:bg-raised"
+          />
+        ) : (
+          <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-[15px] font-bold">{draft.title}</h1>
+        )}
+        {!guest && <SaveBadge state={save.state} onRetry={save.retry} />}
+        {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}
         <span className="text-[12px] text-faint" title="테스트당 시간 제한 (테스트 케이스 탭에서 변경)">
           제한 {draft.timeLimitMs / 1000}초
         </span>
         {sub && (
           <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
-            {sub.score === 100 ? '✓' : '△'} 최근 제출 {sub.score}점
+            {sub.score === 100 ? '✓' : `△ ${sub.score}점`}
           </span>
         )}
-        <FolderSelect value={draft.folderId} onChange={(folderId) => patch({ folderId })} />
-        <CollectionsMenu problemId={problem.id} />
+        {editing ? <FolderSelect value={draft.folderId} onChange={(folderId) => patch({ folderId })} /> : <FolderName id={draft.folderId} />}
+        {!guest && <CollectionsMenu problemId={problem.id} />}
         <select
           value={lang}
           aria-label="언어"
@@ -286,15 +305,34 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           <option value="java">Java</option>
           <option value="python">Python3</option>
         </select>
-        <button
-          type="button"
-          className="btn-quiet px-2 text-[12px]"
-          disabled={delMut.isPending}
-          onClick={() => confirm(`"${draft.title}" 문제를 삭제할까요? 되돌릴 수 없어요.`) && delMut.mutate()}
-        >
-          삭제
-        </button>
+        {editing && (
+          <button
+            type="button"
+            className="btn-quiet px-2 text-[12px]"
+            disabled={delMut.isPending}
+            onClick={() => confirm(`"${draft.title}" 문제를 모든 사용자에게서 삭제할까요? 되돌릴 수 없어요.`) && delMut.mutate()}
+          >
+            삭제
+          </button>
+        )}
+        {canEdit && (
+          <button
+            type="button"
+            className={editing ? 'btn-primary px-3' : 'btn-ghost px-3'}
+            aria-pressed={editing}
+            title="문제 내용·채점 케이스·폴더를 바꿉니다. 바꾸면 모든 사용자에게 적용돼요."
+            onClick={() => {
+              setEditing((v) => !v);
+              setEditingDesc(false);
+            }}
+          >
+            {editing ? '편집 끝내기' : '편집 모드'}
+          </button>
+        )}
       </div>
+      {editing && (
+        <p className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-[12px] text-warn">편집 모드 · 바꾼 내용은 모든 사용자에게 적용돼요</p>
+      )}
 
       {solvedOpen && (
         <SolvedDialog
@@ -309,25 +347,33 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
         {/* 왼쪽: 문제 설명 / 테스트 케이스 */}
         <section className="flex min-h-[260px] flex-col lg:w-(--left) lg:min-w-[280px] lg:shrink-0">
           <div className="pane-title gap-0 px-1">
-            {(['desc', 'cases'] as const).map((t) => (
+            {(guest ? (['desc', 'cases'] as const) : (['desc', 'cases', 'memo'] as const)).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
                 className={`h-full border-b-2 px-3 ${tab === t ? 'border-accent text-text' : 'border-transparent hover:text-text'}`}
               >
-                {t === 'desc' ? '문제 설명' : `테스트 케이스 ${visibleCount}`}
+                {t === 'desc' ? '문제 설명' : t === 'cases' ? `테스트 케이스 ${visibleCount}` : draft.memo.trim() ? '메모 •' : '메모'}
               </button>
             ))}
-            {tab === 'desc' && (
+            {tab === 'desc' && editing && (
               <button type="button" className="btn-quiet ml-auto min-h-7 px-2 text-[12px]" onClick={() => setEditingDesc((v) => !v)}>
                 {editingDesc ? '완료' : '편집'}
               </button>
             )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto bg-panel">
-            {tab === 'desc' ? (
-              editingDesc || !draft.description.trim() ? (
+            {tab === 'memo' ? (
+              <textarea
+                value={draft.memo}
+                onChange={(e) => patch({ memo: e.target.value })}
+                placeholder="풀이 아이디어, 막힌 부분, 다시 볼 점을 적어 두세요. 나만 볼 수 있어요."
+                aria-label="내 메모"
+                className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
+              />
+            ) : tab === 'desc' ? (
+              editing && (editingDesc || !draft.description.trim()) ? (
                 <textarea
                   value={draft.description}
                   onChange={(e) => patch({ description: e.target.value })}
@@ -336,16 +382,20 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
                   autoFocus={editingDesc}
                 />
               ) : (
-                <div className="p-4 text-[14px] leading-[1.75] whitespace-pre-wrap text-text/90" onDoubleClick={() => setEditingDesc(true)}>
-                  {draft.description}
+                <div className="p-4 text-[14px] leading-[1.75] whitespace-pre-wrap text-text/90" onDoubleClick={() => editing && setEditingDesc(true)}>
+                  {draft.description.trim() || <span className="text-faint">문제 설명이 없어요.</span>}
                 </div>
               )
             ) : (
               <CasesEditor
                 problemId={problem.id}
+                guest={guest}
+                editing={editing}
                 mode={draft.mode}
                 params={draft.params}
                 cases={draft.cases}
+                myCases={draft.myCases}
+                onMyCases={(myCases) => patch({ myCases })}
                 hidden={problem.hiddenTestset}
                 timeLimitMs={draft.timeLimitMs}
                 onTimeLimit={(timeLimitMs) => patch({ timeLimitMs })}
@@ -371,7 +421,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
             <span>solution.{lang === 'java' ? 'java' : 'py'}</span>
           </div>
           <div className="min-h-[300px] lg:min-h-0" style={{ flex: `${layout.editorPct} 1 0` }}>
-            <CodeEditor docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
+            <CodeEditor readOnly={guest} docKey={`${lang}:${resets}`} value={code} language={lang} onChange={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })} onRun={doRun} />
           </div>
           <Splitter
             direction="horizontal"
@@ -385,6 +435,13 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
           <div className="min-h-[180px] overflow-y-auto bg-panel lg:min-h-0" style={{ flex: `${100 - layout.editorPct} 1 0` }}>
             <ResultPanel state={run} />
           </div>
+          {guest ? (
+            <footer className="flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
+              <a href={loginHref()} className="btn-primary ml-auto min-w-32">
+                로그인하기
+              </a>
+            </footer>
+          ) : (
           <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
             <button type="button" className="btn-ghost" onClick={reset}>
               초기화
@@ -394,11 +451,16 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
               className="btn-ghost"
               onClick={() => {
                 setTab('cases');
-                if (draft.cases.length < MAX_CASES) patch({ cases: [...draft.cases, newCase(draft.params.length)] });
+                if (draft.myCases.length < MAX_CASES) patch({ myCases: [...draft.myCases, newCase(draft.params.length)] });
               }}
             >
               테스트 케이스 추가하기
             </button>
+            {editing && (
+              <button type="button" className="btn-quiet text-[12px]" onClick={saveAsStarter} title="모든 사용자의 시작 코드가 바뀌어요">
+                시작 코드로 저장
+              </button>
+            )}
             <div className="ml-auto flex gap-2">
               {runMut.isPending && (
                 <button type="button" className="btn-ghost min-w-20 text-bad" disabled={stopping} onClick={() => void doStop()} title="실행·채점 중지">
@@ -425,10 +487,17 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
               </button>
             </div>
           </footer>
+          )}
         </section>
       </div>
     </div>
   );
+}
+
+function FolderName({ id }: { id: string | null }) {
+  const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
+  const name = folders.data?.find((f) => f.id === id)?.name;
+  return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">▤ {name}</span> : null;
 }
 
 function FolderSelect({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {

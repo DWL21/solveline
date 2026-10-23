@@ -8,7 +8,7 @@
 
 | 경로 | 내용 | 실행 환경 |
 |---|---|---|
-| `apps/api` | Hono REST API, 비밀번호 인증, 문제 저장(SQLite), 히든 테스트셋(해시 파일), 제출 큐·디스패처, 매일 백업 | Node 24 (Docker, pahidc) |
+| `apps/api` | Hono REST API, Google 로그인·관리자 모드, 문제 저장(SQLite), 히든 테스트셋(해시 파일), 제출 큐·디스패처, 매일 백업 | Node 24 (Docker, pahidc) |
 | `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE | nginx (Docker, pahidc) — API와 같은 출처 |
 | `runner` | 코드 실행 서버(Python 3.8 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 17, Python 3.8) |
 | `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
@@ -31,7 +31,7 @@
 
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
-| `ACCESS_PASSWORD` (로그인 비밀번호) | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
+| `ACCESS_PASSWORD` (관리자 모드 마스터 비밀번호), `GOOGLE_CLIENT_SECRET` | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
 | `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 
@@ -74,14 +74,16 @@
 
 ## 접근 제어
 
-단일 사용자 전용. **랜덤 비밀번호 하나**로 로그인한다. 원본은 GitHub Environment `production`의 secret `ACCESS_PASSWORD`에만 둔다.
+[0004](docs/decisions/0004-google-login-and-roles.md) 참고.
 
-1. 비밀번호는 24자 이상 랜덤 문자열로 만든다: `openssl rand -base64 24 | tr '+/' '-_' | tr -d '='`
-2. `gh secret set ACCESS_PASSWORD --env production`(표준 입력으로)으로 저장하고, 다음 배포에서 서버 env에 반영된다. 바꾸려면 secret을 갱신하고 `Production deployment`를 다시 실행한다.
-3. `POST /api/auth/login`이 상수 시간 비교로 확인 → HttpOnly·Secure·SameSite=Strict 세션 쿠키 발급. 시도 제한: IP별 분당 5회, 전체 시간당 60회.
-4. 운영에서 `ACCESS_PASSWORD`가 없거나 24자 미만이면 api가 시작하지 않는다.
+- **비회원**: 문제·폴더 조회(GET)만. 코드 작성·실행·저장은 로그인 후.
+- **회원**: Google 로그인(Authorization Code + PKCE). 새 계정은 `/signup`에서 필수 동의(만 14세 이상·이용약관·개인정보 수집·이용) 후 가입. 세션은 SQLite + 서명 쿠키(HttpOnly·Secure·SameSite=Lax).
+- **편집 권한**(`users.role = editor`): 문제 추가·수정·삭제, 채점 케이스(보이는·히든), 시작 코드, 폴더. 바꾸면 모든 사용자에게 적용된다. 운영자(`OWNER_EMAIL`)는 가입할 때 편집 권한을 받고 비밀번호 시절의 풀이 기록(`legacy_state`)을 넘겨받는다.
+- **사용자별 데이터**: 작성 코드·언어·내 테스트 케이스·메모·풀이 시간·마지막 제출(`user_problems`), 컬렉션, 제출 기록. 탈퇴하면 CASCADE로 지운다.
+- **관리자 모드**(`/admin`): 마스터 비밀번호 `ACCESS_PASSWORD`로만 연다(상수 시간 비교, IP별 분당 5회·전체 시간당 60회, 12시간짜리 서명 쿠키). 사용자 목록·상세, 편집 권한 부여·회수, 이용 정지·블랙리스트.
+- **블랙리스트**(`blocked_emails`): 등록된 이메일은 가입·로그인할 수 없고, 로그인돼 있던 세션도 바로 끊긴다.
 
-비밀번호를 코드·이슈·PR·로그·Actions 출력에 남기지 않는다. `/api/health`, `/api/auth/*` 외 모든 API는 세션이 필요하다. 계약은 `packages/shared/src/index.ts`.
+비밀 값(`ACCESS_PASSWORD`, `SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`)은 GitHub Environment `production` secret에만 두고 코드·이슈·PR·로그·Actions 출력에 남기지 않는다. 계약은 `packages/shared/src/index.ts`.
 
 ## 코드 규칙
 

@@ -21,6 +21,8 @@ export function blankProblem(title: string, mode: ProblemMode, language: Languag
     cases: [newCase(params.length)],
     language,
     code: { java: templateFor('java', mode, params), python: templateFor('python', mode, params) },
+    myCases: [],
+    memo: '',
     lastSubmission: null,
   };
 }

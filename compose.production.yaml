@@ -1,6 +1,12 @@
+# 컨테이너 로그는 용량 한도를 넘으면 오래된 것부터 지운다(개인정보처리방침의 접속 기록 보관과 맞춘다)
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: "3" }
+
 name: codetest-production
 services:
   runner:
+    logging: *logging
     build:
       context: .
       dockerfile: docker/runner.Dockerfile
@@ -20,6 +26,7 @@ services:
     cpus: 2
     pids_limit: 512
   api:
+    logging: *logging
     build:
       context: .
       dockerfile: docker/api.Dockerfile
@@ -43,6 +50,7 @@ services:
       runner:
         condition: service_healthy
   web:
+    logging: *logging
     build:
       context: .
       dockerfile: docker/web.Dockerfile

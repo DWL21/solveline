@@ -29,8 +29,15 @@ const EnvSchema = z.object({
   /** 쉼표로 구분한 runner 주소들. 있으면 RUNNER_URL보다 우선 */
   RUNNER_URLS: optionalString,
   RUNNER_SLOTS: positiveNumber(2),
-  ACCESS_PASSWORD: optionalString,
   SESSION_SECRET: optionalString,
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
+  /** 운영자 Google 이메일: 예전(비밀번호 시절) 데이터를 넘겨받고, 허용 목록에 항상 포함 */
+  OWNER_EMAIL: optionalString,
+  /** 관리자 페이지 비밀번호(예전 사이트 비밀번호). 없으면 관리자 페이지를 열 수 없다 */
+  ACCESS_PASSWORD: optionalString,
+  /** 약관·개인정보처리방침에 적는 문의 이메일(없으면 OWNER_EMAIL) */
+  CONTACT_EMAIL: optionalString,
   SESSION_TTL_DAYS: positiveNumber(30),
   WEB_ORIGIN: optionalString,
 });
@@ -42,8 +49,10 @@ export type Config = {
   runnerUrls: string[];
   /** runner 한 대에 동시에 보내는 제출 수(runner의 RUN_SLOTS와 맞춘다) */
   runnerSlots: number;
-  /** 로그인 비밀번호. 없으면 로그인할 수 없다. */
-  accessPassword: string | null;
+  google: { clientId: string; clientSecret: string } | null;
+  ownerEmail: string | null;
+  adminPassword: string | null;
+  contactEmail: string | null;
   sessionSecret: string;
   sessionTtlMs: number;
   webOrigin: string;
@@ -65,9 +74,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const webOrigin = (e.WEB_ORIGIN ?? 'http://localhost:5173').replace(/\/$/, '');
 
   if (production && !e.SESSION_SECRET) throw new ConfigError('운영 환경에는 SESSION_SECRET이 필요합니다.');
-  if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
-  if (production && !e.ACCESS_PASSWORD) throw new ConfigError('운영 환경에는 ACCESS_PASSWORD가 필요합니다.');
   if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
+  if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
 
   let host = '';
   try {
@@ -86,7 +94,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .map((u) => u.trim().replace(/\/$/, ''))
       .filter(Boolean),
     runnerSlots: Math.floor(e.RUNNER_SLOTS),
-    accessPassword: e.ACCESS_PASSWORD ?? null,
+    google: e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET ? { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET } : null,
+    ownerEmail: e.OWNER_EMAIL?.toLowerCase() ?? null,
+    adminPassword: e.ACCESS_PASSWORD ?? null,
+    contactEmail: e.CONTACT_EMAIL ?? e.OWNER_EMAIL ?? null,
     // 개발 편의: 비밀이 없으면 프로세스마다 임의 값 (재시작하면 세션이 무효화된다)
     sessionSecret: e.SESSION_SECRET ?? cryptoRandom(),
     sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3600_000,

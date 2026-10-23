@@ -39,9 +39,11 @@ type Row = {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  user_id: string | null;
 };
 
 export type NewSubmission = {
+  userId: string;
   problemId: string | null;
   kind: SubmissionKind;
   language: Language;
@@ -61,11 +63,12 @@ export class SubmissionStore {
     const id = randomUUID();
     this.db
       .prepare(
-        `INSERT INTO submissions (id, problem_id, kind, language, mode, code, cases, testset_hash, case_ids, time_limit_ms, priority, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+        `INSERT INTO submissions (id, user_id, problem_id, kind, language, mode, code, cases, testset_hash, case_ids, time_limit_ms, priority, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
       )
       .run(
         id,
+        s.userId,
         s.problemId,
         s.kind,
         s.language,
@@ -83,6 +86,11 @@ export class SubmissionStore {
 
   row(id: string) {
     return this.db.prepare('SELECT * FROM submissions WHERE id = ?').get(id) as Row | undefined;
+  }
+
+  /** 이 사용자의 제출인가(다른 사용자의 제출은 없는 것과 같다) */
+  ownedBy(id: string, userId: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM submissions WHERE id = ? AND user_id = ?').get(id, userId);
   }
 
   get(id: string): Submission | null {
@@ -253,7 +261,7 @@ export class Dispatcher {
         const total = ids.length;
         const passed = result.compile.ok ? result.results.filter((r) => r.status === 'pass').length : 0;
         score = total ? Math.round((passed / total) * 100) : 0;
-        if (job.problem_id) this.problems.setLastSubmission(job.problem_id, { score, passed, total, language: job.language, at: new Date().toISOString() });
+        if (job.problem_id && job.user_id) this.problems.setLastSubmission(job.problem_id, job.user_id, { score, passed, total, language: job.language, at: new Date().toISOString() });
       }
       this.store.finish(job.id, { result, score });
     } catch (e) {

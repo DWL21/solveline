@@ -10,6 +10,12 @@ import {
   Runtime,
   Session,
   Submission,
+  PublicConfig,
+  SignupPending,
+  AdminSession,
+  AdminUser,
+  AdminUserDetail,
+  BlockedEmail,
   type CollectionInput,
   type SubmissionRequest,
   type TestCase,
@@ -64,8 +70,12 @@ const json = (method: string, body?: unknown): RequestInit => ({ method, body: J
 
 export const api = {
   session: () => request(Session, '/api/auth/session'),
-  login: (password: string) => request(Session, '/api/auth/login', json('POST', { password })),
   logout: () => request(Session, '/api/auth/logout', json('POST')),
+  publicConfig: () => request(PublicConfig, '/api/public/config'),
+  signupPending: () => request(SignupPending, '/api/auth/signup'),
+  signup: () => request(Session, '/api/auth/signup', json('POST', { agreeAge: true, agreeTerms: true, agreePrivacy: true })),
+  signupCancel: () => request(z.object({ cancelled: z.boolean() }), '/api/auth/signup/cancel', json('POST')),
+  deleteAccount: () => request(z.object({ deleted: z.boolean() }), '/api/account', { method: 'DELETE' }),
   runtime: () => request(Runtime, '/api/runtime'),
   problems: () => request(z.array(ProblemSummary), '/api/problems'),
   problem: (id: string) => request(Problem, `/api/problems/${encodeURIComponent(id)}`),
@@ -95,8 +105,29 @@ export const api = {
   deleteCollection: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/collections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
 
+/** 관리자 모드(마스터 비밀번호) */
+export const adminApi = {
+  session: () => request(AdminSession, '/api/admin/session'),
+  login: (password: string) => request(AdminSession, '/api/admin/login', json('POST', { password })),
+  logout: () => request(AdminSession, '/api/admin/logout', json('POST')),
+  users: () => request(z.array(AdminUser), '/api/admin/users'),
+  user: (id: string) => request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}`),
+  setEditor: (id: string, editor: boolean) => request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}/role`, json('PUT', { editor })),
+  setBlocked: (id: string, blocked: boolean, reason = '') =>
+    request(AdminUserDetail, `/api/admin/users/${encodeURIComponent(id)}/block`, json('PUT', { blocked, reason })),
+  blocklist: () => request(z.array(BlockedEmail), '/api/admin/blocklist'),
+  block: (email: string, reason: string) => request(z.array(BlockedEmail), '/api/admin/blocklist', json('POST', { email, reason })),
+  unblock: (email: string) => request(z.array(BlockedEmail), `/api/admin/blocklist/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+};
+
 export const qk = {
   session: ['session'] as const,
+  publicConfig: ['public-config'] as const,
+  signup: ['signup'] as const,
+  admin: ['admin'] as const,
+  adminUsers: ['admin', 'users'] as const,
+  adminUser: (id: string) => ['admin', 'user', id] as const,
+  blocklist: ['admin', 'blocklist'] as const,
   runtime: ['runtime'] as const,
   problems: ['problems'] as const,
   problem: (id: string) => ['problem', id] as const,

@@ -34,7 +34,13 @@ function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: str
 const BIG_FIELD = 10_000;
 
 /** 큰 값(효율성 케이스)은 입력칸에 넣으면 화면이 느려지므로 읽기 전용으로 크기와 앞부분만 보여 준다. */
-function Field({ value, label, multiline, onChange }: { value: string; label: string; multiline?: boolean; onChange: (v: string) => void }) {
+function Field({ value, label, multiline, readOnly, onChange }: { value: string; label: string; multiline?: boolean; readOnly?: boolean; onChange: (v: string) => void }) {
+  if (readOnly)
+    return (
+      <div className={`field cursor-default font-mono ${multiline ? 'min-h-10 whitespace-pre-wrap' : 'truncate'}`} aria-label={label} title={value.length > 200 ? `${value.length.toLocaleString()}자` : value}>
+        {value.length > BIG_FIELD ? `${value.slice(0, 40)}… (${(value.length / 1024).toFixed(0)}KB)` : value || <span className="text-faint">—</span>}
+      </div>
+    );
   if (value.length > BIG_FIELD)
     return (
       <div className="field cursor-default truncate text-faint" title={`${value.length.toLocaleString()}자 — 너무 커서 여기서는 편집할 수 없어요`} aria-label={label}>
@@ -48,15 +54,30 @@ function Field({ value, label, multiline, onChange }: { value: string; label: st
   );
 }
 
-/** 케이스 목록 편집(보이는/히든 공용) */
-function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode; params: string[]; cases: TestCase[]; label: string; onChange: (c: TestCase[]) => void }) {
+/** 케이스 목록(보이는/히든/내 케이스 공용). readOnly면 보기만 한다. */
+function CaseList({
+  mode,
+  params,
+  cases,
+  label,
+  readOnly,
+  onChange,
+}: {
+  mode: ProblemMode;
+  params: string[];
+  cases: TestCase[];
+  label: string;
+  readOnly?: boolean;
+  onChange: (c: TestCase[]) => void;
+}) {
   const update = (id: string, patch: Partial<TestCase>) => onChange(cases.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const remove = (id: string) => onChange(cases.filter((c) => c.id !== id));
-  const del = (n: number, id: string) => (
+  const del = (n: number, id: string) =>
+    readOnly ? null : (
     <button type="button" className="btn-quiet min-h-7 px-1.5" aria-label={`${label} ${n} 삭제`} onClick={() => remove(id)}>
       ✕
     </button>
-  );
+    );
   if (mode === 'function')
     return (
       <div className="overflow-x-auto">
@@ -80,6 +101,7 @@ function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode;
                 {params.map((p, j) => (
                   <td key={p} className="max-w-48 px-1">
                     <Field
+                      readOnly={readOnly}
                       value={c.args[j] ?? ''}
                       label={`${label} ${i + 1} ${p}`}
                       onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
@@ -87,7 +109,7 @@ function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode;
                   </td>
                 ))}
                 <td className="max-w-48 px-1">
-                  <Field value={c.expected} label={`${label} ${i + 1} 기댓값`} onChange={(v) => update(c.id, { expected: v })} />
+                  <Field readOnly={readOnly} value={c.expected} label={`${label} ${i + 1} 기댓값`} onChange={(v) => update(c.id, { expected: v })} />
                 </td>
                 <td>{del(i + 1, c.id)}</td>
               </tr>
@@ -109,11 +131,11 @@ function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode;
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-dim">입력</span>
-              <Field multiline value={c.stdin} label={`${label} ${i + 1} 입력`} onChange={(v) => update(c.id, { stdin: v })} />
+              <Field multiline readOnly={readOnly} value={c.stdin} label={`${label} ${i + 1} 입력`} onChange={(v) => update(c.id, { stdin: v })} />
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[12px] text-dim">기대 출력</span>
-              <Field multiline value={c.expected} label={`${label} ${i + 1} 기대 출력`} onChange={(v) => update(c.id, { expected: v })} />
+              <Field multiline readOnly={readOnly} value={c.expected} label={`${label} ${i + 1} 기대 출력`} onChange={(v) => update(c.id, { expected: v })} />
             </label>
           </div>
         </div>
@@ -123,45 +145,65 @@ function CaseList({ mode, params, cases, label, onChange }: { mode: ProblemMode;
 }
 
 /**
- * 테스트 케이스 편집. 보이는 케이스는 문제와 함께 자동 저장되고 "코드 실행"에 쓴다.
- * 히든 케이스는 서버의 테스트셋 파일에 따로 있어, 펼칠 때만 불러오고 따로 저장한다(채점 전용, 스포일러 방지로 기본 접힘).
+ * 테스트 케이스.
+ * - 채점 케이스(보이는·히든·시간 제한·매개변수)는 공용이다. 편집 권한이 있는 사용자가 편집 모드에서만 바꾸고, 바꾸면 모두에게 적용된다.
+ * - 내 테스트 케이스는 사용자마다 따로 저장되고 "코드 실행"에만 쓴다(기존의 "테스트 케이스 추가하기").
+ * 히든 케이스는 서버의 테스트셋 파일에 따로 있어, 편집 모드에서 펼칠 때만 불러오고 따로 저장한다.
  */
 export function CasesEditor({
   problemId,
+  guest = false,
+  editing,
   mode,
   params,
   cases,
+  myCases,
   hidden,
   timeLimitMs,
   onTimeLimit,
   onParams,
   onCases,
+  onMyCases,
 }: {
   problemId: string;
+  /** 비회원: 내 테스트 케이스를 만들 수 없다 */
+  guest?: boolean;
+  editing: boolean;
   mode: ProblemMode;
   params: string[];
   cases: TestCase[];
+  myCases: TestCase[];
   hidden: TestsetRef | null;
   timeLimitMs: number;
   onTimeLimit: (ms: number) => void;
   onParams: (p: string[]) => void;
   onCases: (c: TestCase[]) => void;
+  onMyCases: (c: TestCase[]) => void;
 }) {
   return (
     <div className="flex flex-col gap-4 p-4">
-      <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />
+      {editing ? (
+        <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />
+      ) : (
+        <p className="text-[12px] text-dim">
+          <b>시간 제한</b> {timeLimitMs / 1000}초 <span className="text-faint">· 테스트당, solution 실행 시간 기준</span>
+        </p>
+      )}
       {mode === 'function' ? (
         <>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-bold text-dim">매개변수 이름 (쉼표로 구분)</span>
-            <ParamsInput
-              params={params}
-              onChange={(next) => {
-                onParams(next);
-                onCases(cases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
-              }}
-            />
-          </label>
+          {editing && (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-bold text-dim">매개변수 이름 (쉼표로 구분)</span>
+              <ParamsInput
+                params={params}
+                onChange={(next) => {
+                  onParams(next);
+                  onCases(cases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
+                  onMyCases(myCases.map((c) => ({ ...c, args: next.map((_, i) => c.args[i] ?? '') })));
+                }}
+              />
+            </label>
+          )}
           <p className="text-[12px] leading-relaxed text-faint">
             값은 기존 표기 그대로 적습니다: <code className="text-dim">[1, 2, 3]</code>, <code className="text-dim">"abc"</code>,{' '}
             <code className="text-dim">[["a", 1]]</code>, <code className="text-dim">true</code>. 기댓값을 비우면 비교 없이 결과만 봅니다.
@@ -173,19 +215,39 @@ export function CasesEditor({
 
       <section>
         <h3 className="mb-1 text-[12px] font-bold text-dim">
-          보이는 케이스 {cases.length} <span className="font-normal text-faint">— 코드 실행</span>
+          기본 케이스 {cases.length} <span className="font-normal text-faint">— 코드 실행{editing ? ' · 모든 사용자에게 적용' : ''}</span>
         </h3>
         {cases.length > 0 ? (
-          <CaseList mode={mode} params={params} cases={cases} label="테스트" onChange={onCases} />
+          <CaseList mode={mode} params={params} cases={cases} label="테스트" readOnly={!editing} onChange={onCases} />
         ) : (
-          <p className="py-2 text-[12.5px] text-faint">보이는 케이스가 없어요</p>
+          <p className="py-2 text-[12.5px] text-faint">기본 케이스가 없어요</p>
         )}
-        <button type="button" className="btn-ghost mt-2" disabled={cases.length >= MAX_CASES} onClick={() => onCases([...cases, newCase(params.length)])}>
+        {editing && (
+          <button type="button" className="btn-ghost mt-2" disabled={cases.length >= MAX_CASES} onClick={() => onCases([...cases, newCase(params.length)])}>
+            + 기본 케이스 추가
+          </button>
+        )}
+      </section>
+
+      {!guest && (
+      <section className="border-t border-line pt-3">
+        <h3 className="mb-1 text-[12px] font-bold text-dim">
+          내 테스트 케이스 {myCases.length} <span className="font-normal text-faint">— 코드 실행 · 나만 보여요</span>
+        </h3>
+        {myCases.length > 0 && <CaseList mode={mode} params={params} cases={myCases} label="내 테스트" onChange={onMyCases} />}
+        <button type="button" className="btn-ghost mt-2" disabled={myCases.length >= MAX_CASES} onClick={() => onMyCases([...myCases, newCase(params.length)])}>
           + 테스트 케이스 추가
         </button>
       </section>
+      )}
 
-      <HiddenCases problemId={problemId} mode={mode} params={params} summary={hidden} />
+      {editing ? (
+        <HiddenCases problemId={problemId} mode={mode} params={params} summary={hidden} />
+      ) : (
+        <p className="border-t border-line pt-3 text-[12px] text-faint">
+          {hidden?.count ? `채점용 히든 케이스 ${hidden.count}개는 제출 후 채점에만 쓰여요.` : '히든 케이스가 없어 제출할 때 기본 케이스로 채점해요.'}
+        </p>
+      )}
     </div>
   );
 }

@@ -10,8 +10,11 @@ import { log, registerSecret } from './redact.ts';
 
 const config = loadConfig();
 registerSecret(config.sessionSecret);
-registerSecret(config.accessPassword);
-if (!config.accessPassword) log.warn('[config] ACCESS_PASSWORD가 없어 로그인할 수 없습니다.');
+registerSecret(config.google?.clientSecret);
+registerSecret(config.adminPassword);
+if (!config.adminPassword) log.warn('[config] ACCESS_PASSWORD가 없어 관리자 모드를 열 수 없습니다.');
+if (!config.google) log.warn('[config] GOOGLE_CLIENT_ID·GOOGLE_CLIENT_SECRET이 없어 로그인할 수 없습니다.');
+if (!config.ownerEmail) log.warn('[config] OWNER_EMAIL이 없어 예전 데이터를 넘겨받을 계정이 없습니다.');
 
 const db = openDb(config.dataDir);
 const testsets = new TestsetStore(join(config.dataDir, 'testsets'));

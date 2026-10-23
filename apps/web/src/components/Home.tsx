@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@codetest/shared';
+import { useMe } from '../lib/me.ts';
 import { ApiError, api, qk } from '../lib/api.ts';
-import { formatDuration } from '../lib/time.ts';
 import { ListSkeleton } from './Loading.tsx';
 import type { Scope } from '../lib/route.ts';
 
@@ -30,8 +30,8 @@ export function SolvedMark({ p }: { p: ProblemSummary }) {
   if (!sub) return null;
   if (sub.score === 100)
     return (
-      <span className="shrink-0 rounded-full bg-ok/15 px-2 py-0.5 text-[11.5px] font-bold text-ok" title={`맞춤 · ${new Date(sub.at).toLocaleString('ko-KR')}`}>
-        ✓ 맞춤{p.timer.solvedMs !== null ? ` · ${formatDuration(p.timer.solvedMs)}` : ''}
+      <span className="shrink-0 text-[14px] font-bold text-ok" title={new Date(sub.at).toLocaleString('ko-KR')} aria-label="맞춤">
+        ✓
       </span>
     );
   return (
@@ -43,6 +43,9 @@ export function SolvedMark({ p }: { p: ProblemSummary }) {
 
 /** 문제 선택 화면: 왼쪽에 전체·폴더·컬렉션, 오른쪽에 그 범위의 문제 목록. */
 export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope: (s: Scope) => void; onPick: (id: string) => void; onNew: () => void }) {
+  const me = useMe();
+  const editor = !!me?.editor;
+  const signedIn = !!me;
   const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
@@ -95,12 +98,12 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               {effective.kind === 'folder' && <span className="mr-1.5 text-warn">▤</span>}
               {title} <span className="text-[14px] font-semibold text-faint">{list.length}</span>
             </h1>
-            {list.length > 0 && (
+            {list.length > 0 && signedIn && (
               <span className="text-[12px] font-semibold text-ok" title="100점을 받은 문제">
                 ✓ {solved}/{list.length}
               </span>
             )}
-            {folder && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
+            {folder && editor && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
           {effective.kind === 'collection' && <p className="mb-1 text-[12.5px] text-faint">가상 묶음이에요. 문제는 원래 폴더에 그대로 있고, 여러 컬렉션에 함께 들어갈 수 있어요.</p>}
@@ -113,14 +116,16 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               onChange={(e) => setFilter(e.target.value)}
               aria-label="문제 검색"
             />
-            <button type="button" className="btn-primary ml-auto" onClick={onNew}>
-              + 새 문제
-            </button>
+            {editor && (
+              <button type="button" className="btn-primary ml-auto" onClick={onNew} title="편집 권한: 모든 사용자에게 보이는 문제를 만들어요">
+                + 새 문제
+              </button>
+            )}
           </div>
           {all.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center">
               <p className="text-[15px] font-bold">아직 문제가 없어요</p>
-              <p className="text-[13px] text-dim">문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.</p>
+              <p className="text-[13px] text-dim">{editor ? '문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.' : '문제가 등록되면 여기에 보여요.'}</p>
             </div>
           ) : shown.length === 0 ? (
             <p className="py-12 text-center text-[13px] text-faint">
@@ -172,6 +177,7 @@ function Sidebar({
   folderCount: (id: string) => number;
   collections: Collection[];
 }) {
+  const me = useMe();
   const scopes: ScopeItem[] = [
     { scope: { kind: 'all' }, label: '전체', count: total, group: 'all', key: 'all' },
     ...folders.map((f): ScopeItem => ({ scope: { kind: 'folder', id: f.id }, label: f.name, count: folderCount(f.id), group: 'folder', key: 'f' + f.id })),
@@ -225,11 +231,13 @@ function Sidebar({
           <SectionHeader kind="folder" />
           <ul>{scopes.filter((s) => s.group === 'folder').map(item)}</ul>
         </section>
+        {me && (
         <section>
           <SectionHeader kind="collection" />
           <ul>{scopes.filter((s) => s.group === 'collection').map(item)}</ul>
           {collections.length === 0 && <p className="px-2.5 text-[12px] text-faint">문제를 옮기지 않고 세트로 묶어요</p>}
         </section>
+        )}
       </aside>
     </>
   );
@@ -238,6 +246,8 @@ function Sidebar({
 /** 섹션 제목 + 새 폴더/컬렉션 입력 */
 function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
   const qc = useQueryClient();
+  // 폴더는 공용이라 편집 권한이 있어야 만든다. 컬렉션은 각자 만든다.
+  const canAdd = kind === 'collection' || !!useMe()?.editor;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const create = useMutation({
@@ -256,7 +266,8 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
   return (
     <div className="mb-1">
       <div className="flex items-center px-2.5">
-        <h2 className="flex-1 text-[11.5px] font-bold tracking-wide text-faint">{label}</h2>
+        <h2 className="flex-1 text-[11.5px] font-bold tracking-wide text-faint">{kind === 'collection' ? '내 컬렉션' : label}</h2>
+        {canAdd && (
         <button
           type="button"
           className="rounded px-1.5 text-[15px] leading-6 text-faint hover:bg-raised hover:text-text"
@@ -266,8 +277,9 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
         >
           +
         </button>
+        )}
       </div>
-      {open && (
+      {open && canAdd && (
         <form onSubmit={submit} className="mt-1 px-1">
           <input
             className="field font-sans"
