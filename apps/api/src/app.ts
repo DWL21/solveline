@@ -447,54 +447,51 @@ export function createApp(deps: AppDeps) {
     problems.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.'),
   );
 
-  // ─── 폴더(공용) ───
-  app.get('/api/folders', (c) => ok(c, z.array(Folder), folders.list()));
+  // ─── 폴더(사용자별 개인 정리, 비회원은 기본 폴더를 본다) ───
+  app.get('/api/folders', (c) => ok(c, z.array(Folder), folders.list(viewer(c))));
 
-  app.post('/api/folders', editorOnly, async (c) => {
+  app.post('/api/folders', async (c) => {
     const body = await readJson(c, FolderInput);
     if (!body) return fail(c, 400, 'invalid_request', '폴더 이름이 필요합니다.');
-    return ok(c, Folder, folders.create(body.name));
+    return ok(c, Folder, folders.create(body.name, c.get('userId')));
   });
 
-  app.put('/api/folders/:id', editorOnly, async (c) => {
+  app.put('/api/folders/:id', async (c) => {
     const body = await readJson(c, FolderInput);
     if (!body) return fail(c, 400, 'invalid_request', '폴더 이름이 필요합니다.');
-    const f = folders.rename(c.req.param('id')!, body.name);
+    const f = folders.rename(c.req.param('id'), body.name, c.get('userId'));
     return f ? ok(c, Folder, f) : fail(c, 404, 'not_found', '없는 폴더입니다.');
   });
 
-  app.delete('/api/folders/:id', editorOnly, (c) =>
-    folders.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 폴더입니다.'),
+  app.delete('/api/folders/:id', (c) =>
+    folders.delete(c.req.param('id'), c.get('userId')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 폴더입니다.'),
   );
 
-  // ─── 컬렉션(사용자별) ───
-  app.get('/api/collections', (c) => {
-    const uid = viewer(c);
-    return ok(c, z.array(Collection), uid ? collections.list(uid) : []);
-  });
+  // ─── 컬렉션(공용, 편집 권한자만 바꾼다. 이름의 '/'는 계층) ───
+  app.get('/api/collections', (c) => ok(c, z.array(Collection), collections.list()));
 
-  app.post('/api/collections', async (c) => {
+  app.post('/api/collections', editorOnly, async (c) => {
     const body = await readJson(c, CollectionInput);
     if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
-    return ok(c, Collection, collections.create(body, c.get('userId')));
+    return ok(c, Collection, collections.create(body));
   });
 
-  app.put('/api/collections/:id', async (c) => {
+  app.put('/api/collections/:id', editorOnly, async (c) => {
     const body = await readJson(c, CollectionInput);
     if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
-    const col = collections.update(c.req.param('id'), body, c.get('userId'));
+    const col = collections.update(c.req.param('id')!, body);
     return col ? ok(c, Collection, col) : fail(c, 404, 'not_found', '없는 컬렉션입니다.');
   });
 
-  app.put('/api/collections/:id/items', async (c) => {
+  app.put('/api/collections/:id/items', editorOnly, async (c) => {
     const body = await readJson(c, CollectionItemsInput);
     if (!body) return fail(c, 400, 'invalid_request', 'problemIds 배열이 필요합니다.');
-    const col = collections.setItems(c.req.param('id'), body.problemIds, c.get('userId'));
+    const col = collections.setItems(c.req.param('id')!, body.problemIds);
     return col ? ok(c, Collection, col) : fail(c, 404, 'not_found', '없는 컬렉션입니다.');
   });
 
-  app.delete('/api/collections/:id', (c) =>
-    collections.delete(c.req.param('id'), c.get('userId')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 컬렉션입니다.'),
+  app.delete('/api/collections/:id', editorOnly, (c) =>
+    collections.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 컬렉션입니다.'),
   );
 
   // ─── 풀이 시간(사용자별) ───

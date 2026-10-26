@@ -77,8 +77,9 @@ export type FolderInput = z.infer<typeof FolderInput>;
 export const Folder = FolderInput.extend({ id: z.string(), position: z.number().int(), createdAt: z.string() });
 export type Folder = z.infer<typeof Folder>;
 
+/** 컬렉션 이름의 '/'는 계층이다(예: "모의고사/1회") */
 export const CollectionInput = z.object({
-  name: z.string().trim().min(1).max(60),
+  name: z.string().trim().min(1).max(200),
   description: z.string().max(2000).default(''),
 });
 export type CollectionInput = z.infer<typeof CollectionInput>;
