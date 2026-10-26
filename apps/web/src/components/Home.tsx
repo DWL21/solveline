@@ -1,5 +1,5 @@
 import { Language } from '@solveline/shared';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
 import { useMe } from '../lib/me.ts';
@@ -63,6 +63,10 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
   const [filter, setFilter] = useState('');
+  // 문제가 많으면(1,000개 넘게) 한 번에 그리지 않고 처음 일부만, 내려가면 이어서 그린다(화면 전환이 바로 되게)
+  const [limit, setLimit] = useState(PAGE);
+  const scopeKey = JSON.stringify(scope);
+  useEffect(() => setLimit(PAGE), [scopeKey, filter]);
 
   const failed = [problems, folders, collections].find((q) => q.isError);
   if (failed)
@@ -180,8 +184,9 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               {q ? '검색 결과가 없어요' : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
             </p>
           ) : (
+            <>
             <ol className="overflow-hidden rounded-lg border border-line bg-panel">
-              {shown.map((p) => (
+              {shown.slice(0, limit).map((p) => (
                 <li key={p.id} className="border-b border-line last:border-b-0">
                   <button
                     type="button"
@@ -199,6 +204,8 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
                 </li>
               ))}
             </ol>
+            {shown.length > limit && <MoreSentinel onMore={() => setLimit((n) => n + PAGE)} remaining={shown.length - limit} />}
+            </>
           )}
         </div>
       </div>
@@ -500,6 +507,25 @@ function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode;
           <div className="h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
         </div>
       )}
+    </button>
+  );
+}
+
+const PAGE = 80;
+
+/** 목록 끝에 닿으면 다음 묶음을 그린다(스크롤하지 못하는 환경을 위해 버튼도 둔다) */
+function MoreSentinel({ onMore, remaining }: { onMore: () => void; remaining: number }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && onMore(), { rootMargin: '600px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [onMore]);
+  return (
+    <button ref={ref} type="button" className="btn-ghost mt-3 w-full" onClick={onMore}>
+      더 보기 ({remaining})
     </button>
   );
 }

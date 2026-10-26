@@ -64,6 +64,8 @@ function Shell() {
   const sync = useDraftSync(me?.email);
   const qc = useQueryClient();
   const [route, go] = useRoute();
+  // 로고를 누를 때마다 초기 화면을 새로 그린다: 이미 초기 화면이어도 맨 위(컬렉션 카드)로, 검색어도 지운다
+  const [homeKey, setHomeKey] = useState(0);
   const [creating, setCreating] = useState(false);
   useEffect(prefetchWorkspace, []);
   // 홈에서 마지막으로 보던 범위. 문제를 닫으면 그 범위로 돌아간다.
@@ -98,7 +100,11 @@ function Shell() {
           href="#/"
           className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-raised"
           title="문제 선택 화면으로"
-          onClick={(e) => (e.preventDefault(), go({ kind: 'home', scope: { kind: 'all' } }))}
+          onClick={(e) => {
+            e.preventDefault();
+            setHomeKey((k) => k + 1);
+            go({ kind: 'home', scope: { kind: 'all' } });
+          }}
         >
           <img src="/icon.svg" alt="" className="size-6" />
           <span className="text-[15px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
@@ -126,7 +132,7 @@ function Shell() {
       ) : route.kind === 'submissions' ? (
         <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div key={homeKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Home
             scope={route.scope}
             onScope={(scope) => go({ kind: 'home', scope })}
