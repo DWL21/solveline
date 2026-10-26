@@ -88,11 +88,11 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const showResult = useCallback(() => {
     if (narrowRef.current) setPane('result');
   }, [setPane]);
-  // 휴대폰 코드 탭: 앱 상단바·문제 제목 줄을 숨겨 에디터를 최대한 넓게(문제·결과 탭으로 가면 다시 보인다)
-  const codeFocus = narrow && pane === 'code';
+  // 휴대폰 코드·결과 탭: 앱 상단바·문제 제목 줄을 숨겨 에디터·결과를 넓게(문제 탭으로 가면 다시 보인다)
+  const codeFocus = narrow && pane !== 'problem';
   // 코드를 쓰는 중(에디터 초점 = 화상 키보드 열림): 탭·실행 바까지 숨겨 코드만 보여 준다
   const [typingRaw, setTyping] = useState(false);
-  const typing = codeFocus && typingRaw;
+  const typing = narrow && pane === 'code' && typingRaw;
   useEffect(() => {
     const root = document.documentElement;
     if (codeFocus) root.dataset.codeFocus = '';

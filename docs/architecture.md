@@ -49,7 +49,7 @@ solveline.simplyimg.com ─ Cloudflare Pages (web 정적 파일)
 
 | 폭 | 대상 | 문제 화면 |
 |---|---|---|
-| 768px 미만, 또는 가로 휴대폰 | 휴대폰(아이폰·갤럭시·폴드) | 문제·코드·결과 탭 + 하단 실행 바, 코드 탭은 상단바·제목 숨김, 코드를 쓰는 동안은 탭·실행 바까지 숨김, 테스트 케이스는 카드 |
+| 768px 미만, 또는 가로 휴대폰 | 휴대폰(아이폰·갤럭시·폴드) | 문제·코드·결과 탭 + 하단 실행 바, 코드·결과 탭은 상단바·제목 숨김, 코드를 쓰는 동안은 탭·실행 바까지 숨김, 테스트 케이스는 카드 |
 | 768px 이상 | 태블릿 세로·가로, 데스크톱 | 문제 / 에디터·결과 좌우 분할(크기 조절) |
 
 - 앱은 화면에 고정한다(`#root` position fixed). 평소에는 브라우저 영역 전체(`inset: 0`)를 채우고, 화상 키보드가 열려 있을 때만 `visualViewport`의 높이·위치(`--app-h`·`--app-top`, `apps/web/src/main.tsx`)로 키보드 위 영역에 맞춘다(iOS Chrome은 도구 막대가 접히고 펴질 때 visualViewport 높이가 실제보다 짧게 잡혀 평소에는 쓰지 않는다). 문서는 스크롤하지 않고 긴 화면은 `#root` 안에서 스크롤한다. 안드로이드는 `interactive-widget=resizes-content`.
@@ -57,6 +57,6 @@ solveline.simplyimg.com ─ Cloudflare Pages (web 정적 파일)
 - 휴대폰 배치 판단: 폭 768px 미만, 또는 터치 기기에서 높이 500px 이하(가로로 눕힌 휴대폰). 360px 미만(갤럭시 폴드 덮개 화면, 아이폰 SE)은 상단바 로고 글자를 숨긴다.
 - iOS는 입력칸 초점 때 자동 확대되지 않도록 `maximum-scale=1`을 iOS에서만 붙인다(손가락 확대는 그대로).
 - 휴대폰 에디터: 자동 대문자·자동 수정·맞춤법 검사를 끄고, 긴 줄은 그 줄 들여쓰기 + 2칸으로 줄바꿈, 접기 여백 없음, 끝에 40vh 여백(마지막 줄도 키보드 위로 올릴 수 있게). 오른쪽 빠른 스크롤 손잡이, 두 손가락으로 글자 크기 9~22px(기기에 저장, 기본 13px, iOS는 제스처 이벤트로 받아 키보드 여닫기와 상관없이 같게). 화면 크기가 바뀔 때 iOS 글자 자동 확대는 끈다(`text-size-adjust: 100%`).
-- 코드 탭(`html[data-code-focus]`)은 상단바·제목 줄을, 에디터 초점(`html[data-typing]`)·키보드 열림(`html[data-keyboard]`)은 탭·실행 바를 숨긴다.
+- 코드·결과 탭(`html[data-code-focus]`)은 상단바·제목 줄을, 에디터 초점(`html[data-typing]`)·키보드 열림(`html[data-keyboard]`)은 탭·실행 바를 숨긴다.
 - 노치·홈 막대는 `env(safe-area-inset-*)`로 비켜 간다. 폭 판단은 `apps/web/src/lib/media.ts`.
 
