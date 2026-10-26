@@ -328,8 +328,9 @@ guest ? (
             {sub.score === 100 ? '✓' : `△ ${sub.score}점`}
           </span>
         )}
-        {editing ? <FolderSelect value={draft.folderId} onChange={(folderId) => patch({ folderId })} /> : <FolderName id={draft.folderId} />}
-        {!guest && <CollectionsMenu problemId={problem.id} />}
+        {/* 폴더는 개인 정리: 로그인하면 언제든 내 폴더로 옮긴다. 컬렉션(공용)은 편집 권한자만 넣고 뺀다. */}
+        {guest ? <FolderName id={draft.folderId} /> : <FolderSelect value={draft.folderId} onChange={(folderId) => patch({ folderId })} />}
+        {canEdit && <CollectionsMenu problemId={problem.id} />}
         <select
           value={lang}
           aria-label="언어"
@@ -534,11 +535,11 @@ function FolderSelect({ value, onChange }: { value: string | null; onChange: (id
     <select
       value={value ?? ''}
       aria-label="폴더"
-      title="폴더"
+      title="내 폴더"
       onChange={(e) => onChange(e.target.value || null)}
       className="h-[34px] max-w-40 rounded-md border border-line-strong bg-raised px-2 text-[13px] outline-none focus:border-accent"
     >
-      <option value="">▤ 폴더 없음</option>
+      <option value="">▤ 내 폴더 없음</option>
       {folders.data?.map((f) => (
         <option key={f.id} value={f.id}>
           ▤ {f.name}
