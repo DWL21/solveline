@@ -14,6 +14,7 @@
 | `GET` | `/api/admin/users`, `/api/admin/users/{id}` | 사용자 목록 / 상세 현황 |
 | `PUT` | `/api/admin/users/{id}/role` | 편집 권한 주기·회수 |
 | `DELETE` | `/api/admin/users/{id}` | 사용자 삭제(풀이 기록 모두 삭제) |
+| `PUT` | `/api/admin/collections/{id}` | 컬렉션 이름·설명 바꾸기(이름의 `/`는 계층) |
 | `GET` `PUT` | `/api/admin/signup-settings` | 신규 가입 허용 여부 조회·변경 (`{ signupEnabled: boolean }`, 마스터 전용) |
 | `GET` | `/api/runtime` | runner 상태와 Java·Python 버전 |
 | `GET` `POST` | `/api/problems` | 문제 목록 / 만들기 |
