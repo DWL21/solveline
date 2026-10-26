@@ -368,6 +368,16 @@ export function createApp(deps: AppDeps) {
     return ok(c, SignupSettings, { signupEnabled: signupSettings.enabled() });
   });
 
+  /** 컬렉션 이름·설명 바꾸기(마스터, 스크립트용). 이름의 '/'는 계층 */
+  app.put('/api/admin/collections/:id', async (c) => {
+    const body = await readJson(c, CollectionInput);
+    if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
+    const col = collections.update(c.req.param('id'), body);
+    if (!col) return fail(c, 404, 'not_found', '없는 컬렉션입니다.');
+    log.info(`[admin] 컬렉션 이름 변경 ${col.id}`);
+    return ok(c, Collection, col);
+  });
+
   /** 문제의 시작 코드 교체(스크립트용) */
   app.put('/api/admin/problems/:id/starter', async (c) => {
     const body = await readJson(c, CodeSet);
