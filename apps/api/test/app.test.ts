@@ -244,22 +244,29 @@ describe('공용 문제·사용자별 풀이', () => {
     expect((await patch({ timer: { elapsedMs: -1 } })).status).toBe(400);
   });
 
-  it('문제·폴더는 모두가 같이 보고, 편집 권한이 없으면 만들거나 바꿀 수 없다', async () => {
+  it('문제는 모두가 같이 보고 편집 권한이 없으면 바꿀 수 없으며, 폴더는 각자 만든다', async () => {
     const s = setup();
     const E = as(s, await login(s)); // 운영자: 편집 권한
     const U = as(s, await login(s, 'user@example.com'));
     const folder = (await E('POST', '/api/folders', { name: '그래프' })).body.data.id;
     const p = (await E('POST', '/api/problems', { ...problem, folderId: folder })).body.data.id;
-    expect((await U('GET', '/api/problems')).body.data.map((x: { id: string }) => x.id)).toEqual([p]);
-    expect((await U('GET', '/api/folders')).body.data).toHaveLength(1);
+    expect((await U('GET', '/api/problems')).body.data.map((x: { id: string; folderId: string | null }) => [x.id, x.folderId])).toEqual([[p, null]]);
+    expect((await E('GET', '/api/problems')).body.data[0].folderId).toBe(folder);
+    expect((await U('GET', '/api/folders')).body.data).toHaveLength(0);
     expect((await U('POST', '/api/problems', problem)).status).toBe(403);
     expect((await U('DELETE', `/api/problems/${p}`)).status).toBe(403);
-    expect((await U('POST', '/api/folders', { name: 'x' })).status).toBe(403);
-    expect((await U('PUT', `/api/folders/${folder}`, { name: 'x' })).status).toBe(403);
+    // 폴더는 개인 정리용: 누구나 만들고, 남의 폴더는 없는 것과 같다
+    const mine = (await U('POST', '/api/folders', { name: '그래프' })).body.data.id;
+    expect((await U('PUT', `/api/folders/${folder}`, { name: 'x' })).status).toBe(404);
+    expect((await U('DELETE', `/api/folders/${folder}`)).status).toBe(404);
+    await U('PUT', `/api/problems/${p}`, { ...problem, folderId: mine });
+    expect((await U('GET', `/api/problems/${p}`)).body.data.folderId).toBe(mine);
+    expect((await E('GET', `/api/problems/${p}`)).body.data.folderId).toBe(folder);
+    expect((await U('PUT', `/api/problems/${p}`, { ...problem, folderId: folder })).status).toBe(400);
     expect((await U('GET', `/api/problems/${p}/hidden`)).status).toBe(403);
     expect((await U('PUT', `/api/problems/${p}/hidden`, { cases: [] })).status).toBe(403);
     // 권한 없는 사용자의 자동 저장은 내 코드만 반영하고 문제 내용은 그대로 둔다
-    await U('PUT', `/api/problems/${p}`, { ...problem, folderId: folder, title: '바꿔 보기', code: { java: 'mine', python: 'mine' } });
+    await U('PUT', `/api/problems/${p}`, { ...problem, folderId: mine, title: '바꿔 보기', code: { java: 'mine', python: 'mine' } });
     expect((await E('GET', `/api/problems/${p}`)).body.data.title).toBe('두 수의 합');
     expect((await U('GET', `/api/problems/${p}`)).body.data.code.java).toBe('mine');
     // 편집 권한자가 바꾼 채점 케이스·제목은 모두에게 적용된다
@@ -300,16 +307,41 @@ describe('공용 문제·사용자별 풀이', () => {
     expect((await E('POST', `/api/submissions/${sub}/cancel`)).status).toBe(404);
   });
 
-  it('컬렉션은 사용자마다 따로 만든다', async () => {
+  it('컬렉션은 공용이고 편집 권한자만 만들고 바꾼다(이름의 /는 계층)', async () => {
     const s = setup();
     const E = as(s, await login(s));
     const U = as(s, await login(s, 'user@example.com'));
     const p = (await E('POST', '/api/problems', problem)).body.data.id;
-    const col = (await U('POST', '/api/collections', { name: '세트', description: '' })).body.data.id;
-    expect((await E('POST', '/api/collections', { name: '세트', description: '' })).status).toBe(200);
-    expect((await U('PUT', `/api/collections/${col}/items`, { problemIds: [p] })).body.data.problemIds).toEqual([p]);
-    expect((await E('GET', '/api/collections')).body.data[0].problemIds).toEqual([]);
-    expect((await E('PUT', `/api/collections/${col}/items`, { problemIds: [p] })).status).toBe(404);
+    expect((await U('POST', '/api/collections', { name: '세트', description: '' })).status).toBe(403);
+    const col = (await E('POST', '/api/collections', { name: ' 모의고사 /  1회 ', description: '' })).body.data;
+    expect(col.name).toBe('모의고사/1회');
+    expect((await E('POST', '/api/collections', { name: '모의고사/1회', description: '' })).status).toBe(409);
+    expect((await U('PUT', `/api/collections/${col.id}/items`, { problemIds: [p] })).status).toBe(403);
+    expect((await U('DELETE', `/api/collections/${col.id}`)).status).toBe(403);
+    expect((await E('PUT', `/api/collections/${col.id}/items`, { problemIds: [p] })).body.data.problemIds).toEqual([p]);
+    // 비회원·일반 사용자 모두 같은 컬렉션을 본다
+    expect((await U('GET', '/api/collections')).body.data.map((c: { name: string; problemIds: string[] }) => [c.name, c.problemIds])).toEqual([['모의고사/1회', [p]]]);
+    expect(((await (await s.app.request('/api/collections')).json()) as { data: unknown[] }).data).toHaveLength(1);
+  });
+
+  it('기본 폴더(틀)는 가입한 사용자마다 개인 폴더로 복사되고, 비회원은 틀을 본다', async () => {
+    const s = setup();
+    const E = as(s, await login(s));
+    const p = (await E('POST', '/api/problems', problem)).body.data.id;
+    s.db.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES ('tpl', NULL, '구현', 0, '2026-01-01')").run();
+    s.db.prepare("UPDATE problems SET folder_id = 'tpl' WHERE id = ?").run(p);
+    const guestFolders = ((await (await s.app.request('/api/folders')).json()) as { data: { id: string; name: string }[] }).data;
+    expect(guestFolders.map((f) => f.name)).toEqual(['구현']);
+    expect(((await (await s.app.request('/api/problems')).json()) as { data: { folderId: string | null }[] }).data[0]!.folderId).toBe('tpl');
+    const U = as(s, await login(s, 'new@example.com'));
+    const folders = (await U('GET', '/api/folders')).body.data as { id: string; name: string }[];
+    expect(folders.map((f) => f.name)).toEqual(['구현']);
+    expect(folders[0]!.id).not.toBe('tpl');
+    expect((await U('GET', '/api/problems')).body.data[0].folderId).toBe(folders[0]!.id);
+    // 바꿔도 다른 사람에게는 영향이 없다
+    await U('PUT', `/api/folders/${folders[0]!.id}`, { name: '내 구현' });
+    const V = as(s, await login(s, 'other@example.com'));
+    expect((await V('GET', '/api/folders')).body.data.map((f: { name: string }) => f.name)).toEqual(['구현']);
   });
 
   it('운영자가 가입하면 예전 작성 코드·채점 결과·컬렉션을 넘겨받고 편집 권한을 갖는다', async () => {
@@ -324,7 +356,7 @@ describe('공용 문제·사용자별 풀이', () => {
     const U = as(s, await login(s, 'other@example.com'));
     const O = as(s, await login(s));
     expect((await U('GET', '/api/problems/old')).body.data.lastSubmission).toBeNull();
-    expect((await U('GET', '/api/collections')).body.data).toEqual([]);
+    expect((await U('GET', '/api/collections')).body.data.map((c: { name: string }) => c.name)).toEqual(['모의고사']);
     expect((await O('GET', '/api/problems/old')).body.data.code.java).toBe('내 풀이');
     expect((await O('GET', '/api/problems/old')).body.data.lastSubmission.score).toBe(100);
     expect((await O('GET', '/api/collections')).body.data.map((c: { name: string }) => c.name)).toEqual(['모의고사']);
@@ -358,11 +390,11 @@ describe('관리자 모드(마스터 비밀번호)', () => {
     const list = (await A('GET', '/api/admin/users')).body.data as { id: string; email: string; editor: boolean }[];
     const u = list.find((x) => x.email === 'user@example.com')!;
     expect(u.editor).toBe(false);
-    expect((await U('POST', '/api/folders', { name: '새 폴더' })).status).toBe(403);
+    expect((await U('POST', '/api/collections', { name: '새 묶음', description: '' })).status).toBe(403);
     expect((await A('PUT', `/api/admin/users/${u.id}/role`, { editor: true })).body.data.editor).toBe(true);
-    expect((await U('POST', '/api/folders', { name: '새 폴더' })).status).toBe(200);
+    expect((await U('POST', '/api/collections', { name: '새 묶음', description: '' })).status).toBe(200);
     await A('PUT', `/api/admin/users/${u.id}/role`, { editor: false });
-    expect((await U('POST', '/api/folders', { name: '또 폴더' })).status).toBe(403);
+    expect((await U('POST', '/api/collections', { name: '또 묶음', description: '' })).status).toBe(403);
     const detail = (await A('GET', `/api/admin/users/${u.id}`)).body.data;
     expect(detail.termsVersion).toBeTruthy();
     expect(detail.recentSubmissions).toEqual([]);
@@ -410,7 +442,7 @@ describe('설정', () => {
       db.exec(`DROP TABLE signup_settings;
         CREATE TABLE blocked_emails (email TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
         INSERT INTO blocked_emails VALUES ('old@example.com', 'old', '2026-01-01');
-        DELETE FROM _migrations WHERE id = (SELECT MAX(id) FROM _migrations);`);
+        DELETE FROM _migrations WHERE id = 8; -- 가입 정책 마이그레이션(#49)`);
       db.close();
       db = openDb(dir);
       expect(new UserStore(db).byId(user.id)?.email).toBe('old@example.com');

@@ -6,21 +6,33 @@ import { useMe } from '../lib/me.ts';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { ListSkeleton } from './Loading.tsx';
 import type { Scope } from '../lib/route.ts';
+import { ancestors, buildTree, findNode, flatten, problemIdsUnder, type CollectionNode } from '../lib/collections.ts';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const byTitle = (a: ProblemSummary, b: ProblemSummary) => a.title.localeCompare(b.title, 'ko', { numeric: true });
 const sameScope = (a: Scope, b: Scope) =>
-  a.kind === b.kind && (a.kind === 'all' || (a.kind === 'folder' && b.kind === 'folder' && a.id === b.id) || (a.kind === 'collection' && b.kind === 'collection' && a.id === b.id));
+  a.kind === b.kind &&
+  (a.kind === 'all' ||
+    (a.kind === 'folder' && b.kind === 'folder' && a.id === b.id) ||
+    (a.kind === 'collection' && b.kind === 'collection' && a.id === b.id) ||
+    (a.kind === 'group' && b.kind === 'group' && a.path === b.path));
+
+/** 나무의 한 단계로 가는 범위: 실제 컬렉션이면 그 컬렉션, 없으면 묶음 */
+const scopeOfNode = (n: CollectionNode): Scope => (n.collection ? { kind: 'collection', id: n.collection.id } : { kind: 'group', path: n.path });
 
 /** 범위(전체·폴더·컬렉션)의 문제 목록을 화면과 같은 순서로. "다음 문제"도 이 순서를 따른다. */
 export function scopeList(scope: Scope, all: ProblemSummary[], collections: Collection[]): ProblemSummary[] {
   if (scope.kind === 'folder') return all.filter((p) => p.folderId === scope.id).sort(byTitle);
+  const byId = new Map(all.map((p) => [p.id, p]));
+  const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
   if (scope.kind === 'collection') {
     const col = collections.find((c) => c.id === scope.id);
-    if (col) {
-      const byId = new Map(all.map((p) => [p.id, p]));
-      return col.problemIds.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
-    }
+    if (col) return pick(col.problemIds);
+  }
+  // 묶음: 하위 컬렉션의 문제를 모아서
+  if (scope.kind === 'group') {
+    const node = findNode(buildTree(collections), scope.path);
+    if (node) return pick(problemIdsUnder(node));
   }
   return [...all].sort(byTitle);
 }
@@ -67,9 +79,15 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const all = problems.data;
   const folder = scope.kind === 'folder' && scope.id ? folders.data.find((f) => f.id === scope.id) : undefined;
   const collection = scope.kind === 'collection' ? collections.data.find((c) => c.id === scope.id) : undefined;
+  const tree = buildTree(collections.data);
+  const node = collection ? findNode(tree, collection.name) : scope.kind === 'group' ? findNode(tree, scope.path) : null;
 
   // 지워진 폴더·컬렉션 주소로 들어오면 전체로 보여 준다
-  const effective: Scope = (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) ? { kind: 'all' } : scope;
+  const effective: Scope =
+    (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) || (scope.kind === 'group' && !node) ? { kind: 'all' } : scope;
+  const inCollection = effective.kind === 'collection' || effective.kind === 'group';
+  // 카드로 보여 줄 컬렉션: 전체 화면이면 최상위, 컬렉션 안이면 그 하위
+  const cards = effective.kind === 'all' ? tree : inCollection && node ? node.children : [];
 
   const list = scopeList(effective, all, collections.data);
   const solved = list.filter((p) => p.lastSubmission?.score === 100).length;
@@ -78,7 +96,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const shown = q ? list.filter((p) => p.title.toLowerCase().includes(q)) : list;
   const unfiled = all.filter((p) => !p.folderId).length;
   const folderName = new Map(folders.data.map((f) => [f.id, f.name]));
-  const title = effective.kind === 'all' ? '전체 문제' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (collection?.name ?? '');
+  const title = effective.kind === 'all' ? '전체 문제' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (node?.name ?? '');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -89,13 +107,30 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
         unfiled={unfiled}
         folders={folders.data}
         folderCount={(id) => all.filter((p) => p.folderId === id).length}
-        collections={collections.data}
+        tree={tree}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
+          {inCollection && node && node.depth > 0 && (
+            <nav className="mb-1 flex flex-wrap items-center gap-1 text-[12.5px] text-dim" aria-label="컬렉션 경로">
+              {ancestors(node.path)
+                .slice(0, -1)
+                .map((path) => {
+                  const n = findNode(tree, path);
+                  return (
+                    <span key={path} className="flex items-center gap-1">
+                      <button type="button" className="hover:text-text hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
+                        {n?.name ?? path}
+                      </button>
+                      <span className="text-faint">/</span>
+                    </span>
+                  );
+                })}
+            </nav>
+          )}
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <h1 className="text-[18px] font-bold">
-              {effective.kind === 'collection' && <span className="mr-1.5 text-sky">◆</span>}
+              {inCollection && <span className="mr-1.5 text-sky">◆</span>}
               {effective.kind === 'folder' && <span className="mr-1.5 text-warn">▤</span>}
               {title} <span className="text-[14px] font-semibold text-faint">{list.length}</span>
             </h1>
@@ -104,10 +139,23 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
                 ✓ {solved}/{list.length}
               </span>
             )}
-            {folder && editor && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
-            {collection && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
+            {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
+            {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
           {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
+          {cards.length > 0 && (
+            <section className="mt-3 mb-5" aria-label={effective.kind === 'all' ? '컬렉션' : '하위 컬렉션'}>
+              {effective.kind === 'all' && <h2 className="mb-2 text-[13px] font-bold text-dim">컬렉션</h2>}
+              <ul className="grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3">
+                {cards.map((n) => (
+                  <li key={n.path}>
+                    <CollectionCard node={n} all={all} signedIn={signedIn} onOpen={() => onScope(scopeOfNode(n))} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {effective.kind === 'all' && cards.length > 0 && <h2 className="mb-0 text-[13px] font-bold text-dim">전체 문제</h2>}
           <div className="mt-3 mb-4 flex flex-wrap items-center gap-2">
             <input
               className="field w-full font-sans sm:w-72"
@@ -129,7 +177,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             </div>
           ) : shown.length === 0 ? (
             <p className="py-12 text-center text-[13px] text-faint">
-              {q ? '검색 결과가 없어요' : effective.kind === 'collection' ? '아직 문제가 없어요. 문제 화면의 "컬렉션" 버튼으로 추가하세요.' : '이 폴더에 문제가 없어요'}
+              {q ? '검색 결과가 없어요' : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
             </p>
           ) : (
             <ol className="overflow-hidden rounded-lg border border-line bg-panel">
@@ -140,7 +188,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
                     onClick={() => onPick(p.id)}
                     className={`flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${p.lastSubmission?.score === 100 ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
                   >
-                    {effective.kind === 'collection' && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{list.indexOf(p) + 1}</span>}
+                    {inCollection && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{list.indexOf(p) + 1}</span>}
                     <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${p.lastSubmission?.score === 100 ? 'text-ok' : ''}`}>{p.title}</span>
                     <SolvedMark p={p} />
                     {effective.kind !== 'folder' && p.folderId && (
@@ -158,7 +206,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   );
 }
 
-type ScopeItem = { scope: Scope; label: string; count: number; group: 'all' | 'folder' | 'collection'; key: string };
+type ScopeItem = { scope: Scope; label: string; count: number; group: 'all' | 'folder' | 'collection'; key: string; depth?: number };
 
 function Sidebar({
   scope,
@@ -167,7 +215,7 @@ function Sidebar({
   unfiled,
   folders,
   folderCount,
-  collections,
+  tree,
 }: {
   scope: Scope;
   onScope: (s: Scope) => void;
@@ -175,7 +223,7 @@ function Sidebar({
   unfiled: number;
   folders: Folder[];
   folderCount: (id: string) => number;
-  collections: Collection[];
+  tree: CollectionNode[];
 }) {
   const me = useMe();
   const [creating, setCreating] = useState(false);
@@ -183,7 +231,10 @@ function Sidebar({
     { scope: { kind: 'all' }, label: '전체', count: total, group: 'all', key: 'all' },
     ...folders.map((f): ScopeItem => ({ scope: { kind: 'folder', id: f.id }, label: f.name, count: folderCount(f.id), group: 'folder', key: 'f' + f.id })),
     ...(unfiled > 0 ? [{ scope: { kind: 'folder', id: null }, label: '폴더 없음', count: unfiled, group: 'folder', key: 'fnone' } as ScopeItem] : []),
-    ...collections.map((c): ScopeItem => ({ scope: { kind: 'collection', id: c.id }, label: c.name, count: c.problemIds.length, group: 'collection', key: 'c' + c.id })),
+    // 컬렉션은 '/' 계층을 들여쓰기로 보여 준다. 묶음(실제 컬렉션 없음)도 고를 수 있다.
+    ...flatten(tree).map(
+      (n): ScopeItem => ({ scope: scopeOfNode(n), label: n.name, count: problemIdsUnder(n).length, group: 'collection', key: 'c' + n.path, depth: n.depth }),
+    ),
   ];
   const current = scopes.find((s) => sameScope(s.scope, scope))?.key ?? 'all';
   const icon = (g: ScopeItem['group']) => (g === 'collection' ? '◆' : g === 'folder' ? '▤' : '☰');
@@ -194,6 +245,7 @@ function Sidebar({
         type="button"
         onClick={() => onScope(s.scope)}
         aria-current={current === s.key ? 'page' : undefined}
+        style={s.depth ? { paddingLeft: `${10 + s.depth * 14}px` } : undefined}
         className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised/60 hover:text-text'}`}
       >
         <span className={`w-4 shrink-0 text-center text-[11px] ${s.group === 'collection' ? 'text-sky' : s.group === 'folder' ? 'text-warn' : 'text-faint'}`} aria-hidden>
@@ -221,7 +273,7 @@ function Sidebar({
         >
           {scopes.map((s) => (
             <option key={s.key} value={s.key}>
-              {s.group === 'folder' ? '폴더 · ' : s.group === 'collection' ? '컬렉션 · ' : ''}
+              {s.group === 'folder' ? '폴더 · ' : s.group === 'collection' ? `컬렉션 · ${'　'.repeat(s.depth ?? 0)}` : ''}
               {s.label} ({s.count})
             </option>
           ))}
@@ -248,21 +300,19 @@ function Sidebar({
           <SectionHeader kind="folder" />
           <ul>{scopes.filter((s) => s.group === 'folder').map(item)}</ul>
         </section>
-        {me && (
         <section>
           <SectionHeader kind="collection" />
           <ul>{scopes.filter((s) => s.group === 'collection').map(item)}</ul>
         </section>
-        )}
       </aside>
     </>
   );
 }
 
-/** 휴대폰: 컬렉션(누구나)·폴더(편집 권한)를 바로 만든다 */
+/** 휴대폰: 내 폴더(누구나)·공용 컬렉션(편집 권한)을 바로 만든다 */
 function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }) {
   const qc = useQueryClient();
-  const [kind, setKind] = useState<'collection' | 'folder'>('collection');
+  const [kind, setKind] = useState<'collection' | 'folder'>('folder');
   const [name, setName] = useState('');
   const create = useMutation({
     mutationFn: async (): Promise<unknown> => (kind === 'folder' ? api.createFolder(name.trim()) : api.createCollection({ name: name.trim(), description: '' })),
@@ -284,8 +334,8 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
         <div className="grid grid-cols-2 gap-1 rounded-md bg-base p-1" role="radiogroup" aria-label="만들 항목">
           {(
             [
-              ['collection', '◆ 내 컬렉션'],
-              ['folder', '▤ 폴더'],
+              ['folder', '▤ 내 폴더'],
+              ['collection', '◆ 컬렉션'],
             ] as const
           ).map(([k, label]) => (
             <button
@@ -304,7 +354,7 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
       <div className="flex gap-2">
         <input
           className="field h-10 min-w-0 flex-1 font-sans text-[14px]"
-          placeholder={kind === 'folder' ? '새 폴더 이름' : '새 컬렉션 이름'}
+          placeholder={kind === 'folder' ? '새 폴더 이름' : '새 컬렉션 이름 (예: 모의고사/1회)'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
@@ -321,8 +371,9 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
 /** 섹션 제목 + 새 폴더/컬렉션 입력 */
 function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
   const qc = useQueryClient();
-  // 폴더는 공용이라 편집 권한이 있어야 만든다. 컬렉션은 각자 만든다.
-  const canAdd = kind === 'collection' || !!useMe()?.editor;
+  // 폴더는 각자 만드는 개인 정리, 컬렉션은 공용이라 편집 권한이 있어야 만든다
+  const me = useMe();
+  const canAdd = kind === 'folder' ? !!me : !!me?.editor;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const create = useMutation({
@@ -341,7 +392,7 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
   return (
     <div className="mb-1">
       <div className="flex items-center px-2.5">
-        <h2 className="flex-1 text-[11.5px] font-bold tracking-wide text-faint">{kind === 'collection' ? '내 컬렉션' : label}</h2>
+        <h2 className="flex-1 text-[11.5px] font-bold tracking-wide text-faint">{kind === 'folder' && me ? '내 폴더' : label}</h2>
         {canAdd && (
         <button
           type="button"
@@ -358,7 +409,7 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
         <form onSubmit={submit} className="mt-1 px-1">
           <input
             className="field font-sans"
-            placeholder={`${label} 이름`}
+            placeholder={kind === 'collection' ? '컬렉션 이름 (예: 모의고사/1회)' : `${label} 이름`}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
@@ -414,5 +465,41 @@ function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'
         삭제
       </button>
     </div>
+  );
+}
+
+/** 컬렉션 카드: 이름, 문제 수, (로그인 시) 맞힌 비율, 하위 컬렉션 수 */
+function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode; all: ProblemSummary[]; signedIn: boolean; onOpen: () => void }) {
+  const ids = new Set(problemIdsUnder(node));
+  const total = ids.size;
+  const solved = all.filter((p) => ids.has(p.id) && p.lastSubmission?.score === 100).length;
+  const pct = total ? Math.round((solved / total) * 100) : 0;
+  const desc = node.collection?.description.trim();
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex h-full w-full flex-col gap-2 rounded-xl border border-line bg-panel p-3 text-left sm:p-4 transition-colors hover:border-sky/50 hover:bg-raised"
+    >
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 text-[12px] text-sky" aria-hidden>
+          ◆
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14.5px] font-bold">{node.name}</span>
+          {desc ? <span className="mt-0.5 line-clamp-2 block text-[12px] text-dim">{desc}</span> : null}
+        </span>
+      </div>
+      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
+        <span>문제 {total}</span>
+        {node.children.length > 0 && <span>하위 {node.children.length}</span>}
+        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}</span>}
+      </div>
+      {signedIn && total > 0 && (
+        <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden>
+          <div className="h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+    </button>
   );
 }

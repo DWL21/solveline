@@ -203,7 +203,48 @@ const migrations: Migration[] = [
    );
    INSERT INTO signup_settings (id, enabled) VALUES (1, 1);
    DROP TABLE blocked_emails;`,
+  // #79: 폴더는 사용자별, 컬렉션은 공용으로 역할을 바꾼다.
+  // 기존 공용 폴더(user_id NULL)는 새 사용자에게 복사하는 틀로 남기고, problems.folder_id는 틀의 배치로 쓴다.
+  // 사용자별 배치는 folder_items(사용자·문제마다 폴더 하나).
+  {
+    fkOff: true,
+    sql: `CREATE TABLE folders_new (
+       id TEXT PRIMARY KEY,
+       user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+       name TEXT NOT NULL,
+       position INTEGER NOT NULL,
+       created_at TEXT NOT NULL,
+       UNIQUE (user_id, name)
+     );
+     INSERT INTO folders_new (id, user_id, name, position, created_at) SELECT id, NULL, name, position, created_at FROM folders;
+     DROP TABLE folders;
+     ALTER TABLE folders_new RENAME TO folders;
+     CREATE INDEX folders_user ON folders(user_id, position);
+     CREATE TABLE folder_items (
+       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+       problem_id TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+       folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+       PRIMARY KEY (user_id, problem_id)
+     );
+     CREATE INDEX folder_items_folder ON folder_items(folder_id);
+     UPDATE collections SET user_id = NULL;`,
+  },
+  // 기존 사용자에게 틀 폴더를 복사한다
+  (db) => {
+    for (const id of db.prepare('SELECT id FROM users').pluck().all() as string[]) copyTemplateFolders(db, id);
+  },
 ];
+
+/** 틀 폴더(user_id NULL)와 그 배치를 이 사용자의 개인 폴더로 복사한다. 가입할 때와 마이그레이션에서 쓴다. */
+export function copyTemplateFolders(db: Db, userId: string, now = new Date()) {
+  const templates = db.prepare('SELECT id, name, position FROM folders WHERE user_id IS NULL ORDER BY position').all() as { id: string; name: string; position: number }[];
+  const insFolder = db.prepare('INSERT OR IGNORE INTO folders (id, user_id, name, position, created_at) VALUES (?, ?, ?, ?, ?)');
+  const insItems = db.prepare('INSERT OR IGNORE INTO folder_items (user_id, problem_id, folder_id) SELECT ?, id, ? FROM problems WHERE folder_id = ?');
+  for (const t of templates) {
+    const id = randomUUID();
+    if (insFolder.run(id, userId, t.name, t.position, now.toISOString()).changes) insItems.run(userId, id, t.id);
+  }
+}
 
 /** 이름 중복·없는 폴더처럼 요청을 고쳐야 하는 오류 */
 export class StoreError extends Error {
@@ -300,15 +341,18 @@ export class ProblemStore {
     private testsets: TestsetStore,
   ) {}
 
-  /** userId가 null이면 비회원: 풀이 상태 없이 문제만 */
+  /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
   list(userId: string | null): ProblemSummary[] {
     const rows = this.db
       .prepare(
-        `SELECT p.id, p.title, p.folder_id, p.mode, p.language, p.updated_at, s.language AS my_language, s.timer, s.last_submission
-         FROM problems p LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = ?
+        `SELECT p.id, p.title, CASE WHEN @uid IS NULL THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
+                s.language AS my_language, s.timer, s.last_submission
+         FROM problems p
+         LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = @uid
+         LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = @uid
          ORDER BY p.title`,
       )
-      .all(userId) as (Row & { my_language: string | null; timer: string | null; last_submission: string | null })[];
+      .all({ uid: userId }) as (Row & { my_language: string | null; timer: string | null; last_submission: string | null })[];
     return rows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -379,15 +423,29 @@ export class ProblemStore {
       lastSubmission: parse<LastSubmission>(st?.last_submission),
       id: row.id,
       title: row.title,
-      folderId: row.folder_id,
+      folderId: this.folderOf(id, userId) ?? (userId ? null : row.folder_id),
       mode: row.mode,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
   }
 
-  private checkFolder(folderId: string | null) {
-    if (folderId && !this.db.prepare('SELECT 1 FROM folders WHERE id = ?').get(folderId)) throw new StoreError('folder_not_found', '없는 폴더입니다.');
+  /** 이 사용자가 문제를 넣어 둔 개인 폴더 */
+  private folderOf(id: string, userId: string | null): string | null {
+    if (!userId) return null;
+    return (this.db.prepare('SELECT folder_id FROM folder_items WHERE user_id = ? AND problem_id = ?').pluck().get(userId, id) as string | undefined) ?? null;
+  }
+
+  /** 문제를 이 사용자의 개인 폴더에 넣는다(null이면 폴더 없음). 남의 폴더에는 넣을 수 없다. */
+  private setFolder(id: string, userId: string, folderId: string | null) {
+    if (!folderId) {
+      this.db.prepare('DELETE FROM folder_items WHERE user_id = ? AND problem_id = ?').run(userId, id);
+      return;
+    }
+    if (!this.db.prepare('SELECT 1 FROM folders WHERE id = ? AND user_id = ?').get(folderId, userId)) throw new StoreError('folder_not_found', '없는 폴더입니다.');
+    this.db
+      .prepare('INSERT INTO folder_items (user_id, problem_id, folder_id) VALUES (?, ?, ?) ON CONFLICT (user_id, problem_id) DO UPDATE SET folder_id = excluded.folder_id')
+      .run(userId, id, folderId);
   }
 
   /** 입력의 hidden 케이스는 테스트셋으로 옮기고, 없으면 기존 테스트셋을 유지한다. 시작 코드는 starterCode가 있을 때만 바꾼다. */
@@ -405,12 +463,15 @@ export class ProblemStore {
 
   /** 편집 권한자만. 만든 사람의 작성 코드는 시작 코드와 같다. */
   create(input: ProblemInput, userId: string, now = new Date()): Problem {
-    this.checkFolder(input.folderId);
     const id = randomUUID();
     const ts = now.toISOString();
-    this.db
-      .prepare('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, input.title, input.folderId, input.mode, input.language, JSON.stringify(this.toBody(input, null)), ts, ts);
+    this.db.transaction(() => {
+      this.db
+        .prepare('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
+        .run(id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null)), ts, ts);
+      // 폴더는 개인 정리용: 만든 사람의 폴더에만 넣는다
+      this.setFolder(id, userId, input.folderId);
+    })();
     return this.get(id, userId)!;
   }
 
@@ -422,14 +483,13 @@ export class ProblemStore {
     const row = this.row(id);
     if (!row) return null;
     if (editor) {
-      this.checkFolder(input.folderId);
       const prev = this.body(row);
       const next = this.toBody(input, prev);
-      if (row.title !== input.title || row.folder_id !== input.folderId || row.mode !== input.mode || JSON.stringify(prev) !== JSON.stringify(next))
-        this.db
-          .prepare('UPDATE problems SET title = ?, folder_id = ?, mode = ?, body = ?, updated_at = ? WHERE id = ?')
-          .run(input.title, input.folderId, input.mode, JSON.stringify(next), now.toISOString(), id);
+      if (row.title !== input.title || row.mode !== input.mode || JSON.stringify(prev) !== JSON.stringify(next))
+        this.db.prepare('UPDATE problems SET title = ?, mode = ?, body = ?, updated_at = ? WHERE id = ?').run(input.title, input.mode, JSON.stringify(next), now.toISOString(), id);
     }
+    // 폴더 배치는 사용자별(누구나 자기 폴더로 정리)
+    if (input.folderId !== this.folderOf(id, userId)) this.setFolder(id, userId, input.folderId);
     this.upsertState(id, userId, { language: input.language, code: JSON.stringify(input.code), my_cases: JSON.stringify(input.myCases.map((c) => ({ ...c, hidden: false }))), memo: input.memo }, now);
     return this.get(id, userId);
   }
@@ -519,7 +579,7 @@ export class ProblemStore {
 
 type FolderRow = { id: string; name: string; position: number; created_at: string };
 
-/** 폴더: 공용. 편집 권한자만 바꾼다. */
+/** 폴더: 사용자별 개인 정리. 문제는 사용자마다 폴더 하나에 들어간다(folder_items). 비회원에게는 틀 폴더를 보여 준다. */
 export class FolderStore {
   constructor(private db: Db) {}
 
@@ -527,45 +587,51 @@ export class FolderStore {
     return { id: r.id, name: r.name, position: r.position, createdAt: r.created_at };
   }
 
-  private one(id: string) {
-    return this.db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as FolderRow | undefined;
+  private one(id: string, userId: string) {
+    return this.db.prepare('SELECT * FROM folders WHERE id = ? AND user_id = ?').get(id, userId) as FolderRow | undefined;
   }
 
-  list(): Folder[] {
-    return (this.db.prepare('SELECT * FROM folders ORDER BY position, name').all() as FolderRow[]).map((r) => this.toFolder(r));
+  list(userId: string | null): Folder[] {
+    const rows = userId
+      ? this.db.prepare('SELECT * FROM folders WHERE user_id = ? ORDER BY position, name').all(userId)
+      : this.db.prepare('SELECT * FROM folders WHERE user_id IS NULL ORDER BY position, name').all();
+    return (rows as FolderRow[]).map((r) => this.toFolder(r));
   }
 
-  create(name: string, now = new Date()): Folder {
+  create(name: string, userId: string, now = new Date()): Folder {
     const id = randomUUID();
-    const position = (this.db.prepare('SELECT COALESCE(MAX(position), -1) + 1 FROM folders').pluck().get() as number) ?? 0;
+    const position = (this.db.prepare('SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE user_id = ?').pluck().get(userId) as number) ?? 0;
     try {
-      this.db.prepare('INSERT INTO folders (id, name, position, created_at) VALUES (?, ?, ?, ?)').run(id, name, position, now.toISOString());
+      this.db.prepare('INSERT INTO folders (id, user_id, name, position, created_at) VALUES (?, ?, ?, ?, ?)').run(id, userId, name, position, now.toISOString());
     } catch (e) {
       if (isUniqueViolation(e)) throw new StoreError('duplicate_name', '같은 이름의 폴더가 있습니다.');
       throw e;
     }
-    return this.toFolder(this.one(id)!);
+    return this.toFolder(this.one(id, userId)!);
   }
 
-  rename(id: string, name: string): Folder | null {
+  rename(id: string, name: string, userId: string): Folder | null {
     try {
-      if (!this.db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(name, id).changes) return null;
+      if (!this.db.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').run(name, id, userId).changes) return null;
     } catch (e) {
       if (isUniqueViolation(e)) throw new StoreError('duplicate_name', '같은 이름의 폴더가 있습니다.');
       throw e;
     }
-    return this.toFolder(this.one(id)!);
+    return this.toFolder(this.one(id, userId)!);
   }
 
   /** 폴더를 지워도 문제는 남는다(폴더 없음). */
-  delete(id: string): boolean {
-    return this.db.prepare('DELETE FROM folders WHERE id = ?').run(id).changes > 0;
+  delete(id: string, userId: string): boolean {
+    return this.db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
   }
 }
 
-type CollectionRow = { id: string; user_id: string | null; name: string; description: string; created_at: string; updated_at: string };
+type CollectionRow = { id: string; name: string; description: string; created_at: string; updated_at: string };
 
-/** 컬렉션: 문제를 옮기지 않는 가상 묶음. 사용자마다 따로 만든다. 한 문제가 여러 컬렉션에 들어갈 수 있다. */
+/**
+ * 컬렉션: 모두가 같이 보는 공용 묶음(편집 권한자만 바꾼다). 문제를 옮기지 않는 가상 묶음이라 한 문제가 여러 컬렉션에 들어갈 수 있다.
+ * 이름의 '/'는 계층이다(예: "모의고사/1회"). 화면이 이름으로 나무를 그린다.
+ */
 export class CollectionStore {
   constructor(private db: Db) {}
 
@@ -574,47 +640,50 @@ export class CollectionStore {
     return Collection.parse({ id: r.id, name: r.name, description: r.description, problemIds, createdAt: r.created_at, updatedAt: r.updated_at });
   }
 
-  list(userId: string): Collection[] {
-    return (this.db.prepare('SELECT * FROM collections WHERE user_id = ? ORDER BY created_at, name').all(userId) as CollectionRow[]).map((r) =>
-      this.toCollection(r),
-    );
+  list(): Collection[] {
+    return (this.db.prepare('SELECT * FROM collections ORDER BY name').all() as CollectionRow[]).map((r) => this.toCollection(r));
   }
 
-  get(id: string, userId: string): Collection | null {
-    const r = this.db.prepare('SELECT * FROM collections WHERE id = ? AND user_id = ?').get(id, userId) as CollectionRow | undefined;
+  get(id: string): Collection | null {
+    const r = this.db.prepare('SELECT * FROM collections WHERE id = ?').get(id) as CollectionRow | undefined;
     return r ? this.toCollection(r) : null;
   }
 
-  create(input: CollectionInput, userId: string, now = new Date()): Collection {
-    const id = randomUUID();
-    const ts = now.toISOString();
-    try {
-      this.db
-        .prepare('INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(id, userId, input.name, input.description, ts, ts);
-    } catch (e) {
-      if (isUniqueViolation(e)) throw new StoreError('duplicate_name', '같은 이름의 컬렉션이 있습니다.');
-      throw e;
-    }
-    return this.get(id, userId)!;
+  /** 경로 이름 정리: 앞뒤·구분자 주변 공백과 빈 단계를 없앤다("a / /b" → "a/b") */
+  static normalize(name: string): string {
+    return name
+      .split('/')
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .join('/');
   }
 
-  update(id: string, input: CollectionInput, userId: string, now = new Date()): Collection | null {
-    try {
-      const r = this.db
-        .prepare('UPDATE collections SET name = ?, description = ?, updated_at = ? WHERE id = ? AND user_id = ?')
-        .run(input.name, input.description, now.toISOString(), id, userId);
-      if (!r.changes) return null;
-    } catch (e) {
-      if (isUniqueViolation(e)) throw new StoreError('duplicate_name', '같은 이름의 컬렉션이 있습니다.');
-      throw e;
-    }
-    return this.get(id, userId);
+  private assertFree(name: string, exceptId?: string) {
+    const hit = this.db.prepare('SELECT id FROM collections WHERE name = ?').pluck().get(name) as string | undefined;
+    if (hit && hit !== exceptId) throw new StoreError('duplicate_name', '같은 이름의 컬렉션이 있습니다.');
+  }
+
+  create(input: CollectionInput, now = new Date()): Collection {
+    const name = CollectionStore.normalize(input.name);
+    if (!name) throw new StoreError('duplicate_name', '컬렉션 이름이 필요합니다.');
+    this.assertFree(name);
+    const id = randomUUID();
+    const ts = now.toISOString();
+    this.db.prepare('INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?)').run(id, name, input.description, ts, ts);
+    return this.get(id)!;
+  }
+
+  update(id: string, input: CollectionInput, now = new Date()): Collection | null {
+    const name = CollectionStore.normalize(input.name);
+    if (!name) throw new StoreError('duplicate_name', '컬렉션 이름이 필요합니다.');
+    this.assertFree(name, id);
+    const r = this.db.prepare('UPDATE collections SET name = ?, description = ?, updated_at = ? WHERE id = ?').run(name, input.description, now.toISOString(), id);
+    return r.changes ? this.get(id) : null;
   }
 
   /** 컬렉션의 문제 목록을 통째로 바꾼다(순서 포함). 중복 id는 처음 것만 남긴다. */
-  setItems(id: string, problemIds: string[], userId: string, now = new Date()): Collection | null {
-    if (!this.db.prepare('SELECT 1 FROM collections WHERE id = ? AND user_id = ?').get(id, userId)) return null;
+  setItems(id: string, problemIds: string[], now = new Date()): Collection | null {
+    if (!this.db.prepare('SELECT 1 FROM collections WHERE id = ?').get(id)) return null;
     const unique = [...new Set(problemIds)];
     const exists = this.db.prepare('SELECT 1 FROM problems WHERE id = ?');
     for (const pid of unique) if (!exists.get(pid)) throw new StoreError('problem_not_found', `없는 문제입니다: ${pid}`);
@@ -624,12 +693,12 @@ export class CollectionStore {
       unique.forEach((pid, i) => ins.run(id, pid, i));
       this.db.prepare('UPDATE collections SET updated_at = ? WHERE id = ?').run(now.toISOString(), id);
     })();
-    return this.get(id, userId);
+    return this.get(id);
   }
 
   /** 컬렉션을 지워도 문제는 남는다. */
-  delete(id: string, userId: string): boolean {
-    return this.db.prepare('DELETE FROM collections WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+  delete(id: string): boolean {
+    return this.db.prepare('DELETE FROM collections WHERE id = ?').run(id).changes > 0;
   }
 }
 
@@ -684,6 +753,8 @@ export class UserStore {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(id, p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, ts);
+    // 새 사용자도 기본 폴더 구성(틀)으로 시작한다
+    copyTemplateFolders(this.db, id, now);
     return this.byId(id)!;
   }
 
@@ -699,7 +770,7 @@ export class UserStore {
 
   /**
    * 소유자가 없는 예전 데이터(비밀번호 로그인 시절)를 이 사용자에게 넘긴다. 운영자 계정에만 쓴다.
-   * 작성 코드·풀이 시간·채점 결과, 컬렉션, 제출 기록. 넘긴 행 수를 돌려준다.
+   * 작성 코드·풀이 시간·채점 결과, 제출 기록. 넘긴 행 수를 돌려준다.
    */
   claimLegacy(userId: string, now = new Date()): number {
     let n = 0;
@@ -711,7 +782,8 @@ export class UserStore {
         )
         .run(userId, now.toISOString()).changes;
       this.db.prepare('DELETE FROM legacy_state').run();
-      for (const t of ['collections', 'submissions']) n += this.db.prepare(`UPDATE ${t} SET user_id = ? WHERE user_id IS NULL`).run(userId).changes;
+      // 컬렉션은 공용(user_id NULL)이므로 넘겨받지 않는다
+      n += this.db.prepare('UPDATE submissions SET user_id = ? WHERE user_id IS NULL').run(userId).changes;
     })();
     return n;
   }
