@@ -383,6 +383,17 @@ describe('관리자 모드(마스터 비밀번호)', () => {
     expect((await s.app.request('/api/admin/users', { headers: { cookie } })).status).toBe(401);
   });
 
+  it('마스터는 컬렉션 이름을 경로형으로 바꿀 수 있고, Google 세션으로는 못 한다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER });
+    const E = as(s, await login(s));
+    const col = (await E('POST', '/api/collections', { name: '모의고사 1회 · 실전', description: '설명' })).body.data;
+    expect((await E('PUT', `/api/admin/collections/${col.id}`, { name: '모의고사/1회 실전', description: '설명' })).status).toBe(401);
+    const A = as(s, await masterLogin(s));
+    const renamed = (await A('PUT', `/api/admin/collections/${col.id}`, { name: '모의고사 / 1회 실전', description: '설명' })).body.data;
+    expect(renamed).toMatchObject({ name: '모의고사/1회 실전', description: '설명' });
+    expect((await A('PUT', '/api/admin/collections/nope', { name: 'x', description: '' })).status).toBe(404);
+  });
+
   it('사용자 목록·상세를 보고 편집 권한을 주고 회수한다', async () => {
     const s = setup({ ACCESS_PASSWORD: MASTER });
     const U = as(s, await login(s, 'user@example.com'));
