@@ -179,17 +179,19 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
         로그인
       </a>
     );
+  const temporary = me.email.endsWith('@temporary.invalid');
+  const label = temporary ? me.name : me.email;
   return (
     <div className="relative" data-user-menu>
       <button type="button" className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-raised" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <Avatar picture={me.picture} email={me.email} size={24} />
-        <span className="hidden max-w-56 truncate text-[12.5px] text-dim sm:inline">{me.email}</span>
+        <Avatar picture={me.picture} email={me.email} name={temporary ? me.name : undefined} size={24} />
+        <span className="hidden max-w-56 truncate text-[12.5px] text-dim sm:inline">{label}</span>
       </button>
       {open && (
         <div className="absolute right-0 z-40 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-1.5 shadow-2xl">
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
             <p className="truncate text-[13px] font-semibold">{me.name || me.email}</p>
-            <p className="truncate text-[12px] text-dim">{me.email}</p>
+            <p className="truncate text-[12px] text-dim">{temporary ? '임시 계정' : me.email}</p>
             {me.editor && <p className="mt-1 text-[11.5px] font-bold text-accent">편집 권한</p>}
           </div>
           <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-raised" onClick={onLogout}>
