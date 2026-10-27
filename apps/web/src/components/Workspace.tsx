@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type Language, type Problem, type ProblemInput, type ProblemMode, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
+import { BookmarkStar } from './BookmarkStar.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';
 import { CodeEditor } from './CodeEditor.tsx';
@@ -57,6 +58,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const qc = useQueryClient();
   // 비회원: 문제를 볼 수만 있다(코드 작성·실행·저장은 로그인 후)
   const me = useMe();
+  const summaries = useQuery({ queryKey: qk.problems, queryFn: api.problems });
   const guest = !me;
   const queue = draftQueue(me?.email);
   const [draft, setDraft] = useState<ProblemInput>(() => toInput(applyPatch(problem, queue?.read(problem.id)?.patch)));
@@ -319,6 +321,7 @@ guest ? (
         ) : (
           <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-[15px] font-bold">{draft.title}</h1>
         )}
+        <BookmarkStar id={problem.id} bookmarked={summaries.data?.find((p) => p.id === problem.id)?.bookmarked} />
         {!guest && <SaveBadge state={saveState} onRetry={() => void queue?.flush(problem.id)} />}
         {/* 휴대폰: 도구는 한 줄로 두고 가로로 밀어서 본다 */}
         <div className={narrow ? 'no-scrollbar flex w-full min-w-0 basis-full items-center gap-2 overflow-x-auto whitespace-nowrap' : 'contents'}>

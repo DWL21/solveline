@@ -5,6 +5,7 @@ import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
 import { useMe } from '../lib/me.ts';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { ListSkeleton } from './Loading.tsx';
+import { BookmarkStar } from './BookmarkStar.tsx';
 import type { Scope } from '../lib/route.ts';
 import { ancestors, buildTree, findNode, flatten, problemIdsUnder, type CollectionNode } from '../lib/collections.ts';
 
@@ -63,10 +64,11 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
   const [filter, setFilter] = useState('');
+  const [bookmarksOnly, setBookmarksOnly] = useState(false);
   // 문제가 많으면(1,000개 넘게) 한 번에 그리지 않고 처음 일부만, 내려가면 이어서 그린다(화면 전환이 바로 되게)
   const [limit, setLimit] = useState(PAGE);
   const scopeKey = JSON.stringify(scope);
-  useEffect(() => setLimit(PAGE), [scopeKey, filter]);
+  useEffect(() => setLimit(PAGE), [scopeKey, filter, bookmarksOnly]);
 
   const failed = [problems, folders, collections].find((q) => q.isError);
   if (failed)
@@ -97,7 +99,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const solved = list.filter((p) => p.lastSubmission?.score === 100).length;
 
   const q = filter.trim().toLowerCase();
-  const shown = q ? list.filter((p) => p.title.toLowerCase().includes(q)) : list;
+  const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
   const unfiled = all.filter((p) => !p.folderId).length;
   const folderName = new Map(folders.data.map((f) => [f.id, f.name]));
   const title = effective.kind === 'all' ? '전체 문제' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (node?.name ?? '');
@@ -168,6 +170,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               onChange={(e) => setFilter(e.target.value)}
               aria-label="문제 검색"
             />
+            {signedIn && <button type="button" aria-pressed={bookmarksOnly} onClick={() => setBookmarksOnly((v) => !v)} className={`btn-ghost ${bookmarksOnly ? 'text-warn' : ''}`}>★ 북마크만 보기</button>}
             {editor && (
               <button type="button" className="btn-primary ml-auto" onClick={onNew} title="편집 권한: 모든 사용자에게 보이는 문제를 만들어요">
                 + 새 문제
@@ -181,17 +184,18 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             </div>
           ) : shown.length === 0 ? (
             <p className="py-12 text-center text-[13px] text-faint">
-              {q ? '검색 결과가 없어요' : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
+              {q ? '검색 결과가 없어요' : bookmarksOnly ? '북마크한 문제가 없어요' : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
             </p>
           ) : (
             <>
             <ol className="overflow-hidden rounded-lg border border-line bg-panel">
               {shown.slice(0, limit).map((p) => (
-                <li key={p.id} className="border-b border-line last:border-b-0">
+                <li key={p.id} className="flex items-center border-b border-line last:border-b-0">
+                  <BookmarkStar id={p.id} bookmarked={p.bookmarked} />
                   <button
                     type="button"
                     onClick={() => onPick(p.id)}
-                    className={`flex w-full items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${p.lastSubmission?.score === 100 ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
+                    className={`flex min-w-0 flex-1 items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${p.lastSubmission?.score === 100 ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
                   >
                     {inCollection && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{list.indexOf(p) + 1}</span>}
                     <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${p.lastSubmission?.score === 100 ? 'text-ok' : ''}`}>{p.title}</span>

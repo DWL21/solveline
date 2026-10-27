@@ -248,6 +248,25 @@ const as = (s: ReturnType<typeof setup>, cookie: string) => async (method: strin
   return { status: res.status, body: (await res.json()) as { data: any; error?: { code: string } } }; // eslint-disable-line @typescript-eslint/no-explicit-any -- 테스트 응답 파싱
 };
 
+describe('북마크', () => {
+  it('계정별로 저장하고 해제하며 비회원은 변경할 수 없다', async () => {
+    const s = setup();
+    const owner = as(s, await login(s));
+    const other = as(s, await login(s, 'other@example.com'));
+    const id = (await owner('POST', '/api/problems', problem)).body.data.id;
+    const path = `/api/problems/${id}/bookmark`;
+    expect((await s.app.request(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"bookmarked":true}' })).status).toBe(401);
+    expect((await owner('PUT', path, { bookmarked: true })).body.data.bookmarked).toBe(true);
+    expect((await owner('GET', '/api/problems')).body.data[0].bookmarked).toBe(true);
+    expect((await other('GET', '/api/problems')).body.data[0].bookmarked).toBe(false);
+    expect(((await (await s.app.request('/api/problems')).json()) as { data: { bookmarked: boolean }[] }).data[0]?.bookmarked).toBe(false);
+    expect((await owner('PUT', path, { bookmarked: 'yes' })).status).toBe(400);
+    expect((await owner('PUT', '/api/problems/missing/bookmark', { bookmarked: true })).status).toBe(404);
+    expect((await owner('PUT', path, { bookmarked: false })).status).toBe(200);
+    expect((await owner('GET', '/api/problems')).body.data[0].bookmarked).toBe(false);
+  });
+});
+
 describe('공용 문제·사용자별 풀이', () => {
   it('변경분 저장은 최신 공용 내용·다른 언어·메모를 유지하고 계정을 확인한다', async () => {
     const s = setup();

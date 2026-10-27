@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
 import {
+  Bookmark,
   Collection,
   CollectionInput,
   CollectionItemsInput,
@@ -439,6 +440,13 @@ export function createApp(deps: AppDeps) {
 
   // ─── 문제(공용) + 내 풀이 상태 ───
   app.get('/api/problems', (c) => ok(c, z.array(ProblemSummary), problems.list(viewer(c))));
+
+  app.put('/api/problems/:id/bookmark', async (c) => {
+    const body = await readJson(c, Bookmark);
+    if (!body) return fail(c, 400, 'invalid_request', '북마크 상태가 올바르지 않습니다.');
+    if (!problems.setBookmark(c.req.param('id'), c.get('userId'), body.bookmarked)) return fail(c, 404, 'not_found', '없는 문제입니다.');
+    return ok(c, Bookmark, body);
+  });
 
   app.post('/api/problems', editorOnly, async (c) => {
     const body = await readJson(c, ProblemInput);
