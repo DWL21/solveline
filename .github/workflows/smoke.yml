@@ -1,0 +1,31 @@
+name: Production smoke
+# 운영 사이트 읽기 전용 확인. 매일 아침(09:00 KST)과 수동 실행. 데이터를 만들거나 바꾸지 않는다.
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    if: github.repository == 'DWL21/solveline'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @solveline/e2e exec playwright install --with-deps chromium
+      - run: pnpm --filter @solveline/e2e e2e:smoke
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke
+          path: e2e/reports/
+          retention-days: 30

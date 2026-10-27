@@ -101,4 +101,8 @@ pnpm check        # 타입 검사 + 테스트 + 빌드
 pnpm dev:runner   # runner 컨테이너 (127.0.0.1:8000)
 pnpm dev          # api :8787, web :5173 (WEB_PORT, API_PORT로 변경 가능)
 docker compose -f compose.production.yaml build
+scripts/test-env.sh up && pnpm --filter @solveline/e2e e2e:ci   # API·UI 자동화(Docker 테스트 환경)
+scripts/sonar.sh  # 정적 분석·품질 게이트
 ```
+
+테스트 작성 규칙·층 선택·PR 체크리스트는 [docs/quality/guide.md](docs/quality/guide.md). 버그 수정은 재현 테스트를 가장 낮은 층에 먼저 쓴다.

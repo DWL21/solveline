@@ -1,0 +1,25 @@
+# 정적 분석 서버(SonarQube Community). 분석이 끝나면 내린다 — 데이터는 남기지 않는다(매번 같은 기준으로 판정).
+# 실행: scripts/sonar.sh
+name: solveline-quality
+services:
+  sonarqube:
+    image: sonarqube:25.10.0.114319-community
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      SONAR_TELEMETRY_ENABLE: "false"
+      # 작은 머신(로컬 Docker 2GB)에서도 돌도록 JVM 힙을 정해 둔다
+      SONAR_SEARCH_JAVAOPTS: "-Xms384m -Xmx384m"
+      SONAR_WEB_JAVAOPTS: "-Xmx384m"
+      SONAR_CE_JAVAOPTS: "-Xmx384m"
+    ports:
+      - "127.0.0.1:${SONAR_PORT:-9000}:9000"
+    # 이름 없는 볼륨: 내릴 때(down -v) 함께 지워진다. tmpfs는 실행 권한이 없어 내장 라이브러리를 못 읽고 메모리를 잡아먹어 쓰지 않는다.
+    volumes:
+      - /opt/sonarqube/data
+      - /opt/sonarqube/logs
+      - /opt/sonarqube/temp
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 60

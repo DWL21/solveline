@@ -1,0 +1,59 @@
+# 자동화 테스트 환경: 운영과 같은 runner·api 이미지(같은 격리 옵션)에 테스트 설정만 바꾼다.
+# 데이터는 tmpfs라 매번 빈 상태에서 시작한다. 실행: scripts/test-env.sh up
+name: solveline-test
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    # 운영 서버와 같은 x86_64. Apple Silicon에서는 에뮬레이션으로 돈다(JDK 21.0.2가 arm64 일부 CPU에서 멈추기 때문).
+    platform: linux/amd64
+    networks: [sandbox]
+    read_only: true
+    tmpfs:
+      - /tmp:size=768m,mode=1777
+    environment:
+      RUN_SLOTS: "2"
+      TESTSET_CACHE_MB: "200"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1536m
+    pids_limit: 512
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    networks: [default, sandbox]
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=700
+    environment:
+      NODE_ENV: test
+      PORT: "8787"
+      DATA_DIR: /data
+      WEB_ORIGIN: http://localhost:${E2E_PORT:-8090}
+      RUNNER_URLS: http://runner:8000
+      RUNNER_SLOTS: "2"
+      # 실행할 때마다 scripts/test-env.sh가 만든다(저장소에 두지 않는다)
+      SESSION_SECRET: ${E2E_SESSION_SECRET:?scripts/test-env.sh로 실행하세요}
+      TEST_AUTH_TOKEN: ${E2E_TEST_AUTH_TOKEN:?scripts/test-env.sh로 실행하세요}
+      ACCESS_PASSWORD: ${E2E_MASTER_PASSWORD:?scripts/test-env.sh로 실행하세요}
+      OWNER_EMAIL: owner@e2e.test
+      # 로그인 버튼이 보이게 하는 가짜 값(테스트는 Google로 가지 않는다)
+      GOOGLE_CLIENT_ID: e2e-dummy-client
+      GOOGLE_CLIENT_SECRET: e2e-dummy-secret
+    depends_on:
+      runner:
+        condition: service_healthy
+  web:
+    build:
+      context: .
+      dockerfile: docker/web-test.Dockerfile
+    ports:
+      - "127.0.0.1:${E2E_PORT:-8090}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+networks:
+  sandbox:
+    internal: true

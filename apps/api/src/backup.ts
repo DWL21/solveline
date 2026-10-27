@@ -53,10 +53,7 @@ export class BackupJob {
         copyFileSync(join(src, name), join(dir, 'testsets', name));
         copied++;
       }
-      const old = readdirSync(dir)
-        .filter((n) => /^(solveline|codetest)-\d{4}-\d{2}-\d{2}\.db$/.test(n))
-        .sort()
-        .slice(0, -KEEP_DAYS);
+      const old = backupsToPrune(readdirSync(dir), KEEP_DAYS);
       for (const n of old) unlinkSync(join(dir, n));
       const pruned = this.submissions.prune(new Date(now.getTime() - SUBMISSION_DAYS * 86400_000));
       const inUse = new Set([...this.problems.testsetHashes(), ...this.submissions.activeTestsets()]);
@@ -68,4 +65,19 @@ export class BackupJob {
       return null;
     }
   }
+}
+
+const BACKUP_NAME = /^(?:solveline|codetest)-(\d{4}-\d{2}-\d{2})\.db$/;
+
+/**
+ * 지울 백업: 날짜가 오래된 것부터, 최근 keep개를 남긴다.
+ * 이름 앞부분(예전 이름 codetest)이 섞여 있어도 이름이 아니라 날짜로 정렬한다.
+ */
+export function backupsToPrune(names: string[], keep: number): string[] {
+  const dated = names.flatMap((n) => {
+    const m = BACKUP_NAME.exec(n);
+    return m ? [{ n, day: m[1]! }] : [];
+  });
+  dated.sort((a, b) => a.day.localeCompare(b.day));
+  return dated.slice(0, Math.max(0, dated.length - keep)).map((d) => d.n);
 }

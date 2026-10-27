@@ -1,0 +1,32 @@
+# Jenkins Configuration as Code: 관리자 계정과 파이프라인 작업을 코드로 만든다(손으로 설정하지 않는다).
+jenkins:
+  systemMessage: "Solveline 품질 파이프라인(로컬)"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: ${JENKINS_ADMIN_PASSWORD}
+  authorizationStrategy: loggedInUsersCanDoAnything
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: SERVICE_HOST
+            value: host.docker.internal
+jobs:
+  - script: |
+      pipelineJob('solveline-quality') {
+        description('Jenkinsfile: 단위·정적 분석·Docker 테스트 환경·Playwright 자동화·품질 리포트')
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('file:///repo') }
+                branch('${JENKINS_BRANCH}')
+              }
+            }
+            scriptPath('Jenkinsfile')
+          }
+        }
+      }
