@@ -8,7 +8,7 @@
 | Python3 | Python 3.13.13 | `python3` (재귀 제한 등 기본값 그대로) |
 
 버전은 [`docker/runner.Dockerfile`](../docker/runner.Dockerfile)의 `JAVA_VERSION`, `PYTHON_VERSION` 빌드 인자로 바꿀 수 있습니다.
-기존는 공식 버전 표를 공개하지 않아, 기존에서 `System.getProperty("java.version")` / `sys.version`을 출력해 확인한 뒤 맞추세요.
+버전을 바꿀 때는 맞추려는 채점 환경에서 `System.getProperty("java.version")` / `sys.version`을 출력해 확인한 뒤 맞추세요.
 
 ## 배포 구조
 

@@ -233,7 +233,57 @@ const migrations: Migration[] = [
   (db) => {
     for (const id of db.prepare('SELECT id FROM users').pluck().all() as string[]) copyTemplateFolders(db, id);
   },
+  // 기존 데이터 언급 정리: 문제 제목의 "[기존 N]", 설명의 출처 줄·원문 링크·그림 주소, 폴더 이름의 "기존 · ",
+  // 컬렉션 설명의 "기존"·"기존" 언급을 지운다(지문 속 등장인물 이름 등은 그대로).
+  (db) => stripSourceMentions(db),
 ];
+
+/** 기존 데이터 언급을 지운다. 마이그레이션에서 한 번 쓴다. */
+export function stripSourceMentions(db: Db) {
+  const sourceLine = /^\ubc31\uc900 \d+번 · .*$/;
+  const originLine = /^원문:\s*https?:\/\/(www\.)?\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net\/\S*\s*$/;
+  const figure = /\[그림(?: · [^:\]\n]*)?: https?:\/\/[^\]\s]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^\]\s]*\]/g;
+  const updProblem = db.prepare('UPDATE problems SET title = ?, body = ? WHERE id = ?');
+  for (const p of db.prepare('SELECT id, title, body FROM problems').all() as { id: string; title: string; body: string }[]) {
+    const title = p.title.replace(/^\[\ubc31\uc900 (\d+)\]\s*/, '$1. ');
+    const body = JSON.parse(p.body) as { description?: string };
+    const description = (body.description ?? '')
+      .split('\n')
+      .filter((l) => !sourceLine.test(l) && !originLine.test(l))
+      .join('\n')
+      .replace(figure, '[그림]')
+      // 지문 속 괄호 링크 "(https://www.기존.net/problem/…)"와 남은 원문 주소
+      .replace(/\s*\(https?:\/\/[^)\s]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^)\s]*\)/g, '')
+      .replace(/https?:\/\/[^\s)\]]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^\s)\]]*/g, '')
+      .replace(/^\n+/, '');
+    if (title !== p.title || description !== (body.description ?? '')) updProblem.run(title, JSON.stringify({ ...body, description }), p.id);
+  }
+
+  const updCollection = db.prepare('UPDATE collections SET description = ? WHERE id = ?');
+  for (const c of db.prepare('SELECT id, description FROM collections').all() as { id: string; description: string }[]) {
+    const description = c.description.replace(/\s*\(\ubc31\uc900 [^)]*\)/g, '').replace(/\(\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '(').replace(/\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '');
+    if (description !== c.description) updCollection.run(description, c.id);
+  }
+
+  // 폴더 "기존 · 구현" → "구현". 같은 사람(틀은 틀끼리)에게 같은 이름이 이미 있으면 그 폴더로 합친다.
+  const folders = db.prepare("SELECT id, user_id, name FROM folders WHERE name LIKE '\ubc31\uc900%'").all() as { id: string; user_id: string | null; name: string }[];
+  for (const f of folders) {
+    const name = f.name.replace(/^\ubc31\uc900\s*·\s*/, '');
+    if (name === f.name || !name) continue;
+    const same = (
+      f.user_id === null
+        ? db.prepare('SELECT id FROM folders WHERE user_id IS NULL AND name = ? AND id != ?').pluck().get(name, f.id)
+        : db.prepare('SELECT id FROM folders WHERE user_id = ? AND name = ? AND id != ?').pluck().get(f.user_id, name, f.id)
+    ) as string | undefined;
+    if (!same) {
+      db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(name, f.id);
+      continue;
+    }
+    if (f.user_id === null) db.prepare('UPDATE problems SET folder_id = ? WHERE folder_id = ?').run(same, f.id);
+    else db.prepare('UPDATE folder_items SET folder_id = ? WHERE folder_id = ?').run(same, f.id);
+    db.prepare('DELETE FROM folders WHERE id = ?').run(f.id);
+  }
+}
 
 /** 틀 폴더(user_id NULL)와 그 배치를 이 사용자의 개인 폴더로 복사한다. 가입할 때와 마이그레이션에서 쓴다. */
 export function copyTemplateFolders(db: Db, userId: string, now = new Date()) {

@@ -243,7 +243,7 @@ function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose
           <div className="grid grid-cols-2 gap-2">
             {(
               [
-                ['function', 'solution 함수', '일반 기존 문제'],
+                ['function', 'solution 함수', '함수를 완성하는 문제'],
                 ['stdin', '표준 입출력', 'PCCE·입출력 문제'],
               ] as const
             ).map(([m, name, hint]) => (

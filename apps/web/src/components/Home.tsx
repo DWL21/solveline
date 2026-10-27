@@ -481,7 +481,8 @@ function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode;
   const total = ids.size;
   const solved = all.filter((p) => ids.has(p.id) && p.lastSubmission?.score === 100).length;
   const pct = total ? Math.round((solved / total) * 100) : 0;
-  const desc = node.collection?.description.trim();
+  // 카드에는 설명의 첫 줄만 한 줄로(자세한 규칙·목록은 컬렉션을 열면 보인다)
+  const desc = node.collection?.description.trim().split('\n')[0]?.trim();
   return (
     <button
       type="button"
@@ -494,7 +495,7 @@ function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode;
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14.5px] font-bold">{node.name}</span>
-          {desc ? <span className="mt-0.5 line-clamp-2 block text-[12px] text-dim">{desc}</span> : null}
+          {desc ? <span className="mt-0.5 line-clamp-1 text-[12px] text-dim">{desc}</span> : null}
         </span>
       </div>
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">

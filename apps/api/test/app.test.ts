@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { templateFor, type ProblemInput, type TestCase } from '@solveline/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
-import { openDb, UserStore, SignupSettingsStore } from '../src/db.ts';
+import { openDb, stripSourceMentions, UserStore, SignupSettingsStore } from '../src/db.ts';
 import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
 import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
 import { SubmissionStore } from '../src/dispatcher.ts';
@@ -762,6 +762,33 @@ describe('이름 변경(codetest → solveline)', () => {
     const s = setup();
     const cookie = (await login(s)).replace(/^solveline_session=/, 'codetest_session=');
     expect((await s.app.request('/api/collections', { headers: { cookie } })).status).toBe(200);
+  });
+});
+
+describe('기존 데이터 정리', () => {
+  it('문제 제목·설명, 폴더 이름(같은 이름은 합침), 컬렉션 설명에서 기존 데이터 언급을 지운다', async () => {
+    const s = setup();
+    const E = as(s, await login(s));
+    const body = JSON.stringify({
+      description: '\ubc31\uc900 1003번 · 피보나치 함수\n\n원문: https://www.\u0061\u0063\u006d\u0069\u0063\u0070\u0063.net/problem/1003\n난이도: Silver 3\n\n문제 설명\n최\ubc31\uc900은 [그림: https://www.\u0061\u0063\u006d\u0069\u0063\u0070\u0063.net/] 을 본다.\n아기 상어 (https://www.\u0061\u0063\u006d\u0069\u0063\u0070\u0063.net/problem/16236)가 자랐다.\n[그림 · a.png: https://upload.\u0061\u0063\u006d\u0069\u0063\u0070\u0063.net/x/preview/]',
+      params: [],
+      timeLimitMs: 1000,
+      cases: [],
+      code: { java: '', python: '' },
+      hiddenTestset: null,
+    });
+    s.db.prepare("INSERT INTO problems (id, title, mode, language, body, created_at, updated_at) VALUES ('\u0062\u006f\u006a-1003', '[\ubc31\uc900 1003] 피보나치 함수', 'function', 'java', ?, 'x', 'x')").run(body);
+    const me = (s.db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").pluck().get()) as string;
+    s.db.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES ('a', ?, '구현', 0, 'x'), ('b', ?, '\ubc31\uc900 · 구현', 1, 'x'), ('c', ?, '\ubc31\uc900 · 트리', 2, 'x')").run(me, me, me);
+    s.db.prepare("INSERT INTO folder_items (user_id, problem_id, folder_id) VALUES (?, '\u0062\u006f\u006a-1003', 'b')").run(me);
+    s.db.prepare("INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES ('k', NULL, '세트', '후기 수준(\ubc31\uc900 실버) 3문제. 수준(\ud504\ub85c\uadf8\ub798\uba38\uc2a4 Lv1~Lv3).', 'x', 'x')").run();
+    stripSourceMentions(s.db);
+    const p = (await E('GET', '/api/problems/\u0062\u006f\u006a-1003')).body.data;
+    expect(p.title).toBe('1003. 피보나치 함수');
+    expect(p.description).toBe('난이도: Silver 3\n\n문제 설명\n최\ubc31\uc900은 [그림] 을 본다.\n아기 상어가 자랐다.\n[그림]');
+    expect(p.folderId).toBe('a');
+    expect((await E('GET', '/api/folders')).body.data.map((f: { name: string }) => f.name)).toEqual(['구현', '트리']);
+    expect((await E('GET', '/api/collections')).body.data[0].description).toBe('후기 수준 3문제. 수준(Lv1~Lv3).');
   });
 });
 
