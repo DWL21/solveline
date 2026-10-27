@@ -74,8 +74,8 @@ export function LoginScreen() {
                 <button type="button" className="font-semibold text-accent hover:underline" onClick={startGoogleLogin}>Google로 회원가입</button>
               </p>
             )}
-            <p className="mt-3 text-center text-[12.5px] text-dim">
-              <button type="button" disabled={pending || config.data?.signupEnabled === false} onClick={temporaryLogin} className="font-semibold text-accent hover:underline disabled:opacity-50">{pending ? '로그인 중…' : '임시 로그인'}</button>
+            <p className="mt-4 text-center">
+              <button type="button" disabled={pending || config.data?.signupEnabled === false} onClick={temporaryLogin} className="flex min-h-12 w-full items-center justify-center rounded-md border border-accent/40 bg-accent/10 px-4 py-3 text-[15px] font-semibold text-accent hover:bg-accent/20 disabled:opacity-50">{pending ? '로그인 중…' : '임시 로그인'}</button>
             </p>
             <p className="mt-1 text-center text-[12px] text-faint">임시 계정은 로그아웃하거나 최대 24시간이 지나면 사용할 수 없어요.</p>
             {temporaryError && <p role="alert" className="mt-4 text-[13px] text-bad">{temporaryError}</p>}
