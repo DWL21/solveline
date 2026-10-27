@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, qk } from '../lib/api.ts';
 import { LegalFooter } from './Legal.tsx';
@@ -31,6 +32,20 @@ export function GoogleMark() {
 export function LoginScreen() {
   const config = useQuery({ queryKey: qk.publicConfig, queryFn: api.publicConfig, refetchOnWindowFocus: true });
   const error = new URLSearchParams(location.search).get('auth_error');
+  const [temporaryError, setTemporaryError] = useState('');
+  const [pending, setPending] = useState(false);
+  const temporaryLogin = async () => {
+    setPending(true);
+    setTemporaryError('');
+    try {
+      await api.temporaryLogin();
+      const next = new URLSearchParams(location.search).get('next');
+      location.href = next && /^\/(?![\/\\])/.test(next) && next.length < 300 ? next : '/';
+    } catch (e) {
+      setTemporaryError(e instanceof Error ? e.message : '임시 로그인에 실패했어요');
+      setPending(false);
+    }
+  };
   return (
     <div className="relative flex min-h-full flex-col bg-ink">
       <a href="/" className="absolute top-3 left-4 text-[12px] text-faint hover:text-dim">
@@ -59,6 +74,11 @@ export function LoginScreen() {
                 <button type="button" className="font-semibold text-accent hover:underline" onClick={startGoogleLogin}>Google로 회원가입</button>
               </p>
             )}
+            <p className="mt-3 text-center text-[12.5px] text-dim">
+              채용용으로 <button type="button" disabled={pending || config.data?.signupEnabled === false} onClick={temporaryLogin} className="font-semibold text-accent hover:underline disabled:opacity-50">{pending ? '로그인 중…' : '임시 로그인'}</button>하기
+            </p>
+            <p className="mt-1 text-center text-[12px] text-faint">임시 계정은 로그아웃하거나 최대 24시간이 지나면 사용할 수 없어요.</p>
+            {temporaryError && <p role="alert" className="mt-4 text-[13px] text-bad">{temporaryError}</p>}
             {error && (
               <p role="alert" className="mt-4 rounded-md border border-bad/40 bg-bad/10 p-3 text-[13px] font-semibold text-bad">
                 {AUTH_ERRORS[error] ?? '로그인하지 못했어요'}

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
@@ -118,6 +119,8 @@ export function createApp(deps: AppDeps) {
   const testsets = deps.testsets ?? new TestsetStore(':memory:');
   const now = deps.now ?? Date.now;
   const sessions = new SessionStore(db, config.sessionTtlMs);
+  const temporaryTtlMs = Math.min(config.sessionTtlMs, 24 * 3600_000);
+  const temporarySessions = new SessionStore(db, temporaryTtlMs);
   const problems = new ProblemStore(db, testsets);
   const submissions = new SubmissionStore(db);
   const dispatcher = new Dispatcher(submissions, problems, testsets, runners as RunnerClient[], config.runnerSlots);
@@ -159,13 +162,13 @@ export function createApp(deps: AppDeps) {
   const flowCookie = { path: '/api/auth', httpOnly: true, secure: config.secureCookie, sameSite: 'Lax' as const, maxAge: FLOW_TTL_S };
   const sessionCookie = { path: '/', httpOnly: true, secure: config.secureCookie, sameSite: 'Lax' as const };
 
-  const startSession = async (c: Context, userId: string) => {
-    const s = sessions.create(userId, now());
+  const startSession = async (c: Context, userId: string, temporary = false) => {
+    const s = (temporary ? temporarySessions : sessions).create(userId, now());
     // Google에서 돌아오는 첫 이동에도 실리도록 Lax (변경 요청은 CORS·JSON 본문으로 막는다)
     await setSignedCookie(c, SESSION_COOKIE, s.id, config.sessionSecret, {
       ...sessionCookie,
       expires: new Date(s.expiresAt),
-      maxAge: Math.floor(config.sessionTtlMs / 1000),
+      maxAge: Math.floor((temporary ? temporaryTtlMs : config.sessionTtlMs) / 1000),
     });
     return s;
   };
@@ -277,6 +280,20 @@ export function createApp(deps: AppDeps) {
   app.post('/api/auth/signup/cancel', (c) => {
     deleteCookie(c, SIGNUP_COOKIE, flowCookie);
     return c.json({ data: { cancelled: true } });
+  });
+
+  // 임시 계정은 로그인마다 새로 만들고 개인 데이터는 보존한다.
+  app.post('/api/auth/temporary', async (c) => {
+    const blocked = authLimited(c);
+    if (blocked) return blocked;
+    if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json') || !(await readJson(c, z.object({}))))
+      return fail(c, 400, 'invalid_request', '요청을 확인해 주세요.');
+    if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다.');
+    const id = randomUUID();
+    const user = users.create({ sub: `temporary:${id}`, email: `${id}@temporary.invalid`, name: '임시 사용자', picture: '' },
+      { terms: 'temporary', privacy: 'temporary' }, {}, new Date(now()));
+    const s = await startSession(c, user.id, true);
+    return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
   });
 
   app.get('/api/auth/session', async (c) => ok(c, Session, sessionBody(await readSession(c))));

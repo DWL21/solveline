@@ -74,6 +74,7 @@ const json = (method: string, body?: unknown): RequestInit => ({ method, body: J
 export const api = {
   session: () => request(Session, '/api/auth/session'),
   logout: () => request(Session, '/api/auth/logout', json('POST')),
+  temporaryLogin: () => request(Session, '/api/auth/temporary', json('POST')),
   publicConfig: () => request(PublicConfig, '/api/public/config'),
   signupPending: () => request(SignupPending, '/api/auth/signup'),
   signup: () => request(Session, '/api/auth/signup', json('POST', { agreeAge: true, agreeTerms: true, agreePrivacy: true })),

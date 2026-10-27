@@ -114,6 +114,34 @@ const problem: ProblemInput = {
   lastSubmission: null,
 };
 
+describe('임시 로그인', () => {
+  it('독립된 일반 계정으로 로그인하고 로그아웃 후에도 계정을 보존한다', async () => {
+    const s = setup();
+    const request = () => s.app.request('/api/auth/temporary', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const first = await request();
+    const second = await request();
+    expect(first.status).toBe(200);
+    const a = (await first.json()).data;
+    const b = (await second.json()).data;
+    expect(a.authenticated).toBe(true);
+    expect(a.user.editor).toBe(false);
+    expect(a.user.owner).toBe(false);
+    expect(a.user.email).not.toBe(b.user.email);
+    const cookie = cookieOf(first, 'solveline_session')!;
+    expect((await s.app.request('/api/auth/session', { headers: { cookie } })).status).toBe(200);
+    await s.app.request('/api/auth/logout', { method: 'POST', headers: { cookie } });
+    expect(((await (await s.app.request('/api/auth/session', { headers: { cookie } })).json()).data).authenticated).toBe(false);
+    expect(s.db.prepare("SELECT count(*) AS n FROM users WHERE email = ?").get(a.user.email)).toEqual({ n: 1 });
+  });
+
+  it('신규 가입 중지와 JSON 요청 제한을 따른다', async () => {
+    const s = setup();
+    expect((await s.app.request('/api/auth/temporary', { method: 'POST' })).status).toBe(400);
+    new SignupSettingsStore(s.db).setEnabled(false);
+    expect((await s.app.request('/api/auth/temporary', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
+  });
+});
+
 describe('인증', () => {
   it('비회원은 문제·폴더를 볼 수만 있고, 저장·실행은 막는다', async () => {
     const s = setup();
