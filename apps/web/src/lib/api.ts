@@ -82,7 +82,7 @@ export const api = {
   signupCancel: () => request(z.object({ cancelled: z.boolean() }), '/api/auth/signup/cancel', json('POST')),
   runtime: () => request(Runtime, '/api/runtime'),
   problems: () => request(z.array(ProblemSummary), '/api/problems'),
-  setBookmark: (id: string, bookmarked: boolean) => request(Bookmark, `/api/problems/${encodeURIComponent(id)}/bookmark`, json('PUT', { bookmarked })),
+  setBookmark: (id: string, bookmarked: boolean, owner: string) => request(Bookmark, `/api/problems/${encodeURIComponent(id)}/bookmark`, { ...json('PUT', { bookmarked }), headers: { 'X-Draft-Owner': owner }, keepalive: true }),
   problem: (id: string) => request(Problem, `/api/problems/${encodeURIComponent(id)}`),
   createProblem: (p: ProblemInput) => request(Problem, '/api/problems', json('POST', p)),
   /** keepalive: 페이지를 떠나는 중에도 요청을 끝까지 보낸다(본문 64KB 이하일 때만 브라우저가 허용). */

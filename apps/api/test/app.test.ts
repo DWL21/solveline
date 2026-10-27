@@ -244,19 +244,22 @@ describe('인증', () => {
   });
 });
 
-const as = (s: ReturnType<typeof setup>, cookie: string) => async (method: string, path: string, body?: unknown) => {
-  const res = await s.app.request(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+const as = (s: ReturnType<typeof setup>, cookie: string, owner?: string) => async (method: string, path: string, body?: unknown) => {
+  const res = await s.app.request(path, { method, headers: { cookie, 'content-type': 'application/json', ...(owner ? { 'x-draft-owner': owner } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: res.status, body: (await res.json()) as { data: any; error?: { code: string } } }; // eslint-disable-line @typescript-eslint/no-explicit-any -- 테스트 응답 파싱
 };
 
 describe('북마크', () => {
   it('계정별로 저장하고 해제하며 비회원은 변경할 수 없다', async () => {
     const s = setup();
-    const owner = as(s, await login(s));
-    const other = as(s, await login(s, 'other@example.com'));
+    const owner = as(s, await login(s), OWNER);
+    const other = as(s, await login(s, 'other@example.com'), 'other@example.com');
     const id = (await owner('POST', '/api/problems', problem)).body.data.id;
     const path = `/api/problems/${id}/bookmark`;
     expect((await s.app.request(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"bookmarked":true}' })).status).toBe(401);
+    expect((await as(s, await login(s))('PUT', path, { bookmarked: true })).status).toBe(409);
+    expect((await other('PUT', path, { bookmarked: true })).status).toBe(200);
+    expect((await other('PUT', path, { bookmarked: false })).status).toBe(200);
     expect((await owner('PUT', path, { bookmarked: true })).body.data.bookmarked).toBe(true);
     expect((await owner('GET', '/api/problems')).body.data[0].bookmarked).toBe(true);
     expect((await other('GET', '/api/problems')).body.data[0].bookmarked).toBe(false);

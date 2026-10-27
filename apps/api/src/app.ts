@@ -445,6 +445,9 @@ export function createApp(deps: AppDeps) {
   app.get('/api/problems', (c) => ok(c, z.array(ProblemSummary), problems.list(viewer(c))));
 
   app.put('/api/problems/:id/bookmark', async (c) => {
+    const user = users.byId(c.get('userId'));
+    if (!user || c.req.header('x-draft-owner') !== user.email)
+      return fail(c, 409, 'draft_owner_mismatch', '계정이 변경되어 저장하지 못했어요. 다시 로그인해 주세요.');
     const body = await readJson(c, Bookmark);
     if (!body) return fail(c, 400, 'invalid_request', '북마크 상태가 올바르지 않습니다.');
     if (!problems.setBookmark(c.req.param('id'), c.get('userId'), body.bookmarked)) return fail(c, 404, 'not_found', '없는 문제입니다.');
