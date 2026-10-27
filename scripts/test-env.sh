@@ -25,7 +25,10 @@ case "${1:-up}" in
       } > "$ENV_FILE"
     fi
     set -a; . "$ENV_FILE"; set +a
-    "${COMPOSE[@]}" up -d --build --wait --wait-timeout 300
+    # CI가 캐시로 빌드·로드한 이미지는 다시 빌드하지 않는다. 로컬 기본 동작은 빌드다.
+    BUILD_ARGS=(--build)
+    if [ "${TEST_ENV_SKIP_BUILD:-0}" = 1 ]; then BUILD_ARGS=(--no-build); fi
+    "${COMPOSE[@]}" up -d "${BUILD_ARGS[@]}" --wait --wait-timeout 300
     curl -fsS "http://${HOST}:${E2E_PORT}/api/health" >/dev/null
     echo "테스트 환경 준비됨: http://${HOST}:${E2E_PORT}"
     ;;

@@ -13,13 +13,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup-node
+      - uses: ./.github/actions/setup-playwright
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @solveline/e2e exec playwright install --with-deps chromium
+          browsers: chromium
       - run: pnpm --filter @solveline/e2e e2e:smoke
         env:
           CI: "true"

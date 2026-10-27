@@ -16,6 +16,7 @@ export default defineConfig({
   outputDir: './reports/artifacts',
   fullyParallel: true,
   forbidOnly: env.ci,
+  failOnFlakyTests: env.ci,
   retries: env.ci ? 2 : 0,
   workers: env.ci ? 2 : undefined,
   timeout: 60_000,

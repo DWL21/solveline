@@ -1,0 +1,12 @@
+name: Setup Node workspace
+description: Node 24와 고정된 pnpm 버전을 준비하고 lockfile로 의존성을 설치한다
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 24
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      shell: bash

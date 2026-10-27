@@ -1,8 +1,10 @@
 name: CI
+# PR 품질 검증을 한 실행에 모은다. 배포와 운영 스모크는 권한·실행 시점이 달라 분리한다.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -10,22 +12,24 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-node
+      - name: Actions 문법 검사
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
       - run: pnpm check
   docker:
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Build production images
-        run: docker compose -f compose.production.yaml build
+      - name: Build production images (캐시)
+        uses: ./.github/actions/build-images
+        with:
+          image-prefix: solveline-production
+          web-dockerfile: docker/web.Dockerfile
       - name: Runner self-test (운영과 같은 샌드박스 옵션)
         run: |
           docker run --rm --network none --read-only --tmpfs /tmp:size=512m,mode=1777 \
@@ -33,6 +37,7 @@ jobs:
             --security-opt no-new-privileges:true --memory 1536m --pids-limit 512 \
             solveline-production-runner python3 /opt/runner/selftest.py
   secret-scan:
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -41,7 +46,130 @@ jobs:
       # gitleaks 공식 이미지(버전 고정)로 이번 변경의 커밋만 검사한다(Node가 필요 없는 컨테이너 실행)
       - name: gitleaks
         env:
-          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.sha) }}
+          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || github.event_name == 'push' && format('{0}..{1}', github.event.before, github.sha) || format('{0}^!', github.sha) }}
         run: |
-          case "$RANGE" in 0000000000000000000000000000000000000000..*) RANGE="${RANGE#*..}~1..${RANGE#*..}";; esac
+          case "$RANGE" in 0000000000000000000000000000000000000000..*) RANGE="${RANGE#*..}^!";; esac
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --log-opts="$RANGE" --redact --no-banner --exit-code 1
+
+  unit:
+    name: 단위 테스트·커버리지
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-node
+      - name: 커버리지(래칫 기준 아래로 내려가면 실패)
+        run: pnpm --filter @solveline/api test:coverage
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unit
+          path: |
+            apps/api/coverage/
+            apps/api/reports/
+          retention-days: 14
+
+  static-analysis:
+    name: 정적 분석(SonarQube 품질 게이트)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-node
+      - name: Sonar 분석기·JRE 캐시
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.sonar/cache
+            ~/.sonar/native-sonar-scanner
+          key: sonar-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'sonar-project.properties') }}
+      - name: SonarQube(Docker) 분석·품질 게이트
+        run: scripts/sonar.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sonar
+          path: reports/quality/
+          retention-days: 14
+
+  e2e:
+    name: API·UI 자동화(Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-node
+      - name: 브라우저·OS 패키지 준비 (캐시)
+        uses: ./.github/actions/setup-playwright
+      - name: Build test images (캐시)
+        uses: ./.github/actions/build-images
+        with:
+          image-prefix: solveline-test
+          web-dockerfile: docker/web-test.Dockerfile
+      - name: 테스트 환경(Docker) 띄우기
+        run: scripts/test-env.sh up
+        env:
+          TEST_ENV_SKIP_BUILD: "1"
+      - name: API·UI 자동화
+        run: pnpm --filter @solveline/e2e e2e:ci
+        env:
+          CI: "true"
+      - name: 실패 분석용 서버 로그
+        if: failure()
+        run: |
+          mkdir -p e2e/reports
+          scripts/test-env.sh logs > e2e/reports/test-env.log 2>&1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e
+          path: e2e/reports/
+          retention-days: 14
+      - name: 테스트 환경 내리기
+        if: always()
+        run: scripts/test-env.sh down
+
+  report:
+    name: 품질 리포트
+    timeout-minutes: 5
+    needs: [check, docker, secret-scan, unit, static-analysis, e2e]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: unit
+          path: apps/api
+        continue-on-error: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: sonar
+          path: reports/quality
+        continue-on-error: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e
+          path: e2e/reports
+        continue-on-error: true
+      - name: 지표 집계(Step Summary)
+        run: node scripts/quality-report.mjs --strict
+        env:
+          QUALITY_CHECK_RESULT: ${{ needs.check.result }}
+          QUALITY_DOCKER_RESULT: ${{ needs.docker.result }}
+          QUALITY_SECRET_RESULT: ${{ needs.secret-scan.result }}
+          QUALITY_UNIT_RESULT: ${{ needs.unit.result }}
+          QUALITY_STATIC_RESULT: ${{ needs.static-analysis.result }}
+          QUALITY_E2E_RESULT: ${{ needs.e2e.result }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: quality-report
+          path: reports/quality/
+          retention-days: 90

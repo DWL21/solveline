@@ -13,7 +13,7 @@
 | `runner` | 코드 실행 서버(Python 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 21.0.2, Python 3.13.13) |
 | `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
 | `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 API 이미지·nginx 게이트웨이·배포 | pahidc |
-| `.github/workflows` | CI(`ci.yml`), 배포(`deploy.yml`) | GitHub-hosted / self-hosted(pahidc) |
+| `.github/workflows` | 통합 CI(`ci.yml`), 배포(`deploy.yml`), 운영 스모크(`smoke.yml`) | GitHub-hosted / self-hosted(pahidc) |
 | `docs/decisions` | 결정 기록 | — |
 
 ## 작업 흐름 (필수)

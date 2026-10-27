@@ -1,0 +1,78 @@
+name: Setup Playwright
+description: 브라우저 바이너리와 apt 다운로드를 캐시하고 시스템 의존성은 정상 설치한다
+inputs:
+  browsers:
+    description: 설치할 브라우저 목록(공백 구분)
+    default: chromium webkit
+outputs:
+  browser-cache-hit:
+    description: 브라우저 캐시의 정확한 키 일치 여부
+    value: ${{ steps.browser-cache.outputs.cache-hit }}
+  apt-cache-hit:
+    description: apt 다운로드 캐시의 정확한 키 일치 여부
+    value: ${{ steps.apt-cache.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      working-directory: e2e
+      env:
+        PLAYWRIGHT_TARGETS: ${{ inputs.browsers }}
+      run: |
+        echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+        echo "browsers=${PLAYWRIGHT_TARGETS// /-}" >> "$GITHUB_OUTPUT"
+        echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@v6
+      id: browser-cache
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-v1-${{ runner.os }}-${{ runner.arch }}-ubuntu24-${{ steps.version.outputs.version }}-${{ steps.version.outputs.browsers }}
+    - uses: actions/cache/restore@v6
+      id: apt-cache
+      with:
+        path: ${{ runner.temp }}/playwright-apt
+        key: playwright-apt-v1-${{ runner.os }}-${{ runner.arch }}-ubuntu24-${{ steps.version.outputs.version }}-${{ steps.version.outputs.browsers }}-${{ steps.version.outputs.week }}
+        restore-keys: |
+          playwright-apt-v1-${{ runner.os }}-${{ runner.arch }}-ubuntu24-${{ steps.version.outputs.version }}-${{ steps.version.outputs.browsers }}-
+    - name: apt 다운로드 캐시 설정
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/playwright-apt"
+        chmod 755 "$RUNNER_TEMP/playwright-apt"
+        printf 'Dir::Cache::archives "%s";\nAPT::Keep-Downloaded-Packages "true";\nAcquire::Retries "2";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          "$RUNNER_TEMP/playwright-apt" | sudo tee /etc/apt/apt.conf.d/99-solveline-playwright-cache >/dev/null
+    # 캐시에는 .deb만 둔다. apt 목록·설치 상태는 복원하지 않고 최신 메타데이터·서명으로 설치한다.
+    - name: OS 의존성 설치
+      id: dependencies
+      shell: bash
+      env:
+        PLAYWRIGHT_TARGETS: ${{ inputs.browsers }}
+      run: |
+        read -r -a browsers <<< "$PLAYWRIGHT_TARGETS"
+        pnpm --filter @solveline/e2e exec playwright install-deps "${browsers[@]}"
+    - name: apt 캐시 정리
+      if: always()
+      shell: bash
+      run: |
+        sudo rm -f /etc/apt/apt.conf.d/99-solveline-playwright-cache
+        sudo rm -rf "$RUNNER_TEMP/playwright-apt/partial" "$RUNNER_TEMP/playwright-apt/lock"
+        sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/playwright-apt"
+    - uses: actions/cache/save@v6
+      if: always() && steps.dependencies.outcome == 'success' && steps.apt-cache.outputs.cache-hit != 'true'
+      with:
+        path: ${{ runner.temp }}/playwright-apt
+        key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+    - name: 브라우저 설치
+      if: steps.browser-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PLAYWRIGHT_TARGETS: ${{ inputs.browsers }}
+      run: |
+        read -r -a browsers <<< "$PLAYWRIGHT_TARGETS"
+        pnpm --filter @solveline/e2e exec playwright install "${browsers[@]}"
+    - uses: actions/cache/save@v6
+      if: steps.browser-cache.outputs.cache-hit != 'true'
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.browser-cache.outputs.cache-primary-key }}

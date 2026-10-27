@@ -2,6 +2,7 @@ import { expect, type APIRequestContext, type APIResponse } from '@playwright/te
 import { z } from 'zod';
 import {
   AdminSession,
+  Bookmark,
   Collection,
   Folder,
   HiddenCases,
@@ -35,12 +36,13 @@ export class Api {
   }
 
   /** 실패 응답: 상태 코드와 오류 코드를 돌려준다(봉투 형식 검사 포함) */
-  async fail(res: APIResponse | Promise<APIResponse>): Promise<{ status: number; code: string | undefined }> {
+  async fail(res: APIResponse | Promise<APIResponse>): Promise<{ status: number; code: string }> {
     const r = await res;
     expect(r.ok(), `${r.url()}가 성공하면 안 됩니다`).toBe(false);
-    const body = (await r.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
-    if (r.status() !== 404 || body?.error) expect(body?.error?.message, '오류 봉투 { error: { code, message } }').toBeTruthy();
-    return { status: r.status(), code: body?.error?.code };
+    const body = await r.json().catch(() => null);
+    const parsed = z.object({ error: z.object({ code: z.string().min(1), message: z.string().min(1) }) }).safeParse(body);
+    expect(parsed.success, '오류 봉투 { error: { code, message } }').toBe(true);
+    return { status: r.status(), code: parsed.data!.error.code };
   }
 
   // ─── 인증 ───
@@ -62,6 +64,11 @@ export class Api {
   createProblem = (p: ProblemInput) => this.ok(this.request.post('/api/problems', { data: p }), Problem);
   saveProblem = (id: string, p: ProblemInput) => this.ok(this.request.put(`/api/problems/${id}`, { data: p }), Problem);
   setHidden = (id: string, cases: HiddenCases['cases']) => this.ok(this.request.put(`/api/problems/${id}/hidden`, { data: { cases } }), HiddenCases);
+
+  async bookmark(id: string, bookmarked: boolean) {
+    const email = (await this.session()).user?.email ?? '';
+    return this.ok(this.request.put(`/api/problems/${id}/bookmark`, { headers: { 'x-draft-owner': email }, data: { bookmarked } }), Bookmark);
+  }
 
   // ─── 폴더·컬렉션 ───
   folders = () => this.ok(this.request.get('/api/folders'), z.array(Folder));
