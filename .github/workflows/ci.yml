@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -21,6 +22,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
   docker:
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -33,6 +35,7 @@ jobs:
             --security-opt no-new-privileges:true --memory 1536m --pids-limit 512 \
             solveline-production-runner python3 /opt/runner/selftest.py
   secret-scan:
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

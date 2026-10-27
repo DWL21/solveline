@@ -49,13 +49,16 @@ echo "▶ 분석"
 pnpm exec sonar-scanner-npm -Dsonar.host.url="$URL" -Dsonar.token="$TOKEN" -Dsonar.qualitygate.wait=false -Dsonar.javascript.node.maxspace=2048 \
   >"$OUT/sonar-scanner.log" 2>&1 || { tail -40 "$OUT/sonar-scanner.log"; exit 1; }
 
+# 스캐너가 기록한 이번 작업 ID로 완료를 확인한다.
+TASK_ID=$(python3 -c 'from pathlib import Path; print(dict(line.split("=", 1) for line in Path(".scannerwork/report-task.txt").read_text().splitlines() if "=" in line)["ceTaskId"])')
 # 백그라운드 분석 작업이 끝날 때까지
 for _ in $(seq 1 120); do
-  STATUS=$(api "$URL/api/ce/component?component=solveline" | python3 -c 'import json,sys;d=json.load(sys.stdin);q=d.get("queue",[]);c=d.get("current") or {};print("PENDING" if q else c.get("status","PENDING"))')
+  STATUS=$(api "$URL/api/ce/task?id=$TASK_ID" | python3 -c 'import json,sys;print(json.load(sys.stdin)["task"]["status"])')
   [ "$STATUS" = SUCCESS ] && break
-  [ "$STATUS" = FAILED ] && { echo "분석 작업 실패"; exit 1; }
+  case "$STATUS" in FAILED|CANCELED) echo "분석 작업 실패: $STATUS"; exit 1;; esac
   sleep 3
 done
+[ "$STATUS" = SUCCESS ] || { echo "분석 작업 완료 대기 시간 초과" >&2; exit 1; }
 
 METRICS=bugs,vulnerabilities,code_smells,security_hotspots,coverage,line_coverage,branch_coverage,duplicated_lines_density,ncloc,reliability_rating,security_rating,sqale_rating,sqale_index,cognitive_complexity
 api "$URL/api/qualitygates/project_status?projectKey=solveline" > "$OUT/sonar-gate.json"

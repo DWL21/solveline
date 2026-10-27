@@ -15,9 +15,9 @@ Solveline의 테스트 자동화와 품질 관리를 한곳에 모은 문서입�
               │   smoke      │
             ┌─┴──────────────┴─┐ UI E2E(데스크톱·Safari 계열·휴대폰·태블릿)  21
             │      ui          │
-        ┌───┴──────────────────┴───┐ API 블랙박스(계약·권한 결정표·채점 상태) 59
+        ┌───┴──────────────────┴───┐ API 블랙박스(계약·권한 결정표·채점 상태) 69
         │          api             │
-  ┌─────┴──────────────────────────┴─────┐ 단위·통합(인메모리, 커버리지 래칫)  61+
+  ┌─────┴──────────────────────────┴─────┐ 단위·통합(인메모리, 커버리지 래칫)  64
   │                unit                  │
   └──────────────────────────────────────┘
   + 정적 분석(SonarQube 품질 게이트) · runner 자체 검사(격리) · 접근성(axe)
@@ -43,9 +43,11 @@ Solveline의 테스트 자동화와 품질 관리를 한곳에 모은 문서입�
 
 | 어디서 | 파일 | 언제 |
 |---|---|---|
-| GitHub Actions | [`.github/workflows/quality.yml`](../../.github/workflows/quality.yml) | 모든 PR·main 푸시: 단위 → 정적 분석 → API·UI → 품질 리포트(Step Summary) |
+| GitHub Actions | [`.github/workflows/quality.yml`](../../.github/workflows/quality.yml) | 모든 PR·main 푸시: 단위·정적 분석·API·UI 병렬 실행 → 엄격 품질 게이트·리포트(Step Summary) |
 | GitHub Actions | [`.github/workflows/smoke.yml`](../../.github/workflows/smoke.yml) | 매일 09:00 KST, 수동 |
 
 CI는 GitHub가 호스팅하는 runner에서만 돈다. 운영 서버·개발자 PC의 자원을 쓰지 않고, 매 실행 새 가상 머신이라 이전 실행의 흔적이 남지 않는다.
 
 CI 도구가 바뀌어도 테스트가 바뀌지 않도록, 파이프라인은 얇게 두고 일은 저장소의 스크립트(`scripts/test-env.sh`, `scripts/sonar.sh`, `scripts/quality-report.mjs`)가 한다. 같은 스크립트를 로컬에서도 그대로 돌린다.
+
+- [2026-10-28 QA 감사·개선 및 잔여 위험](audit-2026-10-28.md)

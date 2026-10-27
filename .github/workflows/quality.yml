@@ -1,5 +1,5 @@
 name: Quality
-# 품질 파이프라인: 빠른 피드백부터(단위 → 정적 분석 → API·UI 자동화) 실행하고, 결과를 하나의 품질 리포트로 모은다.
+# 단위·정적 분석·API·UI를 병렬 실행하고, 필수 결과와 잡 상태를 품질 게이트로 집계한다.
 # 공개 저장소: GitHub가 호스팅하는 runner만 쓰고(self-hosted 금지), 비밀 값은 쓰지 않는다(테스트 환경 값은 실행마다 임의 생성).
 on:
   pull_request:
@@ -81,7 +81,9 @@ jobs:
           CI: "true"
       - name: 실패 분석용 서버 로그
         if: failure()
-        run: scripts/test-env.sh logs > e2e/reports/test-env.log
+        run: |
+          mkdir -p e2e/reports
+          scripts/test-env.sh logs > e2e/reports/test-env.log 2>&1
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -94,11 +96,15 @@ jobs:
 
   report:
     name: 품질 리포트
+    timeout-minutes: 5
     needs: [unit, static-analysis, e2e]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - uses: actions/download-artifact@v8
         with:
           name: unit
@@ -115,8 +121,13 @@ jobs:
           path: e2e/reports
         continue-on-error: true
       - name: 지표 집계(Step Summary)
-        run: node scripts/quality-report.mjs
+        run: node scripts/quality-report.mjs --strict
+        env:
+          QUALITY_UNIT_RESULT: ${{ needs.unit.result }}
+          QUALITY_STATIC_RESULT: ${{ needs.static-analysis.result }}
+          QUALITY_E2E_RESULT: ${{ needs.e2e.result }}
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: quality-report
           path: reports/quality/

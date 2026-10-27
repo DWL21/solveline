@@ -1,6 +1,7 @@
+import { SubmissionDetail, SubmissionHistory } from '@solveline/shared';
 import { test, expect, emailFor } from '../../src/fixtures.ts';
 import { Api } from '../../src/api.ts';
-import { aProblem, uid } from '../../src/builders.ts';
+import { aCase, aProblem, sumSolutions, uid } from '../../src/builders.ts';
 
 /** 사용자별 데이터 분리와 공용 데이터의 규칙(폴더는 개인, 컬렉션은 공용·경로형) */
 test.describe('데이터 분리', () => {
@@ -33,3 +34,36 @@ test.describe('데이터 분리', () => {
     expect((await editorApi.fail(editorApi.request.post('/api/collections', { data: { name: `${name}/1회`, description: '' } }))).status).toBe(409);
   });
 });
+
+test('북마크는 사용자별로 저장되고 비회원과 다른 사용자에게 보이지 않는다', async ({ api, signIn, editorApi, seedProblem }) => {
+  const p = await seedProblem();
+  const bookmark = (value: boolean) => editorApi.bookmark(p.id, value);
+  await bookmark(true);
+  expect((await editorApi.problems()).find((x) => x.id === p.id)?.bookmarked).toBe(true);
+  expect((await api.problems()).find((x) => x.id === p.id)?.bookmarked).toBe(false);
+  await signIn();
+  expect((await api.problems()).find((x) => x.id === p.id)?.bookmarked).toBe(false);
+  await bookmark(false);
+  expect((await editorApi.problems()).find((x) => x.id === p.id)?.bookmarked).toBe(false);
+});
+
+for (const access of ['상태 조회', '코드 상세 조회', '실행 취소'] as const) {
+  test(`다른 사용자(편집 권한 포함)는 남의 제출 ${access}를 할 수 없다`, async ({ api, signIn, editorApi, seedProblem }) => {
+    const p = await seedProblem();
+    await signIn();
+    const code = sumSolutions.python.correct;
+    const own = await api.submit({ problemId: p.id, kind: 'submit', language: 'python', mode: 'function', code, cases: [aCase(['[1, 2]'], '3')] });
+    const path = `/api/submissions/${own.id}`;
+    try {
+      const response = access === '실행 취소' ? editorApi.request.post(`${path}/cancel`)
+        : editorApi.request.get(`${path}${access === '코드 상세 조회' ? '/detail' : ''}`);
+      expect(await editorApi.fail(response)).toEqual({ status: 404, code: 'not_found' });
+      expect((await api.ok(api.request.get(`${path}/detail`), SubmissionDetail)).code).toBe(code);
+      const history = await editorApi.ok(editorApi.request.get('/api/submissions'), SubmissionHistory);
+      expect(history.items.some((item) => item.id === own.id)).toBe(false);
+      expect((await api.submission(own.id)).status).not.toBe('cancelled');
+    } finally {
+      await api.request.post(`${path}/cancel`);
+    }
+  });
+}

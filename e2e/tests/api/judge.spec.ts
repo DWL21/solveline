@@ -44,8 +44,9 @@ for (const language of ['java', 'python'] as Language[]) {
 
     test('문법 오류 → 컴파일(구문) 에러', async ({ api }) => {
       const { submission } = await run(api, sumSolutions[language].compileError);
-      if (language === 'java') expect(submission.result?.compile.ok).toBe(false);
-      else expect(submission.result?.results.every((r) => r.status === 'error')).toBe(true);
+      expect(submission.result?.compile.ok).toBe(false);
+      expect(submission.result?.compile.output).toMatch(language === 'java' ? /error/ : /SyntaxError/);
+      expect(submission.result?.results).toEqual([]);
     });
 
     test('런타임 오류 → error와 에러 메시지', async ({ api }) => {
@@ -59,6 +60,19 @@ for (const language of ['java', 'python'] as Language[]) {
       const { submission } = await run(api, sumSolutions[language].timeout, true);
       expect(submission.status).toBe('done');
       expect(submission.result?.results[0]?.status).toBe('timeout');
+    });
+
+    test('입출력형은 표준 입력을 읽고 출력의 줄 끝 공백을 무시해 채점한다', async ({ api }) => {
+      const code = language === 'java'
+        ? 'import java.util.Scanner; class Main { public static void main(String[] args) { Scanner s = new Scanner(System.in); System.out.println((s.nextInt() + s.nextInt()) + "  "); } }'
+        : 'a, b = map(int, input().split())\nprint(str(a + b) + "  ")\n';
+      const { submission, transitions } = await api.judge({
+        problemId: null, kind: 'run', language, mode: 'stdin', code,
+        cases: [aCase([], '3', { stdin: '1 2\n' }), aCase([], '-2', { stdin: '-5 3\n' })],
+      });
+      expectValidTransitions(transitions);
+      expect(submission.status).toBe('done');
+      expect(submission.result?.results.map((r) => r.status)).toEqual(['pass', 'pass']);
     });
 
     test('표준 출력을 반환값과 따로 보여 준다', async ({ api }) => {
@@ -80,7 +94,7 @@ test.describe('제출 채점(히든 테스트셋)', () => {
     const right = await submit(sumSolutions.python.correct);
     expect(right.submission.score).toBe(100);
     // 채점 결과에는 히든 케이스의 반환값을 남기지 않는다(문제 유출 방지)
-    expect(right.submission.result?.results.every((r) => r.actual === null)).toBe(true);
+    expect(right.submission.result?.results.map((r) => r.actual)).toEqual([null, null]);
     expect((await api.problem(p.id)).lastSubmission).toMatchObject({ score: 100, passed: 2, total: 2 });
   });
 
