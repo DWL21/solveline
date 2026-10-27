@@ -21,7 +21,6 @@ export function BookmarkStar({ id, bookmarked }: { id: string; bookmarked: boole
     qc.setQueryData<ProblemSummary[]>(qk.problems, (all) => all?.map((p) => p.id === id ? { ...p, bookmarked: next } : p));
     queue.set(me.email, id, next, () => {
       void qc.invalidateQueries({ queryKey: qk.problems });
-      window.alert('북마크를 저장하지 못했어요. 다시 시도해 주세요.');
     });
   };
   return <span className="flex shrink-0 items-center">
