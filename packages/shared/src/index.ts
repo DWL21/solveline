@@ -181,7 +181,8 @@ export const Problem = ProblemInput.extend({
 });
 export type Problem = z.infer<typeof Problem>;
 
-export const ProblemSummary = Problem.pick({ id: true, title: true, folderId: true, mode: true, language: true, lastSubmission: true, timer: true, updatedAt: true });
+export const Bookmark = z.object({ bookmarked: z.boolean() });
+export const ProblemSummary = Problem.pick({ id: true, title: true, folderId: true, mode: true, language: true, lastSubmission: true, timer: true, updatedAt: true }).extend({ bookmarked: z.boolean() });
 export type ProblemSummary = z.infer<typeof ProblemSummary>;
 
 // ─── 실행 ───

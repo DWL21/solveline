@@ -235,6 +235,11 @@ const migrations: Migration[] = [
   },
   // 기존 문제와 폴더, 컬렉션의 표시를 정리한다.
   (db) => stripSourceMentions(db),
+  `CREATE TABLE bookmarks (
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     problem_id TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+     PRIMARY KEY (user_id, problem_id)
+   );`,
 ];
 
 /** 기존 데이터 언급을 지운다. 마이그레이션에서 한 번 쓴다. */
@@ -395,15 +400,17 @@ export class ProblemStore {
     const rows = this.db
       .prepare(
         `SELECT p.id, p.title, CASE WHEN @uid IS NULL THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
-                s.language AS my_language, s.timer, s.last_submission
+                s.language AS my_language, s.timer, s.last_submission, b.problem_id AS bookmark_id
          FROM problems p
          LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = @uid
+         LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = @uid
          LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = @uid
          ORDER BY p.title`,
       )
-      .all({ uid: userId }) as (Row & { my_language: string | null; timer: string | null; last_submission: string | null })[];
+      .all({ uid: userId }) as (Row & { my_language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null })[];
     return rows.map((r) => ({
       id: r.id,
+      bookmarked: r.bookmark_id !== null,
       title: r.title,
       folderId: r.folder_id,
       mode: r.mode as Problem['mode'],
@@ -412,6 +419,13 @@ export class ProblemStore {
       timer: parse<ProblemTimer>(r.timer) ?? EMPTY_TIMER,
       updatedAt: r.updated_at,
     }));
+  }
+
+  setBookmark(id: string, userId: string, bookmarked: boolean) {
+    if (!this.exists(id)) return false;
+    if (bookmarked) this.db.prepare('INSERT OR IGNORE INTO bookmarks (user_id, problem_id) VALUES (?, ?)').run(userId, id);
+    else this.db.prepare('DELETE FROM bookmarks WHERE user_id = ? AND problem_id = ?').run(userId, id);
+    return true;
   }
 
   private row(id: string) {
