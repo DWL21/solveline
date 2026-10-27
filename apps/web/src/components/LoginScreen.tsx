@@ -75,7 +75,7 @@ export function LoginScreen() {
               </p>
             )}
             <p className="mt-3 text-center text-[12.5px] text-dim">
-              채용용으로 <button type="button" disabled={pending || config.data?.signupEnabled === false} onClick={temporaryLogin} className="font-semibold text-accent hover:underline disabled:opacity-50">{pending ? '로그인 중…' : '임시 로그인'}</button>하기
+              <button type="button" disabled={pending || config.data?.signupEnabled === false} onClick={temporaryLogin} className="font-semibold text-accent hover:underline disabled:opacity-50">{pending ? '로그인 중…' : '임시 로그인'}</button>
             </p>
             <p className="mt-1 text-center text-[12px] text-faint">임시 계정은 로그아웃하거나 최대 24시간이 지나면 사용할 수 없어요.</p>
             {temporaryError && <p role="alert" className="mt-4 text-[13px] text-bad">{temporaryError}</p>}

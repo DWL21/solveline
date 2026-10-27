@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
@@ -291,7 +291,10 @@ export function createApp(deps: AppDeps) {
       return fail(c, 400, 'invalid_request', '요청을 확인해 주세요.');
     if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다.');
     const id = randomUUID();
-    const user = users.create({ sub: `temporary:${id}`, email: `${id}@temporary.invalid`, name: '임시 사용자', picture: '' },
+    const adjectives = ['말랑한', '포근한', '반짝이는', '따뜻한', '씩씩한', '수줍은', '발랄한', '졸린', '행복한', '상냥한'];
+    const nouns = ['구름', '토끼', '다람쥐', '고양이', '햄스터', '펭귄', '오리', '곰', '별', '병아리'];
+    const name = `${adjectives[randomInt(adjectives.length)]} ${nouns[randomInt(nouns.length)]}`;
+    const user = users.create({ sub: `temporary:${id}`, email: `${id}@temporary.invalid`, name, picture: '' },
       { terms: 'temporary', privacy: 'temporary' }, {}, new Date(now()));
     const s = await startSession(c, user.id, true);
     return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));

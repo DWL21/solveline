@@ -124,6 +124,7 @@ describe('임시 로그인', () => {
     const a = (await first.json()).data;
     const b = (await second.json()).data;
     expect(a.authenticated).toBe(true);
+    expect(a.user.name).toMatch(/^(말랑한|포근한|반짝이는|따뜻한|씩씩한|수줍은|발랄한|졸린|행복한|상냥한) (구름|토끼|다람쥐|고양이|햄스터|펭귄|오리|곰|별|병아리)$/);
     expect(a.user.editor).toBe(false);
     expect(a.user.owner).toBe(false);
     expect(a.user.email).not.toBe(b.user.email);
