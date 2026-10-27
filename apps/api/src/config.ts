@@ -40,6 +40,8 @@ const EnvSchema = z.object({
   CONTACT_EMAIL: optionalString,
   SESSION_TTL_DAYS: positiveNumber(30),
   WEB_ORIGIN: optionalString,
+  /** 자동화 테스트 전용 로그인 토큰(테스트 환경만). 운영(NODE_ENV=production)에서 설정하면 시작하지 않는다 */
+  TEST_AUTH_TOKEN: optionalString,
 });
 
 export type Config = {
@@ -58,6 +60,8 @@ export type Config = {
   webOrigin: string;
   /** 쿠키 Secure 속성. localhost 출처에서만 끈다. */
   secureCookie: boolean;
+  /** 자동화 테스트 전용 로그인(POST /api/test/session). null이면 경로 자체가 없다 */
+  testAuthToken: string | null;
 };
 
 export class ConfigError extends Error {}
@@ -74,6 +78,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const webOrigin = (e.WEB_ORIGIN ?? 'http://localhost:5173').replace(/\/$/, '');
 
   if (production && !e.SESSION_SECRET) throw new ConfigError('운영 환경에는 SESSION_SECRET이 필요합니다.');
+  if (production && e.TEST_AUTH_TOKEN) throw new ConfigError('운영 환경에서는 TEST_AUTH_TOKEN을 쓸 수 없습니다.');
+  if (e.TEST_AUTH_TOKEN && e.TEST_AUTH_TOKEN.length < 24) throw new ConfigError('TEST_AUTH_TOKEN은 24자 이상이어야 합니다.');
   if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
   if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
 
@@ -103,6 +109,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3600_000,
     webOrigin,
     secureCookie: !isLocal,
+    testAuthToken: production ? null : (e.TEST_AUTH_TOKEN ?? null),
   };
 }
 

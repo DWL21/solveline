@@ -50,7 +50,13 @@ export function findNode(nodes: CollectionNode[], path: string): CollectionNode 
 export function problemIdsUnder(node: CollectionNode): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const n of flatten([node])) for (const id of n.collection?.problemIds ?? []) if (!seen.has(id)) (seen.add(id), out.push(id));
+  for (const n of flatten([node])) {
+    for (const id of n.collection?.problemIds ?? []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
   return out;
 }
 

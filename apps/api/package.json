@@ -7,7 +7,8 @@
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "start": "node --import tsx src/main.ts",
     "typecheck": "tsc -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "4.1.12",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0"
   },
