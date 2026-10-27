@@ -116,7 +116,7 @@ const sonar = json('reports/quality/sonar.json', (v) => typeof v?.gate === 'stri
 const rating = (v) => (v ? 'ABCDE'[Math.round(+v) - 1] : '—');
 
 // 상위 잡 상태까지 확인한다. 커버리지 문턱 실패 등은 JUnit만으로 판별할 수 없다.
-const jobs = { unit: process.env.QUALITY_UNIT_RESULT, static: process.env.QUALITY_STATIC_RESULT, e2e: process.env.QUALITY_E2E_RESULT };
+const jobs = { check: process.env.QUALITY_CHECK_RESULT, docker: process.env.QUALITY_DOCKER_RESULT, secret: process.env.QUALITY_SECRET_RESULT, unit: process.env.QUALITY_UNIT_RESULT, static: process.env.QUALITY_STATIC_RESULT, e2e: process.env.QUALITY_E2E_RESULT };
 for (const [job, result] of Object.entries(jobs)) {
   if (result && result !== 'success') problems.push(`상위 잡 ${job}: ${result}`);
 }

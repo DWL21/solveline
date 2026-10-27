@@ -30,7 +30,7 @@ function run(files, { strict = true, env = {} } = {}) {
       writeFileSync(join(cwd, path), typeof body === 'string' ? body : JSON.stringify(body));
     }
     const result = spawnSync(process.execPath, [script, ...(strict ? ['--strict'] : [])], {
-      cwd, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '', QUALITY_UNIT_RESULT: '', QUALITY_STATIC_RESULT: '', QUALITY_E2E_RESULT: '', ...env },
+      cwd, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '', QUALITY_CHECK_RESULT: '', QUALITY_DOCKER_RESULT: '', QUALITY_SECRET_RESULT: '', QUALITY_UNIT_RESULT: '', QUALITY_STATIC_RESULT: '', QUALITY_E2E_RESULT: '', ...env },
     });
     return { ...result, metrics: JSON.parse(readFileSync(join(cwd, 'reports/quality/metrics.json'), 'utf8')), summary: readFileSync(join(cwd, 'reports/quality/summary.md'), 'utf8') };
   } finally {
@@ -91,8 +91,10 @@ test('Sonar 게이트 실패를 차단한다', () => {
   assert.equal(run({ ...inputs(), [sonarPath]: { gate: 'ERROR' } }).status, 1);
 });
 test('상위 잡이 실패·취소·건너뛰기이면 정상 리포트만으로 성공하지 않는다', () => {
-  for (const result of ['failure', 'cancelled', 'skipped']) {
-    assert.equal(run(inputs(), { env: { QUALITY_UNIT_RESULT: result } }).status, 1);
+  for (const key of ['QUALITY_CHECK_RESULT', 'QUALITY_DOCKER_RESULT', 'QUALITY_SECRET_RESULT', 'QUALITY_UNIT_RESULT', 'QUALITY_STATIC_RESULT', 'QUALITY_E2E_RESULT']) {
+    for (const result of ['failure', 'cancelled', 'skipped']) {
+      assert.equal(run(inputs(), { env: { [key]: result } }).status, 1);
+    }
   }
 });
 test('로컬 부분 집계는 허용하되 누락을 명시한다', () => {
