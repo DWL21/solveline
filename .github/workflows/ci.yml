@@ -25,8 +25,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - name: Build production images
-        run: docker compose -f compose.production.yaml build
+      - name: Build production images (캐시)
+        uses: ./.github/actions/build-images
+        with:
+          image-prefix: solveline-production
+          web-dockerfile: docker/web.Dockerfile
       - name: Runner self-test (운영과 같은 샌드박스 옵션)
         run: |
           docker run --rm --network none --read-only --tmpfs /tmp:size=512m,mode=1777 \
@@ -75,6 +78,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-node
+      - name: Sonar 분석기·JRE 캐시
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.sonar/cache
+            ~/.sonar/native-sonar-scanner
+          key: sonar-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'sonar-project.properties') }}
       - name: SonarQube(Docker) 분석·품질 게이트
         run: scripts/sonar.sh
       - uses: actions/upload-artifact@v7
@@ -91,10 +101,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-node
-      - name: 브라우저 설치
-        run: pnpm --filter @solveline/e2e exec playwright install --with-deps chromium webkit
+      - name: 브라우저·OS 패키지 준비 (캐시)
+        uses: ./.github/actions/setup-playwright
+      - name: Build test images (캐시)
+        uses: ./.github/actions/build-images
+        with:
+          image-prefix: solveline-test
+          web-dockerfile: docker/web-test.Dockerfile
       - name: 테스트 환경(Docker) 띄우기
         run: scripts/test-env.sh up
+        env:
+          TEST_ENV_SKIP_BUILD: "1"
       - name: API·UI 자동화
         run: pnpm --filter @solveline/e2e e2e:ci
         env:
@@ -125,6 +142,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          package-manager-cache: false
       - uses: actions/download-artifact@v8
         with:
           name: unit

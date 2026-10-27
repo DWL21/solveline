@@ -1,0 +1,43 @@
+name: Build cached images
+description: 같은 Dockerfile을 BuildKit GHA 레이어 캐시로 빌드하고 로컬 Docker에 로드한다
+inputs:
+  image-prefix:
+    description: Compose가 사용하는 이미지 이름 접두사
+    required: true
+  web-dockerfile:
+    description: 웹 이미지 Dockerfile
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@v4
+    - name: Runner image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: docker/runner.Dockerfile
+        platforms: linux/amd64
+        tags: ${{ inputs.image-prefix }}-runner
+        load: true
+        cache-from: type=gha,scope=solveline-runner-amd64-v1
+        cache-to: type=gha,mode=max,scope=solveline-runner-amd64-v1
+    - name: API image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: docker/api.Dockerfile
+        platforms: linux/amd64
+        tags: ${{ inputs.image-prefix }}-api
+        load: true
+        cache-from: type=gha,scope=solveline-api-amd64-v1
+        cache-to: type=gha,mode=max,scope=solveline-api-amd64-v1
+    - name: Web image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ${{ inputs.web-dockerfile }}
+        platforms: linux/amd64
+        tags: ${{ inputs.image-prefix }}-web
+        load: true
+        cache-from: type=gha,scope=${{ inputs.image-prefix }}-web-amd64-v1
+        cache-to: type=gha,mode=max,scope=${{ inputs.image-prefix }}-web-amd64-v1

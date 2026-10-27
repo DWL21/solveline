@@ -14,7 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-node
-      - run: pnpm --filter @solveline/e2e exec playwright install --with-deps chromium
+      - uses: ./.github/actions/setup-playwright
+        with:
+          browsers: chromium
       - run: pnpm --filter @solveline/e2e e2e:smoke
         env:
           CI: "true"
