@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 /**
  * 해시 라우터.
  *   #/            전체 문제
+ *   #/bookmarks   북마크한 문제
  *   #/f/<id>      폴더 (id가 'none'이면 폴더 없음)
  *   #/c/<id>      컬렉션
  *   #/cg/<경로>   컬렉션 묶음(이름의 '/' 계층에서 실제 컬렉션이 없는 상위 단계. 하위 컬렉션의 문제를 모아 보여 준다)
@@ -14,9 +15,10 @@ export type Route =
   | { kind: 'submissions' }
   | { kind: 'problem'; id: string };
 
-export type Scope = { kind: 'all' } | { kind: 'folder'; id: string | null } | { kind: 'collection'; id: string } | { kind: 'group'; path: string };
+export type Scope = { kind: 'all' } | { kind: 'bookmarks' } | { kind: 'folder'; id: string | null } | { kind: 'collection'; id: string } | { kind: 'group'; path: string };
 
 export function parseRoute(hash: string): Route {
+  if (hash === '#/bookmarks') return { kind: 'home', scope: { kind: 'bookmarks' } };
   if (hash === '#/submissions') return { kind: 'submissions' };
   const g = /^#\/cg\/(.+)$/.exec(hash);
   if (g) {
@@ -38,6 +40,7 @@ export function hrefOf(r: Route): string {
   if (r.kind === 'submissions') return '#/submissions';
   if (r.kind === 'problem') return `#/p/${r.id}`;
   const s = r.scope;
+  if (s.kind === 'bookmarks') return '#/bookmarks';
   if (s.kind === 'folder') return `#/f/${s.id ?? 'none'}`;
   if (s.kind === 'collection') return `#/c/${s.id}`;
   if (s.kind === 'group') return `#/cg/${encodeURIComponent(s.path)}`;
