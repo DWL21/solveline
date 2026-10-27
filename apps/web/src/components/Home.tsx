@@ -14,6 +14,7 @@ const byTitle = (a: ProblemSummary, b: ProblemSummary) => a.title.localeCompare(
 const sameScope = (a: Scope, b: Scope) =>
   a.kind === b.kind &&
   (a.kind === 'all' ||
+    (a.kind === 'bookmarks' && b.kind === 'bookmarks') ||
     (a.kind === 'folder' && b.kind === 'folder' && a.id === b.id) ||
     (a.kind === 'collection' && b.kind === 'collection' && a.id === b.id) ||
     (a.kind === 'group' && b.kind === 'group' && a.path === b.path));
@@ -23,6 +24,7 @@ const scopeOfNode = (n: CollectionNode): Scope => (n.collection ? { kind: 'colle
 
 /** 범위(전체·폴더·컬렉션)의 문제 목록을 화면과 같은 순서로. "다음 문제"도 이 순서를 따른다. */
 export function scopeList(scope: Scope, all: ProblemSummary[], collections: Collection[]): ProblemSummary[] {
+  if (scope.kind === 'bookmarks') return all.filter((p) => p.bookmarked).sort(byTitle);
   if (scope.kind === 'folder') return all.filter((p) => p.folderId === scope.id).sort(byTitle);
   const byId = new Map(all.map((p) => [p.id, p]));
   const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
@@ -102,7 +104,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
   const unfiled = all.filter((p) => !p.folderId).length;
   const folderName = new Map(folders.data.map((f) => [f.id, f.name]));
-  const title = effective.kind === 'all' ? '전체 문제' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (node?.name ?? '');
+  const title = effective.kind === 'all' ? '전체 문제' : effective.kind === 'bookmarks' ? '북마크' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (node?.name ?? '');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -110,6 +112,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
         scope={effective}
         onScope={onScope}
         total={all.length}
+        bookmarked={all.filter((p) => p.bookmarked).length}
         unfiled={unfiled}
         folders={folders.data}
         folderCount={(id) => all.filter((p) => p.folderId === id).length}
@@ -170,7 +173,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               onChange={(e) => setFilter(e.target.value)}
               aria-label="문제 검색"
             />
-            {signedIn && <button type="button" aria-pressed={bookmarksOnly} onClick={() => setBookmarksOnly((v) => !v)} className={`btn-ghost ${bookmarksOnly ? 'text-warn' : ''}`}>★ 북마크만 보기</button>}
+            {signedIn && effective.kind !== 'bookmarks' && <button type="button" aria-pressed={bookmarksOnly} onClick={() => setBookmarksOnly((v) => !v)} className={`btn-ghost ${bookmarksOnly ? 'text-warn' : ''}`}>★ 북마크만 보기</button>}
             {editor && (
               <button type="button" className="btn-primary ml-auto" onClick={onNew} title="편집 권한: 모든 사용자에게 보이는 문제를 만들어요">
                 + 새 문제
@@ -184,7 +187,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             </div>
           ) : shown.length === 0 ? (
             <p className="py-12 text-center text-[13px] text-faint">
-              {q ? '검색 결과가 없어요' : bookmarksOnly ? '북마크한 문제가 없어요' : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
+              {q ? '검색 결과가 없어요' : bookmarksOnly || effective.kind === 'bookmarks' ? (signedIn ? '북마크한 문제가 없어요' : '로그인하면 북마크를 사용할 수 있어요') : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
             </p>
           ) : (
             <>
@@ -223,6 +226,7 @@ function Sidebar({
   scope,
   onScope,
   total,
+  bookmarked,
   unfiled,
   folders,
   folderCount,
@@ -231,6 +235,7 @@ function Sidebar({
   scope: Scope;
   onScope: (s: Scope) => void;
   total: number;
+  bookmarked: number;
   unfiled: number;
   folders: Folder[];
   folderCount: (id: string) => number;
@@ -240,6 +245,7 @@ function Sidebar({
   const [creating, setCreating] = useState(false);
   const scopes: ScopeItem[] = [
     { scope: { kind: 'all' }, label: '전체', count: total, group: 'all', key: 'all' },
+    { scope: { kind: 'bookmarks' }, label: '북마크', count: bookmarked, group: 'all', key: 'bookmarks' },
     ...folders.map((f): ScopeItem => ({ scope: { kind: 'folder', id: f.id }, label: f.name, count: folderCount(f.id), group: 'folder', key: 'f' + f.id })),
     ...(unfiled > 0 ? [{ scope: { kind: 'folder', id: null }, label: '폴더 없음', count: unfiled, group: 'folder', key: 'fnone' } as ScopeItem] : []),
     // 컬렉션은 '/' 계층을 들여쓰기로 보여 준다. 묶음(실제 컬렉션 없음)도 고를 수 있다.
@@ -260,7 +266,7 @@ function Sidebar({
         className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised/60 hover:text-text'}`}
       >
         <span className={`w-4 shrink-0 text-center text-[11px] ${s.group === 'collection' ? 'text-sky' : s.group === 'folder' ? 'text-warn' : 'text-faint'}`} aria-hidden>
-          {icon(s.group)}
+          {s.key === 'bookmarks' ? '★' : icon(s.group)}
         </span>
         <span className="min-w-0 flex-1 truncate">{s.label}</span>
         <span className="text-[11.5px] text-faint">{s.count}</span>
