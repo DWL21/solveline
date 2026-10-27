@@ -233,8 +233,7 @@ const migrations: Migration[] = [
   (db) => {
     for (const id of db.prepare('SELECT id FROM users').pluck().all() as string[]) copyTemplateFolders(db, id);
   },
-  // 기존 데이터 언급 정리: 문제 제목의 "[기존 N]", 설명의 출처 줄·원문 링크·그림 주소, 폴더 이름의 "기존 · ",
-  // 컬렉션 설명의 "기존"·"기존" 언급을 지운다(지문 속 등장인물 이름 등은 그대로).
+  // 기존 문제와 폴더, 컬렉션의 표시를 정리한다.
   (db) => stripSourceMentions(db),
 ];
 
@@ -265,7 +264,7 @@ export function stripSourceMentions(db: Db) {
     if (description !== c.description) updCollection.run(description, c.id);
   }
 
-  // 폴더 "기존 · 구현" → "구현". 같은 사람(틀은 틀끼리)에게 같은 이름이 이미 있으면 그 폴더로 합친다.
+  // 같은 사용자에게 동일한 폴더가 있으면 합친다.
   const folders = db.prepare("SELECT id, user_id, name FROM folders WHERE name LIKE '\ubc31\uc900%'").all() as { id: string; user_id: string | null; name: string }[];
   for (const f of folders) {
     const name = f.name.replace(/^\ubc31\uc900\s*·\s*/, '');
