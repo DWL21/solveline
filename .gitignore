@@ -13,3 +13,6 @@ data/
 *.key
 *.pem
 keys/
+coverage/
+reports/
+.scannerwork/

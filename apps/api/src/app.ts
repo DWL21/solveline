@@ -4,6 +4,9 @@ import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
+
+/** 테스트 전용 로그인 요청 */
+const TestSessionRequest = z.object({ email: z.string().trim().toLowerCase().email().max(254), name: z.string().max(100).optional(), editor: z.boolean().optional() });
 import {
   Bookmark,
   Collection,
@@ -300,6 +303,23 @@ export function createApp(deps: AppDeps) {
     return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
   });
 
+  // ─── 자동화 테스트 전용 로그인(테스트 환경만, 운영에서는 경로가 없다) ───
+  // Google 왕복 없이 원하는 계정(편집 권한 포함)으로 세션을 만든다. 약관 동의는 현재 버전으로 기록한다.
+  if (config.testAuthToken) {
+    const token = config.testAuthToken;
+    log.warn('[test] 테스트 전용 로그인이 켜져 있습니다(테스트 환경 전용).');
+    app.post('/api/test/session', async (c) => {
+      if (!passwordMatches(token, c.req.header('x-test-auth') ?? '')) return fail(c, 401, 'unauthorized', '테스트 토큰이 올바르지 않습니다.');
+      const body = await readJson(c, TestSessionRequest);
+      if (!body) return fail(c, 400, 'invalid_request', 'email이 필요합니다.');
+      const profile: GoogleProfile = { sub: `test:${body.email}`, email: body.email, name: body.name ?? body.email.split('@')[0]!, picture: '' };
+      const user = users.byGoogleSub(profile.sub) ?? users.create(profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: body.editor });
+      if (body.editor !== undefined && user.editor !== body.editor) users.setEditor(user.id, body.editor);
+      const s = await startSession(c, user.id);
+      return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
+    });
+  }
+
   app.get('/api/auth/session', async (c) => ok(c, Session, sessionBody(await readSession(c))));
 
   app.post('/api/auth/logout', async (c) => {
@@ -412,7 +432,7 @@ export function createApp(deps: AppDeps) {
 
   app.use('/api/*', async (c, next) => {
     const p = c.req.path;
-    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/admin/')) return next();
+    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
     const s = await readSession(c);
     const u = s ? users.byId(s.userId) : null;
     if (!s || !u) {

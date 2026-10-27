@@ -813,6 +813,35 @@ describe('이름 변경(codetest → solveline)', () => {
   });
 });
 
+describe('테스트 전용 로그인', () => {
+  const TOKEN = 'test-auth-token-0123456789abcdef';
+  const post = (s: ReturnType<typeof setup>, body: unknown, token = TOKEN) =>
+    s.app.request('/api/test/session', { method: 'POST', headers: { 'content-type': 'application/json', 'x-test-auth': token }, body: JSON.stringify(body) });
+
+  it('운영 환경에서는 설정할 수 없고, 짧은 토큰은 거부한다', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 'x'.repeat(40), TEST_AUTH_TOKEN: TOKEN })).toThrow(/TEST_AUTH_TOKEN/);
+    expect(() => loadConfig({ TEST_AUTH_TOKEN: 'short' })).toThrow(/24자/);
+  });
+
+  it('토큰이 없으면 경로 자체가 없다', async () => {
+    const s = setup();
+    expect((await post(s, { email: 'a@e2e.test' })).status).toBe(404);
+  });
+
+  it('토큰이 맞아야 세션을 만들고, 편집 권한을 지정할 수 있다', async () => {
+    const s = setup({ TEST_AUTH_TOKEN: TOKEN });
+    expect((await post(s, { email: 'a@e2e.test' }, 'wrong-token')).status).toBe(401);
+    const res = await post(s, { email: 'Editor@E2E.test', editor: true });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: { user: { email: string; editor: boolean } } }).data.user).toMatchObject({ email: 'editor@e2e.test', editor: true });
+    const cookie = cookieOf(res, 'solveline_session')!;
+    expect((await s.app.request('/api/collections', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'x', description: '' }) })).status).toBe(200);
+    // 같은 이메일로 다시 오면 같은 사용자, 권한은 요청대로 바뀐다
+    const again = (await (await post(s, { email: 'editor@e2e.test', editor: false })).json()) as { data: { user: { editor: boolean } } };
+    expect(again.data.user.editor).toBe(false);
+  });
+});
+
 describe('기존 데이터 정리', () => {
   it('문제 제목·설명, 폴더 이름(같은 이름은 합침), 컬렉션 설명에서 기존 데이터 언급을 지운다', async () => {
     const s = setup();

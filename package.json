@@ -10,5 +10,8 @@
     "test": "pnpm -r --if-present test && node --test scripts/pages-proxy.test.mjs",
     "build": "pnpm -r --if-present build",
     "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@sonar/scan": "5.0.1"
   }
 }
