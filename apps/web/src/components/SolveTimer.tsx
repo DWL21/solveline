@@ -74,10 +74,11 @@ export function SolveTimerBadge({
   onResume: () => void;
 }>) {
   const solved = timer.solvedMs !== null;
+  const pausedTone = timer.paused ? 'bg-raised text-dim' : 'bg-raised text-text';
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : timer.paused ? 'bg-raised text-dim' : 'bg-raised text-text'}`}
+        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : pausedTone}`}
         title={solved ? '정답을 맞힌 시점의 풀이 시간' : '풀이 시간'}
         aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}, 해결` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >

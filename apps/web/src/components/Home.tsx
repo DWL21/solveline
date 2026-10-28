@@ -1,5 +1,4 @@
-import { Language } from '@solveline/shared';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
 import { useMe } from '../lib/me.ts';
@@ -77,7 +76,7 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
   useEffect(() => setLimit(PAGE), [scopeKey, filter, bookmarksOnly]);
 
   const failed = [problems, folders, collections].find((q) => q.isError);
-  if (failed) return <LoadError error={failed.error} onRetry={() => void failed.refetch()} />;
+  if (failed) return <LoadError error={failed.error} onRetry={() => failed.refetch()} />;
   if (!problems.data || !folders.data || !collections.data) return <ListSkeleton />;
 
   const all = problems.data;
@@ -88,13 +87,43 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
   const solved = progress.solved;
   const siblings = node && node.depth > 0 ? siblingNodes(tree, node) : null;
   const parent = node && node.depth > 0 ? findNode(tree, node.path.split('/').slice(0, -1).join('/')) : null;
-  const levelLabel = node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션';
+  const levelLabel = levelLabelOf(node);
 
   const q = filter.trim().toLowerCase();
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
   const unfiled = all.filter((p) => !p.folderId).length;
   const folderName = new Map(folders.data.map((f) => [f.id, f.name]));
   const title = scopeTitle(effective, folder, node);
+
+  let listBody: ReactNode;
+  if (all.length === 0)
+    listBody = (
+      <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel py-16 text-center">
+        <p className="text-[15px] font-semibold">아직 문제가 없어요</p>
+        {editor && <p className="text-[13px] text-dim">새 문제를 추가해 보세요.</p>}
+      </div>
+    );
+  else if (shown.length === 0)
+    listBody = (
+      <p className="rounded-lg border border-line bg-panel py-14 text-center text-[14px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
+    );
+  else
+    listBody = (
+      <>
+      <ol className="overflow-hidden rounded-lg border border-line bg-panel" aria-label="문제 목록">
+        {shown.slice(0, limit).map((p) => (
+          <ProblemRow
+            key={p.id}
+            p={p}
+            order={inCollection ? list.indexOf(p) + 1 : null}
+            folderLabel={effective.kind !== 'folder' && p.folderId ? folderName.get(p.folderId) : undefined}
+            onPick={onPick}
+          />
+        ))}
+      </ol>
+      {shown.length > limit && <MoreSentinel onMore={() => setLimit((n) => n + PAGE)} remaining={shown.length - limit} />}
+      </>
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -117,24 +146,7 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
               </button>
             </nav>
           )}
-          {inCollection && node && (
-            <nav className="mb-2 flex flex-wrap items-center gap-1 text-[13px] text-dim" aria-label="컬렉션 경로">
-              <button type="button" className="hover:text-text hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
-              {ancestors(node.path)
-                .slice(0, -1)
-                .map((path) => {
-                  const n = findNode(tree, path);
-                  return (
-                    <span key={path} className="flex items-center gap-1">
-                      <Icon name="right" size={12} className="text-faint" />
-                      <button type="button" className="hover:text-text hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
-                        {n?.name ?? path}
-                      </button>
-                    </span>
-                  );
-                })}
-            </nav>
-          )}
+          {inCollection && node && <CollectionPath node={node} tree={tree} onScope={onScope} />}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             {inCollection && node && (
               <button type="button" className="btn-quiet -ml-2 size-9 px-0" aria-label="돌아가기" title="돌아가기" onClick={() => onScope(parent ? scopeOfNode(parent) : { kind: 'collections' })}>
@@ -149,33 +161,13 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
               <div className="ml-auto flex items-center gap-1">
                 {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
                 {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'collections' })} />}
-                {siblings && (
-                  <>
-                    <button type="button" className="btn-ghost ml-1 size-9 px-0 disabled:opacity-40" aria-label={`이전 ${levelLabel}`} title={`이전 ${levelLabel}`} disabled={!siblings.previous} onClick={() => siblings.previous && onScope(scopeOfNode(siblings.previous))}><Icon name="left" /></button>
-                    <button type="button" className="btn-ghost size-9 px-0 disabled:opacity-40" aria-label={`다음 ${levelLabel}`} title={`다음 ${levelLabel}`} disabled={!siblings.next} onClick={() => siblings.next && onScope(scopeOfNode(siblings.next))}><Icon name="right" /></button>
-                  </>
-                )}
+                {siblings && <SiblingNav siblings={siblings} label={levelLabel} onScope={onScope} />}
               </div>
             )}
           </div>
           {collection?.description && <p className="mt-2 max-w-2xl text-[14px] leading-relaxed whitespace-pre-wrap text-dim">{collection.description}</p>}
           {!overview && list.length > 0 && signedIn && <Progress solved={solved} total={list.length} done={inCollection && progress.cleared} />}
-          {cards.length > 0 && (
-            <section className={overview ? 'mt-6' : 'mt-6 mb-2'} aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
-              <ul className={overview ? 'flex flex-col gap-8' : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'}>
-                {cards.map((n) => (
-                  <li key={n.path} className="min-w-0">
-                    <CollectionCard node={n} all={all} signedIn={signedIn} stretch={!overview || n.children.length === 0} onOpen={() => onScope(scopeOfNode(n))} />
-                    {overview && n.children.length > 0 && (
-                      <div className="mt-3 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">
-                        {n.children.map((child) => <CollectionCard key={child.path} node={child} all={all} signedIn={signedIn} compact onOpen={() => onScope(scopeOfNode(child))} />)}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          {cards.length > 0 && <CollectionCards cards={cards} all={all} signedIn={signedIn} overview={overview} onScope={onScope} />}
           {overview && cards.length === 0 && <p className="py-16 text-center text-[14px] text-faint">아직 컬렉션이 없어요</p>}
           {!overview && <>
           <div className="mt-6 mb-3 flex flex-wrap items-center gap-2">
@@ -200,34 +192,69 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
               </button>
             )}
           </div>
-          {all.length === 0 ? (
-            <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel py-16 text-center">
-              <p className="text-[15px] font-semibold">아직 문제가 없어요</p>
-              {editor && <p className="text-[13px] text-dim">새 문제를 추가해 보세요.</p>}
-            </div>
-          ) : shown.length === 0 ? (
-            <p className="rounded-lg border border-line bg-panel py-14 text-center text-[14px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
-          ) : (
-            <>
-            <ol className="overflow-hidden rounded-lg border border-line bg-panel" aria-label="문제 목록">
-              {shown.slice(0, limit).map((p) => (
-                <ProblemRow
-                  key={p.id}
-                  p={p}
-                  order={inCollection ? list.indexOf(p) + 1 : null}
-                  folderLabel={effective.kind !== 'folder' && p.folderId ? folderName.get(p.folderId) : undefined}
-                  onPick={onPick}
-                />
-              ))}
-            </ol>
-            {shown.length > limit && <MoreSentinel onMore={() => setLimit((n) => n + PAGE)} remaining={shown.length - limit} />}
-            </>
-          )}
+          {listBody}
           </>}
         </div>
         {footer}
       </div>
     </div>
+  );
+}
+
+
+function levelLabelOf(node: CollectionNode | null): string {
+  if (node?.name.includes('단계')) return '단계';
+  if (node?.name.includes('세트')) return '세트';
+  return '컬렉션';
+}
+
+function CollectionPath({ node, tree, onScope }: Readonly<{ node: CollectionNode; tree: CollectionNode[]; onScope: (s: Scope) => void }>) {
+  return (
+    <nav className="mb-2 flex flex-wrap items-center gap-1 text-[13px] text-dim" aria-label="컬렉션 경로">
+      <button type="button" className="hover:text-text hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
+      {ancestors(node.path)
+        .slice(0, -1)
+        .map((path) => {
+          const n = findNode(tree, path);
+          return (
+            <span key={path} className="flex items-center gap-1">
+              <Icon name="right" size={12} className="text-faint" />
+              <button type="button" className="hover:text-text hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
+                {n?.name ?? path}
+              </button>
+            </span>
+          );
+        })}
+    </nav>
+  );
+}
+
+function SiblingNav({ siblings, label, onScope }: Readonly<{ siblings: NonNullable<ReturnType<typeof siblingNodes>>; label: string; onScope: (s: Scope) => void }>) {
+  const go = (n: CollectionNode | null | undefined) => n && onScope(scopeOfNode(n));
+  return (
+    <>
+      <button type="button" className="btn-ghost ml-1 size-9 px-0 disabled:opacity-40" aria-label={`이전 ${label}`} title={`이전 ${label}`} disabled={!siblings.previous} onClick={() => go(siblings.previous)}><Icon name="left" /></button>
+      <button type="button" className="btn-ghost size-9 px-0 disabled:opacity-40" aria-label={`다음 ${label}`} title={`다음 ${label}`} disabled={!siblings.next} onClick={() => go(siblings.next)}><Icon name="right" /></button>
+    </>
+  );
+}
+
+function CollectionCards({ cards, all, signedIn, overview, onScope }: Readonly<{ cards: CollectionNode[]; all: ProblemSummary[]; signedIn: boolean; overview: boolean; onScope: (s: Scope) => void }>) {
+  return (
+    <section className={overview ? 'mt-6' : 'mt-6 mb-2'} aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
+      <ul className={overview ? 'flex flex-col gap-8' : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'}>
+        {cards.map((n) => (
+          <li key={n.path} className="min-w-0">
+            <CollectionCard node={n} all={all} signedIn={signedIn} stretch={!overview || n.children.length === 0} onOpen={() => onScope(scopeOfNode(n))} />
+            {overview && n.children.length > 0 && (
+              <div className="mt-3 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">
+                {n.children.map((child) => <CollectionCard key={child.path} node={child} all={all} signedIn={signedIn} compact onOpen={() => onScope(scopeOfNode(child))} />)}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -245,11 +272,11 @@ function Progress({ solved, total, done }: Readonly<{ solved: number; total: num
   );
 }
 
-function LoadError({ error, onRetry }: Readonly<{ error: unknown; onRetry: () => void }>) {
+function LoadError({ error, onRetry }: Readonly<{ error: unknown; onRetry: () => Promise<unknown> }>) {
   return (
     <div className="p-6 text-[13px]">
       <p className="font-semibold text-bad">{errMsg(error)}</p>
-      <button type="button" className="btn-ghost mt-3" onClick={onRetry}>
+      <button type="button" className="btn-ghost mt-3" onClick={() => void onRetry()}>
         다시 시도
       </button>
     </div>
@@ -261,13 +288,17 @@ function resolveScope(scope: Scope, folders: Folder[], collections: Collection[]
   const folder = scope.kind === 'folder' && scope.id ? folders.find((f) => f.id === scope.id) : undefined;
   const collection = scope.kind === 'collection' ? collections.find((c) => c.id === scope.id) : undefined;
   const tree = buildTree(collections);
-  const node = collection ? findNode(tree, collection.name) : scope.kind === 'group' ? findNode(tree, scope.path) : null;
+  let node: CollectionNode | null = null;
+  if (collection) node = findNode(tree, collection.name);
+  else if (scope.kind === 'group') node = findNode(tree, scope.path);
   const missing = (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) || (scope.kind === 'group' && !node);
   const effective: Scope = missing ? { kind: 'collections' } : scope;
   const overview = effective.kind === 'collections';
   const inCollection = effective.kind === 'collection' || effective.kind === 'group';
   // 첫 화면은 최상위 컬렉션, 컬렉션 안에서는 그 하위를 보여 준다.
-  const cards = overview ? tree : inCollection && node ? node.children : [];
+  let cards: CollectionNode[] = [];
+  if (overview) cards = tree;
+  else if (inCollection && node) cards = node.children;
   return { effective, folder, collection, node, tree, overview, inCollection, cards };
 }
 
@@ -433,16 +464,13 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
               ['collection', '컬렉션'],
             ] as const
           ).map(([k, label]) => (
-            <button
+            <label
               key={k}
-              type="button"
-              role="radio"
-              aria-checked={kind === k}
-              onClick={() => setKind(k)}
-              className={`h-9 rounded text-[13px] font-semibold ${kind === k ? 'bg-panel text-text shadow-sm' : 'text-dim'}`}
+              className={`flex h-9 cursor-pointer items-center justify-center rounded text-[13px] font-semibold has-focus-visible:outline-2 has-focus-visible:outline-accent ${kind === k ? 'bg-panel text-text shadow-sm' : 'text-dim'}`}
             >
+              <input type="radio" name="quick-create-kind" value={k} checked={kind === k} onChange={() => setKind(k)} className="sr-only" />
               {label}
-            </button>
+            </label>
           ))}
         </div>
       )}
@@ -479,7 +507,7 @@ function SectionHeader({ kind }: Readonly<{ kind: 'folder' | 'collection' }>) {
       setOpen(false);
     },
   });
-  const submit = (e: FormEvent) => {
+  const submit = (e: SubmitEvent) => {
     e.preventDefault();
     if (name.trim()) create.mutate();
   };
@@ -610,7 +638,7 @@ function MoreSentinel({ onMore, remaining }: Readonly<{ onMore: () => void; rema
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el || !('IntersectionObserver' in window)) return;
+    if (!el || !('IntersectionObserver' in globalThis)) return;
     const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && onMore(), { rootMargin: '600px' });
     io.observe(el);
     return () => io.disconnect();

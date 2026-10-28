@@ -79,7 +79,7 @@ export function LoginScreen() {
           </p>
           <div className="my-6 flex items-center gap-3 text-[12px] text-faint" aria-hidden>
             <span className="h-px flex-1 bg-line" />
-            또는
+            <span>또는</span>
             <span className="h-px flex-1 bg-line" />
           </div>
           <button type="button" disabled={pending || closed} onClick={temporaryLogin} className="btn-ghost min-h-12 w-full text-[15px]">

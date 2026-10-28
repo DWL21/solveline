@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Language, ProblemMode, Session } from '@solveline/shared';
 import { ApiError, api, qk } from './lib/api.ts';
-import { useRoute, type Scope } from './lib/route.ts';
+import { useRoute, type Route, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
 import { LegalFooter, PrivacyPage, TermsPage } from './components/Legal.tsx';
 import { SignupScreen } from './components/SignupScreen.tsx';
@@ -121,51 +121,18 @@ function Shell() {
       </div>
     );
 
-  const ide = route.kind === 'problem';
-  const navLink = (active: boolean) =>
-    `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
-
   return (
     <div className="flex h-full flex-col bg-ink">
-      <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
-        <a
-          href="#/"
-          className="-ml-1 flex items-center gap-2 rounded-md px-1 py-1"
-          title="문제 선택 화면으로"
-          onClick={(e) => {
-            e.preventDefault();
-            setHomeKey((k) => k + 1);
-            go({ kind: 'home', scope: { kind: 'collections' } });
-          }}
-        >
-          <img src="/icon.svg" alt="" className="size-6" />
-          <span className="text-[16px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
-        </a>
-        {ide ? (
-          <button type="button" className="btn-quiet ml-1 gap-1 px-2" onClick={() => go({ kind: 'home', scope: lastScope })}>
-            <Icon name="left" size={14} /> 문제 목록
-          </button>
-        ) : (
-          <nav className="ml-2 flex h-full items-center gap-4 max-sm:hidden" aria-label="주 메뉴">
-            <a href="#/" className={navLink(route.kind === 'home')} aria-current={route.kind === 'home' ? 'page' : undefined}>
-              문제
-            </a>
-            {me && (
-              <a href="#/submissions" className={navLink(route.kind === 'submissions')} aria-current={route.kind === 'submissions' ? 'page' : undefined}>
-                제출 기록
-              </a>
-            )}
-          </nav>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-          {me && (ide ? (
-            <a href="#/submissions" className="btn-quiet px-2 text-[13px]">제출 기록</a>
-          ) : (
-            <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
-          ))}
-          <UserMenu onLogout={() => logout.mutate()} />
-        </div>
-      </header>
+      <AppHeader
+        route={route}
+        signedIn={!!me}
+        onLogo={() => {
+          setHomeKey((k) => k + 1);
+          go({ kind: 'home', scope: { kind: 'collections' } });
+        }}
+        onList={() => go({ kind: 'home', scope: lastScope })}
+        onLogout={() => logout.mutate()}
+      />
 
       {page}
 
@@ -180,6 +147,55 @@ function Shell() {
         />
       )}
     </div>
+  );
+}
+
+
+const navLink = (active: boolean) =>
+  `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
+
+/** 상단바: 로고, 주 메뉴(문제 화면에서는 목록으로 돌아가기), 제출 기록, 계정 */
+function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ route: Route; signedIn: boolean; onLogo: () => void; onList: () => void; onLogout: () => void }>) {
+  const ide = route.kind === 'problem';
+  return (
+    <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
+      <a
+        href="#/"
+        className="-ml-1 flex items-center gap-2 rounded-md px-1 py-1"
+        title="문제 선택 화면으로"
+        onClick={(e) => {
+          e.preventDefault();
+          onLogo();
+        }}
+      >
+        <img src="/icon.svg" alt="" className="size-6" />
+        <span className="text-[16px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
+      </a>
+      {ide ? (
+        <button type="button" className="btn-quiet ml-1 gap-1 px-2" onClick={onList}>
+          <Icon name="left" size={14} /> 문제 목록
+        </button>
+      ) : (
+        <nav className="ml-2 flex h-full items-center gap-4 max-sm:hidden" aria-label="주 메뉴">
+          <a href="#/" className={navLink(route.kind === 'home')} aria-current={route.kind === 'home' ? 'page' : undefined}>
+            문제
+          </a>
+          {signedIn && (
+            <a href="#/submissions" className={navLink(route.kind === 'submissions')} aria-current={route.kind === 'submissions' ? 'page' : undefined}>
+              제출 기록
+            </a>
+          )}
+        </nav>
+      )}
+      <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+        {signedIn && (ide ? (
+          <a href="#/submissions" className="btn-quiet px-2 text-[13px]">제출 기록</a>
+        ) : (
+          <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
+        ))}
+        <UserMenu onLogout={onLogout} />
+      </div>
+    </header>
   );
 }
 
