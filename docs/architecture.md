@@ -31,7 +31,7 @@ api는 runner에 직접 닿지 않습니다(sandbox 네트워크 밖). 실행은
 judge ─서명 POST /api/internal/judge/results─▶ api: 결과·점수·마지막 제출 기록(같은 결과는 한 번만 반영)
 ```
 
-`main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/api.env`·`judge.env` 기록 → web 빌드 → API·judge·runner·게이트웨이 `docker compose up --build` → Pages 업로드 → 공개 주소 헬스 체크. PR의 `check`, `docker`, `secret-scan`은 기존처럼 GitHub-hosted에서 실행합니다.
+`main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/judge.env` 기록 → web·Worker 빌드 → judge·runner·게이트웨이 `docker compose up --build` → Pages 비밀·D1 마이그레이션 → (롤백 기간 뒤 한 번) 예전 사용자 데이터 정리 → Pages 업로드 → 공개 주소 헬스 체크. PR의 `check`, `docker`, `secret-scan`은 기존처럼 GitHub-hosted에서 실행합니다.
 
 배포 준비·전환·롤백은 [Pages 배포](pages-deployment.md)를 참고하세요.
 
