@@ -184,7 +184,7 @@ function UserList({ selected, onSelect }: { selected: string | null; onSelect: (
 function Badges({ user }: { user: AdminUser }) {
   return (
     <span className="flex shrink-0 gap-1">
-      {user.editor && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-bold text-accent">편집</span>}
+      {user.editor && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-bold text-accent-text">편집</span>}
     </span>
   );
 }

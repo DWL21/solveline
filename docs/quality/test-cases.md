@@ -52,7 +52,7 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 | TC-21 | R8 | 휴대폰에서 코드 탭으로 실행한다 | 상단 메뉴가 숨고 결과 탭으로 넘어간다 | 기기 호환 | `ui/responsive.spec.ts` |
 | TC-22 | R8 | 휴대폰에서 주요 화면을 연다 | 가로로 넘치지 않는다 | 기기 호환 | `ui/responsive.spec.ts` |
 | TC-23 | R8 | 태블릿에서 문제 화면을 연다 | 탭 없이 좌우로 나눠 보인다 | 기기 호환 | `ui/responsive.spec.ts` |
-| TC-24 | R9 | 첫 화면·로그인·약관을 axe로 검사한다 | critical 위반 0, 나머지는 리포트에 남긴다 | 접근성 | `ui/a11y.spec.ts` |
+| TC-24 | R9 | 첫 화면·로그인·약관을 axe로 검사한다 | critical·serious 위반 0, 나머지는 리포트에 남긴다 | 접근성 | `ui/a11y.spec.ts` |
 | TC-25 | R10 | 비회원 조회 API를 호출한다 | 모든 응답이 공유 Zod 계약과 맞는다 | 계약 테스트 | `api/contract.spec.ts` |
 | TC-26 | R10 | 없는 경로·없는 문제·잘못된 본문을 보낸다 | `{ error: { code, message } }`와 401·404·400 | 부정 테스트 | `api/contract.spec.ts` |
 | TC-27 | R10 | API 응답 헤더를 본다 | nosniff·DENY·frame-ancestors 'none' | 보안 관점 | `api/contract.spec.ts` |

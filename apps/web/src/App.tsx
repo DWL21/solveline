@@ -115,7 +115,7 @@ function Shell() {
           </button>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          {me && <a href="#/submissions" className={`btn-quiet ${route.kind === 'submissions' ? 'text-accent' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>}
+          {me && <a href="#/submissions" className={`btn-quiet ${route.kind === 'submissions' ? 'text-accent-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>}
           <UserMenu onLogout={() => logout.mutate()} />
         </div>
       </header>
@@ -192,7 +192,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
             <p className="truncate text-[13px] font-semibold">{me.name || me.email}</p>
             <p className="truncate text-[12px] text-dim">{temporary ? '임시 계정' : me.email}</p>
-            {me.editor && <p className="mt-1 text-[11.5px] font-bold text-accent">편집 권한</p>}
+            {me.editor && <p className="mt-1 text-[11.5px] font-bold text-accent-text">편집 권한</p>}
           </div>
           <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-raised" onClick={onLogout}>
             로그아웃

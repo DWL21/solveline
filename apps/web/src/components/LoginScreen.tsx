@@ -71,7 +71,7 @@ export function LoginScreen() {
             ) : (
               <p className="mt-4 text-center text-[12.5px] text-dim">
                 처음이신가요?{' '}
-                <button type="button" className="font-semibold text-accent hover:underline" onClick={startGoogleLogin}>Google로 회원가입</button>
+                <button type="button" className="font-semibold text-accent-text hover:underline" onClick={startGoogleLogin}>Google로 회원가입</button>
               </p>
             )}
             <p className="mt-4 text-center">
