@@ -151,6 +151,30 @@ describe('Worker API(D1·R2 바인딩·judge)', () => {
   });
 });
 
+describe('D1 매일 정리 SQL(백업 워크플로가 실행)', () => {
+  it('지난 세션·요청 제한과 30일 지난 끝난 제출만 지운다', () => {
+    const db = d1FromSchemaFile();
+    const now = Date.now();
+    const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+    db.prepare("INSERT INTO users (id, google_sub, email, terms_version, privacy_version, agreed_at, created_at, last_login_at) VALUES ('u', 's', 'e', 't', 'p', ?, ?, ?)").run(iso(0), iso(0), iso(0));
+    const session = db.prepare('INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)');
+    session.run('expired', 'u', now - 60_000, iso(0));
+    session.run('valid', 'u', now + 3_600_000, iso(0));
+    const limit = db.prepare('INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)');
+    limit.run('run:old', now - 1000);
+    limit.run('run:now', now + 60_000);
+    const sub = db.prepare("INSERT INTO submissions (id, user_id, kind, language, mode, code, case_ids, priority, status, created_at, finished_at) VALUES (?, 'u', 'run', 'python', 'function', '', '[]', 0, ?, ?, ?)");
+    const day = 86_400_000;
+    sub.run('old-done', 'done', iso(31 * day), iso(31 * day));
+    sub.run('old-queued', 'queued', iso(31 * day), null);
+    sub.run('recent-done', 'done', iso(day), iso(day));
+    db.exec(readFileSync(new URL('../d1/cleanup.sql', import.meta.url), 'utf8'));
+    expect(db.prepare('SELECT id FROM sessions ORDER BY id').pluck().all()).toEqual(['valid']);
+    expect(db.prepare('SELECT key FROM rate_limits').pluck().all()).toEqual(['run:now']);
+    expect(db.prepare('SELECT id FROM submissions ORDER BY id').pluck().all()).toEqual(['old-queued', 'recent-done']);
+  });
+});
+
 describe('SQL 요청 제한', () => {
   it('창이 지나면 다시 세고, 지난 행을 정리한다', async () => {
     const sql = d1Sql(fakeD1(d1FromSchemaFile()));
