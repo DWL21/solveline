@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { lastSubmissionOf, type Language, type Problem, type ProblemInput, type ProblemMode, type ProblemSummary, type TestCase } from '@solveline/shared';
+import { lastSubmissionOf, type Language, type Problem, type ProblemInput, type ProblemMode, type ProblemSummary, type Submission, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
@@ -54,6 +54,53 @@ export function Workspace({ problemId, onDeleted, onNext, onList }: { problemId:
   return <Editor key={problemId} problem={q.data} onDeleted={onDeleted} onNext={onNext} onList={onList} />;
 }
 
+/** 끝난 제출을 결과 패널 상태로 바꾼다 */
+function runStateOf(s: Submission, submit: boolean, cases: TestCase[], d: ProblemInput): RunState {
+  const done = (cancelled?: true): RunState => ({ kind: 'done', result: s.result!, cases, mode: d.mode, limitMs: d.timeLimitMs, ...(cancelled && { cancelled }) });
+  if (s.status === 'cancelled') return submit || !s.result ? { kind: 'cancelled', submit } : done(true);
+  if (s.status === 'error' || !s.result) return { kind: 'error', message: s.error ?? '실행하지 못했어요' };
+  return submit ? { kind: 'graded', result: s.result, score: s.score ?? 0 } : done();
+}
+
+/** 휴대폰 폭의 화면 탭(문제·코드·결과)과, 코드를 쓰는 동안 주변 막대를 숨기는 표시를 관리한다. */
+function usePanes(narrow: boolean) {
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
+  const [pane, setPaneState] = useState<'problem' | 'code' | 'result'>('problem');
+  const paneRef = useRef(pane);
+  const [unseen, setUnseen] = useState(false);
+  const setPane = useCallback((p: 'problem' | 'code' | 'result') => {
+    paneRef.current = p;
+    setPaneState(p);
+    if (p === 'result') setUnseen(false);
+  }, []);
+  /** 결과를 보여 줄 때: 휴대폰이면 결과 탭으로 */
+  const showResult = useCallback(() => {
+    if (narrowRef.current) setPane('result');
+  }, [setPane]);
+  /** 다른 탭을 보는 중에 결과가 나오면 새 결과 표시 */
+  const markUnseenIfHidden = useCallback(() => {
+    if (narrowRef.current && paneRef.current !== 'result') setUnseen(true);
+  }, []);
+  // 휴대폰 코드·결과 탭: 앱 상단바·문제 제목 줄을 숨겨 에디터·결과를 넓게(문제 탭으로 가면 다시 보인다)
+  const codeFocus = narrow && pane !== 'problem';
+  // 코드를 쓰는 중(에디터 초점 = 화상 키보드 열림): 탭·실행 바까지 숨겨 코드만 보여 준다
+  const [typingRaw, setTyping] = useState(false);
+  const typing = narrow && pane === 'code' && typingRaw;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (codeFocus) root.dataset.codeFocus = '';
+    else delete root.dataset.codeFocus;
+    if (typing) root.dataset.typing = '';
+    else delete root.dataset.typing;
+    return () => {
+      delete root.dataset.codeFocus;
+      delete root.dataset.typing;
+    };
+  }, [codeFocus, typing]);
+  return { pane, setPane, unseen, showResult, markUnseenIfHidden, codeFocus, setTyping };
+}
+
 function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
   const qc = useQueryClient();
   // 비회원: 문제를 볼 수만 있다(코드 작성·실행·저장은 로그인 후)
@@ -76,36 +123,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const [resets, setResets] = useState(0);
   // 휴대폰 폭: 문제·코드·결과를 탭으로 나눠 한 번에 하나만 크게 보여 준다
   const narrow = useNarrow();
-  const narrowRef = useRef(narrow);
-  narrowRef.current = narrow;
-  const [pane, setPaneState] = useState<'problem' | 'code' | 'result'>('problem');
-  const paneRef = useRef(pane);
-  const [unseen, setUnseen] = useState(false);
-  const setPane = useCallback((p: 'problem' | 'code' | 'result') => {
-    paneRef.current = p;
-    setPaneState(p);
-    if (p === 'result') setUnseen(false);
-  }, []);
-  /** 결과를 보여 줄 때: 휴대폰이면 결과 탭으로 */
-  const showResult = useCallback(() => {
-    if (narrowRef.current) setPane('result');
-  }, [setPane]);
-  // 휴대폰 코드·결과 탭: 앱 상단바·문제 제목 줄을 숨겨 에디터·결과를 넓게(문제 탭으로 가면 다시 보인다)
-  const codeFocus = narrow && pane !== 'problem';
-  // 코드를 쓰는 중(에디터 초점 = 화상 키보드 열림): 탭·실행 바까지 숨겨 코드만 보여 준다
-  const [typingRaw, setTyping] = useState(false);
-  const typing = narrow && pane === 'code' && typingRaw;
-  useEffect(() => {
-    const root = document.documentElement;
-    if (codeFocus) root.dataset.codeFocus = '';
-    else delete root.dataset.codeFocus;
-    if (typing) root.dataset.typing = '';
-    else delete root.dataset.typing;
-    return () => {
-      delete root.dataset.codeFocus;
-      delete root.dataset.typing;
-    };
-  }, [codeFocus, typing]);
+  const { pane, setPane, unseen, showResult, markUnseenIfHidden, codeFocus, setTyping } = usePanes(narrow);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
@@ -148,20 +166,15 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     onSettled: () => {
       current.current = { id: null, stopping: false };
       setStopping(false);
-      if (narrowRef.current && paneRef.current !== 'result') setUnseen(true);
+      markUnseenIfHidden();
     },
     onMutate: ({ submit }) => {
       setRun({ kind: 'running', submit, ahead: null });
       showResult();
     },
     onSuccess: (s, { cases, submit }) => {
-      if (s.status === 'cancelled') {
-        if (submit || !s.result) return setRun({ kind: 'cancelled', submit });
-        return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs, cancelled: true });
-      }
-      if (s.status === 'error' || !s.result) return setRun({ kind: 'error', message: s.error ?? '실행하지 못했어요' });
-      if (!submit) return setRun({ kind: 'done', result: s.result, cases, mode: draftRef.current.mode, limitMs: draftRef.current.timeLimitMs });
-      setRun({ kind: 'graded', result: s.result, score: s.score ?? 0 });
+      setRun(runStateOf(s, submit, cases, draftRef.current));
+      if (!submit || s.status === 'cancelled' || s.status === 'error' || !s.result) return;
       void qc.invalidateQueries({ queryKey: ['submission-history'] });
       if (s.score === 100) {
         solve.markSolved();

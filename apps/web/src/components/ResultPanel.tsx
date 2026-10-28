@@ -56,7 +56,7 @@ export function ResultPanel({ state }: { state: RunState }) {
   if (state.kind === 'running')
     return (
       <div className="flex items-center gap-2.5 p-4 text-[13px] text-dim" role="status" aria-live="polite">
-        <Spinner size={16} className="text-accent" />
+        <Spinner size={16} className="text-accent-text" />
         {state.ahead ? (
           <span>
             대기 중 <span className="text-faint">· 앞에 {state.ahead}개</span>

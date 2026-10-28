@@ -8,12 +8,31 @@ import { Avatar } from './Avatar.tsx';
 
 type Agree = { age: boolean; terms: boolean; privacy: boolean };
 
+const apiMessage = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
+const hasCode = (e: unknown, code: string) => e instanceof ApiError && e.code === code;
+
+function AgreeItem({ name, label, href, agree, onChange }: { name: keyof Agree; label: string; href?: string; agree: Agree; onChange: (a: Agree) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 hover:bg-raised">
+      <input type="checkbox" className="size-4 accent-accent" checked={agree[name]} onChange={(e) => onChange({ ...agree, [name]: e.target.checked })} />
+      <span className="flex-1 text-[13.5px]">
+        <span className="font-semibold text-accent-text">[필수]</span> {label}
+      </span>
+      {href && (
+        <a href={href} target="_blank" rel="noreferrer" className="text-[12px] text-faint underline hover:text-dim" onClick={(e) => e.stopPropagation()}>
+          보기
+        </a>
+      )}
+    </label>
+  );
+}
+
 /** 회원가입: Google 인증을 마친 새 계정이 필수 항목에 동의하면 가입된다. */
 export function SignupScreen() {
   const qc = useQueryClient();
   const pending = useQuery({ queryKey: qk.signup, queryFn: api.signupPending, retry: false, refetchOnWindowFocus: true });
   const [agree, setAgree] = useState<Agree>({ age: false, terms: false, privacy: false });
-  const closed = pending.error instanceof ApiError && pending.error.code === 'signup_closed';
+  const closed = hasCode(pending.error, 'signup_closed');
   const all = agree.age && agree.terms && agree.privacy;
 
   const signup = useMutation({
@@ -27,20 +46,6 @@ export function SignupScreen() {
 
   if (pending.isPending) return <BootScreen />;
 
-  const item = (key: keyof Agree, label: string, href?: string) => (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 hover:bg-raised">
-      <input type="checkbox" className="size-4 accent-accent" checked={agree[key]} onChange={(e) => setAgree({ ...agree, [key]: e.target.checked })} />
-      <span className="flex-1 text-[13.5px]">
-        <span className="font-semibold text-accent">[필수]</span> {label}
-      </span>
-      {href && (
-        <a href={href} target="_blank" rel="noreferrer" className="text-[12px] text-faint underline hover:text-dim" onClick={(e) => e.stopPropagation()}>
-          보기
-        </a>
-      )}
-    </label>
-  );
-
   return (
     <div className="flex min-h-full flex-col bg-ink">
       <div className="flex flex-1 items-center justify-center px-4 py-10">
@@ -53,9 +58,7 @@ export function SignupScreen() {
             <h1 className="text-[17px] font-bold">회원가입</h1>
             {pending.isError ? (
               <>
-                <p className="mt-3 text-[13px] text-dim">
-                  {pending.error instanceof ApiError ? pending.error.message : '가입 정보를 불러오지 못했어요.'}
-                </p>
+                <p className="mt-3 text-[13px] text-dim">{apiMessage(pending.error, '가입 정보를 불러오지 못했어요.')}</p>
                 <button type="button" className="btn-primary mt-4 min-h-11 w-full" onClick={closed ? () => location.assign('/') : startGoogleLogin}>
                   {closed ? '문제 둘러보기' : 'Google로 다시 시작'}
                 </button>
@@ -81,9 +84,9 @@ export function SignupScreen() {
                     <span className="text-[14px] font-bold">전체 동의</span>
                   </label>
                   <div className="p-2">
-                    {item('age', '만 14세 이상입니다')}
-                    {item('terms', '이용약관 동의', '/terms')}
-                    {item('privacy', '개인정보 수집·이용 동의', '/privacy')}
+                    <AgreeItem name="age" label="만 14세 이상입니다" agree={agree} onChange={setAgree} />
+                    <AgreeItem name="terms" label="이용약관 동의" href="/terms" agree={agree} onChange={setAgree} />
+                    <AgreeItem name="privacy" label="개인정보 수집·이용 동의" href="/privacy" agree={agree} onChange={setAgree} />
                   </div>
                 </div>
 
@@ -106,10 +109,10 @@ export function SignupScreen() {
 
                 {signup.isError && (
                   <p role="alert" className="mt-3 text-[13px] font-semibold text-bad">
-                    {signup.error instanceof ApiError ? signup.error.message : '가입하지 못했어요'}
+                    {apiMessage(signup.error, '가입하지 못했어요')}
                   </p>
                 )}
-                <button type="button" className="btn-primary mt-4 min-h-11 w-full text-[14px]" disabled={!all || signup.isPending || (signup.error instanceof ApiError && signup.error.code === 'signup_closed')} onClick={() => signup.mutate()}>
+                <button type="button" className="btn-primary mt-4 min-h-11 w-full text-[14px]" disabled={!all || signup.isPending || hasCode(signup.error, 'signup_closed')} onClick={() => signup.mutate()}>
                   {signup.isPending ? <Spinner size={16} label="가입하는 중" /> : '동의하고 가입하기'}
                 </button>
                 <button type="button" className="btn-quiet mt-2 w-full" disabled={cancel.isPending} onClick={() => cancel.mutate()}>

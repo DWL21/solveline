@@ -12,10 +12,11 @@
   --color-line: #2f4256;
   --color-line-strong: #3d5468;
   --color-text: #e6edf3;
-  --color-dim: #98a8b9;
-  --color-faint: #687c90;
-  --color-accent: #0078ff;
-  --color-accent-hover: #2b8cff;
+  --color-dim: #aab9c9;
+  --color-faint: #90a3b6;
+  --color-accent: #0066e0;
+  --color-accent-hover: #1a74e8;
+  --color-accent-text: #5aaeff;
   --color-sky: #44c4f5;
   --color-ok: #3ec27d;
   --color-bad: #ff6b6b;

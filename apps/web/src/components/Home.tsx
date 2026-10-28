@@ -75,30 +75,11 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   useEffect(() => setLimit(PAGE), [scopeKey, filter, bookmarksOnly]);
 
   const failed = [problems, folders, collections].find((q) => q.isError);
-  if (failed)
-    return (
-      <div className="p-6 text-[13px]">
-        <p className="font-semibold text-bad">{errMsg(failed.error)}</p>
-        <button type="button" className="btn-ghost mt-3" onClick={() => void failed.refetch()}>
-          다시 시도
-        </button>
-      </div>
-    );
+  if (failed) return <LoadError error={failed.error} onRetry={() => void failed.refetch()} />;
   if (!problems.data || !folders.data || !collections.data) return <ListSkeleton />;
 
   const all = problems.data;
-  const folder = scope.kind === 'folder' && scope.id ? folders.data.find((f) => f.id === scope.id) : undefined;
-  const collection = scope.kind === 'collection' ? collections.data.find((c) => c.id === scope.id) : undefined;
-  const tree = buildTree(collections.data);
-  const node = collection ? findNode(tree, collection.name) : scope.kind === 'group' ? findNode(tree, scope.path) : null;
-
-  // 지워진 폴더·컬렉션 주소로 들어오면 컬렉션 선택 화면을 보여 준다
-  const effective: Scope =
-    (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) || (scope.kind === 'group' && !node) ? { kind: 'collections' } : scope;
-  const overview = effective.kind === 'collections';
-  const inCollection = effective.kind === 'collection' || effective.kind === 'group';
-  // 첫 화면은 최상위 컬렉션, 컬렉션 안에서는 그 하위를 보여 준다.
-  const cards = overview ? tree : inCollection && node ? node.children : [];
+  const { effective, folder, collection, node, overview, inCollection, cards, tree } = resolveScope(scope, folders.data, collections.data);
 
   const list = scopeList(effective, all, collections.data);
   const progress = collectionProgress(list);
@@ -111,7 +92,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
   const unfiled = all.filter((p) => !p.folderId).length;
   const folderName = new Map(folders.data.map((f) => [f.id, f.name]));
-  const title = overview ? '컬렉션' : effective.kind === 'all' ? '전체 문제' : effective.kind === 'bookmarks' ? '북마크' : effective.kind === 'folder' ? (folder?.name ?? '폴더 없음') : (node?.name ?? '');
+  const title = scopeTitle(effective, folder, node);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -212,29 +193,18 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               <p className="text-[13px] text-dim">{editor ? '문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.' : '문제가 등록되면 여기에 보여요.'}</p>
             </div>
           ) : shown.length === 0 ? (
-            <p className="py-12 text-center text-[13px] text-faint">
-              {q ? '검색 결과가 없어요' : bookmarksOnly || effective.kind === 'bookmarks' ? (signedIn ? '북마크한 문제가 없어요' : '로그인하면 북마크를 사용할 수 있어요') : inCollection ? (cards.length ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요') : '이 폴더에 문제가 없어요'}
-            </p>
+            <p className="py-12 text-center text-[13px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
           ) : (
             <>
             <ol className="overflow-hidden rounded-lg border border-line bg-panel">
               {shown.slice(0, limit).map((p) => (
-                <li key={p.id} className="flex items-center border-b border-line last:border-b-0">
-                  <BookmarkStar id={p.id} bookmarked={p.bookmarked} />
-                  <button
-                    type="button"
-                    onClick={() => onPick(p.id)}
-                    className={`flex min-w-0 flex-1 items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${p.lastSubmission?.score === 100 ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
-                  >
-                    {inCollection && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{list.indexOf(p) + 1}</span>}
-                    <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${p.lastSubmission?.score === 100 ? 'text-ok' : ''}`}>{p.title}</span>
-                    <SolvedMark p={p} />
-                    {effective.kind !== 'folder' && p.folderId && (
-                      <span className="hidden shrink-0 rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-dim sm:inline">{folderName.get(p.folderId)}</span>
-                    )}
-                    <span className="shrink-0 text-[11.5px] text-faint" aria-label="지원 언어">{Language.options.map((language) => language === 'java' ? 'Java' : 'Python').join(' · ')}</span>
-                  </button>
-                </li>
+                <ProblemRow
+                  key={p.id}
+                  p={p}
+                  order={inCollection ? list.indexOf(p) + 1 : null}
+                  folderLabel={effective.kind !== 'folder' && p.folderId ? folderName.get(p.folderId) : undefined}
+                  onPick={onPick}
+                />
               ))}
             </ol>
             {shown.length > limit && <MoreSentinel onMore={() => setLimit((n) => n + PAGE)} remaining={shown.length - limit} />}
@@ -244,6 +214,67 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
         </div>
       </div>
     </div>
+  );
+}
+
+function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  return (
+    <div className="p-6 text-[13px]">
+      <p className="font-semibold text-bad">{errMsg(error)}</p>
+      <button type="button" className="btn-ghost mt-3" onClick={onRetry}>
+        다시 시도
+      </button>
+    </div>
+  );
+}
+
+/** 주소의 범위를 실제 데이터에 맞춘다. 지워진 폴더·컬렉션 주소로 들어오면 컬렉션 선택 화면을 보여 준다. */
+function resolveScope(scope: Scope, folders: Folder[], collections: Collection[]) {
+  const folder = scope.kind === 'folder' && scope.id ? folders.find((f) => f.id === scope.id) : undefined;
+  const collection = scope.kind === 'collection' ? collections.find((c) => c.id === scope.id) : undefined;
+  const tree = buildTree(collections);
+  const node = collection ? findNode(tree, collection.name) : scope.kind === 'group' ? findNode(tree, scope.path) : null;
+  const missing = (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) || (scope.kind === 'group' && !node);
+  const effective: Scope = missing ? { kind: 'collections' } : scope;
+  const overview = effective.kind === 'collections';
+  const inCollection = effective.kind === 'collection' || effective.kind === 'group';
+  // 첫 화면은 최상위 컬렉션, 컬렉션 안에서는 그 하위를 보여 준다.
+  const cards = overview ? tree : inCollection && node ? node.children : [];
+  return { effective, folder, collection, node, tree, overview, inCollection, cards };
+}
+
+function scopeTitle(scope: Scope, folder: Folder | undefined, node: CollectionNode | null): string {
+  if (scope.kind === 'collections') return '컬렉션';
+  if (scope.kind === 'all') return '전체 문제';
+  if (scope.kind === 'bookmarks') return '북마크';
+  if (scope.kind === 'folder') return folder?.name ?? '폴더 없음';
+  return node?.name ?? '';
+}
+
+function emptyMessage({ q, bookmarksOnly, kind, signedIn, inCollection, hasCards }: { q: string; bookmarksOnly: boolean; kind: Scope['kind']; signedIn: boolean; inCollection: boolean; hasCards: boolean }): string {
+  if (q) return '검색 결과가 없어요';
+  if (bookmarksOnly || kind === 'bookmarks') return signedIn ? '북마크한 문제가 없어요' : '로그인하면 북마크를 사용할 수 있어요';
+  if (inCollection) return hasCards ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요';
+  return '이 폴더에 문제가 없어요';
+}
+
+function ProblemRow({ p, order, folderLabel, onPick }: { p: ProblemSummary; order: number | null; folderLabel: string | undefined; onPick: (id: string) => void }) {
+  const solved = p.lastSubmission?.score === 100;
+  return (
+    <li className="flex items-center border-b border-line last:border-b-0">
+      <BookmarkStar id={p.id} bookmarked={p.bookmarked} />
+      <button
+        type="button"
+        onClick={() => onPick(p.id)}
+        className={`flex min-w-0 flex-1 items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${solved ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
+      >
+        {order !== null && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{order}</span>}
+        <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${solved ? 'text-ok' : ''}`}>{p.title}</span>
+        <SolvedMark p={p} />
+        {folderLabel && <span className="hidden shrink-0 rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-dim sm:inline">{folderLabel}</span>}
+        <span className="shrink-0 text-[11.5px] text-faint" aria-label="지원 언어">{Language.options.map((language) => (language === 'java' ? 'Java' : 'Python')).join(' · ')}</span>
+      </button>
+    </li>
   );
 }
 
