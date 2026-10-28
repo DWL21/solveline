@@ -8,7 +8,7 @@
     "dev:runner": "docker build -q -f docker/runner.Dockerfile -t solveline-runner . && docker run --rm -p 127.0.0.1:8000:8000 --read-only --tmpfs /tmp:size=512m,mode=1777 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --cap-add KILL --security-opt no-new-privileges:true solveline-runner",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --if-present test && node --test scripts/*.test.mjs e2e/report/*.test.mjs",
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm -r --if-present build && pnpm --filter @solveline/api build:worker",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

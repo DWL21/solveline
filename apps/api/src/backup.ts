@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Db } from './db.ts';
+import type { Db } from './db-node.ts';
 import type { SubmissionStore } from './submissions.ts';
 import { log } from './redact.ts';
 

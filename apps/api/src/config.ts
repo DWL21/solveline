@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { z } from 'zod';
 
 // 빈 문자열은 "미설정"으로 본다 (.env.example을 복사하면 빈 값이 남는다).
@@ -93,7 +92,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   return {
     port: e.PORT,
-    dataDir: resolve(e.DATA_DIR ?? './data'),
+    // 상대 경로는 main.ts가 절대 경로로 바꾼다(Worker에는 파일 시스템이 없다)
+    dataDir: e.DATA_DIR ?? './data',
     production,
     judgeUrl: (e.JUDGE_URL ?? 'http://127.0.0.1:8790').replace(/\/$/, ''),
     judgeSecret: e.JUDGE_SECRET ?? cryptoRandom(),

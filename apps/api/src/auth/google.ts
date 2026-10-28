@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomToken, sha256Base64url } from '../crypto.ts';
 import type { GoogleProfile } from '../db.ts';
 
 /** Google OAuth 2.0 (Authorization Code + PKCE). 서버가 code를 토큰으로 바꾸고 사용자 정보를 읽는다. */
@@ -9,8 +9,8 @@ export type GoogleClient = {
   exchange(params: { code: string; verifier: string; redirectUri: string }): Promise<GoogleProfile>;
 };
 
-export const newVerifier = () => randomBytes(32).toString('base64url');
-export const challengeOf = (verifier: string) => createHash('sha256').update(verifier).digest('base64url');
+export const newVerifier = () => randomToken(32);
+export const challengeOf = (verifier: string) => sha256Base64url(verifier);
 
 export function googleClient(clientId: string, clientSecret: string, fetchImpl: typeof fetch = fetch): GoogleClient {
   return {

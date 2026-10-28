@@ -63,6 +63,13 @@ Worker: D1에 결과·점수·마지막 제출 기록(같은 제출을 두 번 �
 1. **저장소 비동기화**: 모든 저장소가 `Sql` 인터페이스(`all`·`get`·`run`·`batch`)를 쓴다. better-sqlite3 어댑터(테스트·로컬 개발)와 D1 어댑터를 둔다. 동작은 바뀌지 않는다.
 2. **judge 분리**: `apps/judge`(대기열·디스패처·runner·테스트셋)와 API의 judge 클라이언트, 결과 수신 경로를 만든다. pahidc에서 api와 judge를 따로 띄운다.
 3. **Worker 실행**: API를 Pages `_worker.js`로 묶는다(esbuild). D1·R2 바인딩, WebCrypto, D1 기반 요청 제한을 쓴다. 로컬·CI는 wrangler(Miniflare)로 돌린다.
+   - 묶기: `pnpm build`가 web 빌드 뒤 `apps/api/scripts/build-worker.mjs`로 `apps/web/public/_worker.js`(카탈로그 캐시)와 `apps/api/src/worker.ts`(API)를 `apps/web/dist/_worker.js` 하나로 묶는다. Node 내장 모듈을 넣으면 빌드가 실패한다.
+   - 켜기: `API_MODE = "worker"`이고 D1 바인딩 `DB`가 있을 때만 Worker 안의 API가 답한다. 아니면 지금처럼 Tunnel로 넘긴다. 운영 배포(`deploy.yml`)는 5단계에서 이 번들을 올리도록 바꾼다.
+   - Node 전용 코드: better-sqlite3·마이그레이션(`db-node.ts`), 파일 백업(`backup.ts`), 진입점(`main.ts`)만 남는다. 나머지는 WebCrypto(`crypto.ts`)를 쓴다.
+   - 요청 제한: Worker는 격리 공간이 여러 개라 메모리로 셀 수 없으므로 D1 `rate_limits`에 한 문장(UPSERT … RETURNING)으로 센다.
+   - D1 스키마: `apps/api/migrations/0001_schema.sql`(마이그레이션 결과, `pnpm --filter @solveline/api d1:schema`로 만든다). 테스트가 마이그레이션과 같은지 확인한다.
+   - 검증: 가짜 D1(better-sqlite3 위에 D1 모양)과 가짜 R2 바인딩으로 Node에서 돌린다. Miniflare(wrangler dev)로 돌리는 검사는 아직 없다.
+   - 남은 일: 편집할 때 카탈로그 전체(1,046개)를 다시 해시하지 않고 바뀐 문제만 고쳐 쓰기(CPU 10ms), Worker에서의 매일 정리(오래된 제출·세션·`rate_limits`)는 4단계 일정 실행에서 SQL로 한다.
 4. **백업 워크플로**: 위 2번.
 5. **전환(승인 필요)**:
    - D1을 만들고 스키마를 적용한다.

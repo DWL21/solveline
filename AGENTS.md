@@ -75,6 +75,12 @@
 - R2 키 형식을 바꾸면 `apps/api/src/catalog.ts`와 `apps/web/public/_worker.js`를 함께 고친다.
 - pahidc는 R2 API 키 없이 Worker의 `/api/internal/r2`(공유 비밀 `R2_PROXY_SECRET`)로만 R2에 쓴다. R2 바인딩·변수는 `apps/web/wrangler.toml`이 관리한다.
 
+## Worker 실행 규칙 (0007 3단계)
+
+- api 코드(`apps/api/src`)는 Node·Workers 둘 다에서 돈다. `node:*`·`Buffer`·better-sqlite3는 `main.ts`·`db-node.ts`·`backup.ts`에서만 쓰고, 암호 기능은 `crypto.ts`(WebCrypto)를 쓴다. 어기면 `pnpm build`의 Worker 묶기가 실패한다.
+- 마이그레이션(`db-node.ts`)을 더하면 `pnpm --filter @solveline/api d1:schema`로 D1 스키마 파일을 다시 만든다(테스트가 어긋나면 실패한다). 기본 행을 넣는 마이그레이션은 `d1-schema.ts`의 SEED에도 더한다.
+- Worker 안의 API(`API_MODE = "worker"`, D1 바인딩)는 5단계 전환(운영자 승인) 전에는 켜지 않는다.
+
 ## 채점 파이프라인 규칙 (0003, 0007)
 
 - 실행은 반드시 제출 기록(`submissions`)과 judge의 대기열을 거친다. judge만 runner를 부른다. 우선순위: 코드 실행(0) > 제출(1).

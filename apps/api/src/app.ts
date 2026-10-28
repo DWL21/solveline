@@ -1,4 +1,3 @@
-import { randomInt, randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { getSignedCookie, setSignedCookie, deleteCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
@@ -51,10 +50,11 @@ import {
   PRIVACY_VERSION,
 } from '@solveline/shared';
 import type { Config } from './config.ts';
-import { SignupSettingsStore, CollectionStore, FolderStore, ProblemStore, StoreError, UserStore, type Db, type GoogleProfile } from './db.ts';
+import { SignupSettingsStore, CollectionStore, FolderStore, ProblemStore, StoreError, UserStore, type GoogleProfile } from './db.ts';
+import type { Db } from './db-node.ts';
 import { passwordMatches } from './auth/password.ts';
 import { challengeOf, GoogleAuthError, googleClient, newVerifier, type GoogleClient } from './auth/google.ts';
-import { RateLimiter } from './auth/rate-limit.ts';
+import { memoryLimiters, type LimiterFactory } from './auth/rate-limit.ts';
 import { SessionStore } from './auth/sessions.ts';
 import { JudgeError, type Judge } from './judge.ts';
 import { isTerminal, SubmissionStore } from './submissions.ts';
@@ -62,12 +62,14 @@ import { buildCatalog, CatalogPublisher } from './catalog.ts';
 import { sqliteSql, type Sql } from './sql.ts';
 import type { ObjectStore } from '@solveline/judge/r2';
 import { log } from './redact.ts';
+import { decodeJson, encodeJson, randomInt } from './crypto.ts';
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 502 | 503;
 
 export type AppDeps = {
   config: Config;
-  db: Db;
+  /** pahidc·테스트의 better-sqlite3. Worker는 sql(D1)만 준다 */
+  db?: Db;
   /** 저장소가 쓰는 SQL. 없으면 db(better-sqlite3)를 쓴다. Worker에서는 D1 */
   sql?: Sql;
   /** runner 여러 대. 디스패처가 빈 슬롯에 나눠 보낸다. */
@@ -75,6 +77,8 @@ export type AppDeps = {
   judge: Judge;
   /** 공용 문제 데이터·테스트셋을 게시할 R2. 없으면 게시하지 않는다(데이터는 SQLite·로컬 파일에만) */
   objectStore?: ObjectStore | null;
+  /** 요청 제한 저장소. 없으면 프로세스 메모리. Worker에서는 D1(rate_limits) */
+  limiters?: LimiterFactory;
   /** 테스트에서 Google 대신 끼워 넣는다. 없으면 config.google로 만든다. */
   google?: GoogleClient | null;
   now?: () => number;
@@ -95,15 +99,8 @@ const FLOW_TTL_S = 600;
 /** 로그인 뒤 돌아갈 경로. 같은 사이트 안의 경로만 허용한다(열린 리디렉션 방지). */
 const safeNext = (v: string | undefined) => (v && /^\/(?![/\\])/.test(v) && v.length < 300 ? v : '/');
 
-const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-const decode = <T>(v: string | false | undefined): T | null => {
-  if (!v) return null;
-  try {
-    return JSON.parse(Buffer.from(v, 'base64url').toString()) as T;
-  } catch {
-    return null;
-  }
-};
+const encode = encodeJson;
+const decode = decodeJson;
 
 const fail = (c: Context, status: Status, code: string, message: string) => c.json({ error: { code, message } }, status);
 
@@ -132,7 +129,8 @@ const clientIp = (c: Context) =>
 
 export function createApp(deps: AppDeps) {
   const { config, db, judge } = deps;
-  const sql = deps.sql ?? sqliteSql(db);
+  const sql = deps.sql ?? (db ? sqliteSql(db) : null);
+  if (!sql) throw new Error('db 또는 sql이 필요합니다.');
   const now = deps.now ?? Date.now;
   const sessions = new SessionStore(sql, config.sessionTtlMs);
   const temporaryTtlMs = Math.min(config.sessionTtlMs, 24 * 3_600_000);
@@ -151,12 +149,13 @@ export function createApp(deps: AppDeps) {
   const google = deps.google === undefined ? configuredGoogle() : deps.google;
   const redirectUri = `${config.webOrigin}/api/auth/google/callback`;
   // 로그인 왕복 남용 방지: IP별 분당 20회
-  const authLimit = new RateLimiter(20, 60_000);
+  const limiter = deps.limiters ?? memoryLimiters;
+  const authLimit = limiter('auth', 20, 60_000);
   // 마스터 비밀번호 대입 방지: IP별 분당 5회, 전체 시간당 60회
-  const adminLimit = new RateLimiter(5, 60_000);
-  const adminGlobalLimit = new RateLimiter(60, 3_600_000);
+  const adminLimit = limiter('admin', 5, 60_000);
+  const adminGlobalLimit = limiter('admin-all', 60, 3_600_000);
   // 실행·채점: 사용자별 분당 30회
-  const runLimit = new RateLimiter(30, 60_000);
+  const runLimit = limiter('run', 30, 60_000);
 
   const app = new Hono<Env>();
 
@@ -173,7 +172,7 @@ export function createApp(deps: AppDeps) {
   // 공용 문제 데이터를 바꾸는 요청(편집 권한·관리자 모드)이 성공하면 메모리의 목록을 버리고, R2가 있으면 게시한 뒤 응답한다.
   // 그래야 편집한 사람이 바로 새로 읽을 때(?fresh=1) 새 내용을 받는다.
   const CATALOG_WRITE = /^\/api\/(problems|collections|admin\/collections|admin\/problems)(\/|$)/;
-  let built: { at: number; cat: Promise<ReturnType<typeof buildCatalog>> } | null = null;
+  let built: { at: number; cat: ReturnType<typeof buildCatalog> } | null = null;
   app.use('/api/*', async (c, next) => {
     await next();
     if (c.req.method === 'GET' || c.res.status >= 400 || !CATALOG_WRITE.test(c.req.path)) return;
@@ -238,8 +237,8 @@ export function createApp(deps: AppDeps) {
     }),
   );
 
-  const authLimited = (c: Context) => {
-    const retry = authLimit.hit(clientIp(c), now());
+  const authLimited = async (c: Context) => {
+    const retry = await authLimit.hit(clientIp(c), now());
     if (!retry) return null;
     c.header('Retry-After', String(retry));
     return fail(c, 429, 'rate_limited', '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.');
@@ -247,18 +246,18 @@ export function createApp(deps: AppDeps) {
 
   /** 로그인·회원가입 모두 여기서 시작한다. 가입 여부는 Google에서 돌아온 뒤 판단한다. */
   app.get('/api/auth/google/start', async (c) => {
-    const blocked = authLimited(c);
+    const blocked = await authLimited(c);
     if (blocked) return blocked;
     if (!google) return fail(c, 503, 'auth_not_configured', 'Google 로그인이 설정되지 않았습니다.');
     const state = newVerifier();
     const verifier = newVerifier();
     await setSignedCookie(c, OAUTH_COOKIE, encode({ state, verifier, next: safeNext(c.req.query('next')) }), config.sessionSecret, flowCookie);
-    return c.redirect(google.authUrl({ state, challenge: challengeOf(verifier), redirectUri }), 302);
+    return c.redirect(google.authUrl({ state, challenge: await challengeOf(verifier), redirectUri }), 302);
   });
 
   app.get('/api/auth/google/callback', async (c) => {
     const back = (code: string) => c.redirect(`/?auth_error=${code}`, 302);
-    const limited = authLimited(c);
+    const limited = await authLimited(c);
     if (limited) return back('rate_limited');
     if (!google) return back('auth_not_configured');
     const flow = decode<{ state: string; verifier: string; next: string }>(await getSignedCookie(c, config.sessionSecret, OAUTH_COOKIE));
@@ -323,12 +322,12 @@ export function createApp(deps: AppDeps) {
 
   // 임시 계정은 로그인마다 새로 만들고 개인 데이터는 보존한다.
   app.post('/api/auth/temporary', async (c) => {
-    const blocked = authLimited(c);
+    const blocked = await authLimited(c);
     if (blocked) return blocked;
     if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json') || !(await readJson(c, z.object({}))))
       return fail(c, 400, 'invalid_request', '요청을 확인해 주세요.');
     if (!await signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다.');
-    const id = randomUUID();
+    const id = crypto.randomUUID();
     const adjectives = ['말랑한', '포근한', '반짝이는', '따뜻한', '씩씩한', '수줍은', '발랄한', '졸린', '행복한', '상냥한'];
     const nouns = ['구름', '토끼', '다람쥐', '고양이', '햄스터', '펭귄', '오리', '곰', '별', '병아리'];
     const name = `${adjectives[randomInt(adjectives.length)]} ${nouns[randomInt(nouns.length)]}`;
@@ -344,7 +343,7 @@ export function createApp(deps: AppDeps) {
     const token = config.testAuthToken;
     log.warn('[test] 테스트 전용 로그인이 켜져 있습니다(테스트 환경 전용).');
     app.post('/api/test/session', async (c) => {
-      if (!passwordMatches(token, c.req.header('x-test-auth') ?? '')) return fail(c, 401, 'unauthorized', '테스트 토큰이 올바르지 않습니다.');
+      if (!(await passwordMatches(token, c.req.header('x-test-auth') ?? ''))) return fail(c, 401, 'unauthorized', '테스트 토큰이 올바르지 않습니다.');
       const body = await readJson(c, TestSessionRequest);
       if (!body) return fail(c, 400, 'invalid_request', 'email이 필요합니다.');
       const profile: GoogleProfile = { sub: `test:${body.email}`, email: body.email, name: body.name ?? body.email.split('@')[0]!, picture: '' };
@@ -376,7 +375,7 @@ export function createApp(deps: AppDeps) {
   };
 
   app.post('/api/admin/login', async (c) => {
-    const retry = adminLimit.hit(clientIp(c), now()) || adminGlobalLimit.hit('all', now());
+    const retry = (await adminLimit.hit(clientIp(c), now())) || (await adminGlobalLimit.hit('all', now()));
     if (retry) {
       c.header('Retry-After', String(retry));
       return fail(c, 429, 'rate_limited', '시도가 너무 많습니다. 잠시 후 다시 시도하세요.');
@@ -384,7 +383,7 @@ export function createApp(deps: AppDeps) {
     if (!config.adminPassword) return fail(c, 503, 'admin_not_configured', '관리자 비밀번호(ACCESS_PASSWORD)가 설정되지 않았습니다.');
     const body = await readJson(c, AdminLogin);
     if (!body) return fail(c, 400, 'invalid_request', '비밀번호가 필요합니다.');
-    if (!passwordMatches(config.adminPassword, body.password)) {
+    if (!(await passwordMatches(config.adminPassword, body.password))) {
       log.warn(`[admin] 비밀번호 불일치 ip=${clientIp(c)}`);
       return fail(c, 401, 'invalid_password', '비밀번호가 올바르지 않습니다.');
     }
@@ -663,7 +662,7 @@ export function createApp(deps: AppDeps) {
     // 코드 실행은 보이는 케이스, 제출은 히든 테스트셋(없으면 요청의 케이스)
     const ref = req.kind === 'submit' ? problem?.hiddenTestset : null;
     const cases = ref ? null : req.kind === 'run' ? req.cases.filter((x) => !x.hidden) : req.cases;
-    const id = randomUUID();
+    const id = crypto.randomUUID();
     await submissions.insert({ id, userId, problemId: req.problemId, kind: req.kind, language: req.language, mode: req.mode, code: req.code, cases, testsetHash: ref?.hash ?? null, timeLimitMs });
     try {
       const s = await judge.submit({ id, kind: req.kind, language: req.language, mode: req.mode, code: req.code, cases, testsetHash: ref?.hash ?? null, timeLimitMs }, wait);
@@ -686,15 +685,15 @@ export function createApp(deps: AppDeps) {
   /** 긴 조회 대기 시간(?wait=초, 최대 25초: 프록시 응답 제한보다 충분히 짧게) */
   const waitMs = (c: Context) => Math.min(25, Math.max(0, Number(c.req.query('wait')) || 0)) * 1000;
 
-  const limited = (c: Context<Env>) => {
-    const retry = runLimit.hit(c.get('userId'), now());
+  const limited = async (c: Context<Env>) => {
+    const retry = await runLimit.hit(c.get('userId'), now());
     if (!retry) return null;
     c.header('Retry-After', String(retry));
     return fail(c, 429, 'rate_limited', '실행 요청이 너무 많습니다. 잠시 후 다시 시도하세요.');
   };
 
   app.post('/api/submissions', async (c) => {
-    const blocked = limited(c);
+    const blocked = await limited(c);
     if (blocked) return blocked;
     const body = await readJson(c, SubmissionRequest);
     if (!body) return fail(c, 400, 'invalid_request', '제출 형식이 올바르지 않습니다.');
@@ -749,7 +748,7 @@ export function createApp(deps: AppDeps) {
 
   /** 동기 실행(스크립트용): judge에 맡기고 끝날 때까지 기다린다 */
   app.post('/api/run', async (c) => {
-    const blocked = limited(c);
+    const blocked = await limited(c);
     if (blocked) return blocked;
     const body = await readJson(c, RunRequest);
     if (!body) return fail(c, 400, 'invalid_request', '실행 요청 형식이 올바르지 않습니다.');

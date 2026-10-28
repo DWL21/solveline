@@ -1,6 +1,4 @@
-// 로그·에러 메시지에서 비밀 값을 지운다.
-import { inspect } from 'node:util';
-
+// 로그·에러 메시지에서 비밀 값을 지운다. Worker에서도 돌므로 node:util 대신 JSON으로 객체를 보여 준다.
 const secrets = new Set<string>();
 
 /** 비밀 값을 등록하면 이후 redact()가 해당 문자열을 가린다. */
@@ -25,7 +23,12 @@ export function redact(text: string) {
 /** 오류 값을 로그 문구로. 객체는 "[object Object]" 대신 내용을 보여 준다. */
 function describe(err: unknown) {
   if (err instanceof Error) return err.stack ?? err.message;
-  return typeof err === 'string' ? err : inspect(err);
+  if (typeof err === 'string') return err;
+  try {
+    return JSON.stringify(err) ?? String(err);
+  } catch {
+    return String(err); // 순환 참조 등
+  }
 }
 
 export const log = {
