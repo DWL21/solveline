@@ -44,7 +44,20 @@ function verdict(r: CaseResult, mode: ProblemMode, expected: string, limitMs: nu
   }
 }
 
-const show = (v: string | null, mode: ProblemMode) => (v === null ? 'null' : mode === 'stdin' ? v.trimEnd() : v);
+function show(v: string | null, mode: ProblemMode) {
+  if (v === null) return 'null';
+  return mode === 'stdin' ? v.trimEnd() : v;
+}
+
+/** 케이스 상태 색과 앞 기호(통과·실패는 색만으로 구분하지 않는다) */
+const STATUS_STYLE: Record<CaseResult['status'], { color: string; mark: string }> = {
+  pass: { color: 'text-ok', mark: '✓ ' },
+  fail: { color: 'text-bad', mark: '✗ ' },
+  done: { color: 'text-dim', mark: '' },
+  error: { color: 'text-bad', mark: '✗ ' },
+  timeout: { color: 'text-warn', mark: '' },
+  skipped: { color: 'text-dim', mark: '' },
+};
 
 function Code({ children }: Readonly<{ children: React.ReactNode }>) {
   return <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px] text-text">{children}</code>;
@@ -55,7 +68,7 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
   if (state.kind === 'running')
     return (
-      <div className="flex items-center gap-2.5 p-4 text-[13px] text-dim" role="status" aria-live="polite">
+      <output className="flex items-center gap-2.5 p-4 text-[13px] text-dim" aria-live="polite">
         <Spinner size={16} className="text-accent-text" />
         {state.ahead ? (
           <span>
@@ -64,7 +77,7 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
         ) : (
           <span>{state.submit ? '채점하는 중이에요' : '코드를 실행하는 중이에요'}</span>
         )}
-      </div>
+      </output>
     );
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
   if (state.kind === 'cancelled') return <p className="p-4 text-[13px] font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
@@ -86,9 +99,9 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
             <header className="mb-1.5 flex flex-wrap items-baseline gap-x-2 font-sans">
               <b className="text-[13px] text-text">테스트 {i + 1}</b>
               <span
-                className={`text-[12px] font-bold ${r.status === 'pass' ? 'text-ok' : r.status === 'fail' || r.status === 'error' ? 'text-bad' : r.status === 'timeout' ? 'text-warn' : 'text-dim'}`}
+                className={`text-[12px] font-bold ${STATUS_STYLE[r.status].color}`}
               >
-                {r.status === 'pass' ? '✓ ' : r.status === 'fail' || r.status === 'error' ? '✗ ' : ''}
+                {STATUS_STYLE[r.status].mark}
                 {label[r.status]}
               </span>
               {r.status !== 'skipped' && (
@@ -187,7 +200,7 @@ function Graded({ result, score }: Readonly<{ result: RunResult; score: number }
           정확성: <b>{score.toFixed(1)}</b>
         </p>
         <p>
-          합계: <b className={score === 100 ? 'text-ok' : 'text-bad'}>{score.toFixed(1)}</b> / 100.0
+          합계: <b className={score === 100 ? 'text-ok' : 'text-bad'}>{score.toFixed(1)}</b> / 100.0{/* 공백 없이 여백(ml-2)으로 띄운다 */}
           <span className="ml-2 text-[12px] text-faint">
             ({result.results.length}개 중 {passed}개 통과)
           </span>

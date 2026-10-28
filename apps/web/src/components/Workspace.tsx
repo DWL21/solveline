@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type Language, type Problem, type ProblemInput, type ProblemMode, type Submission, type TestCase } from '@solveline/shared';
+import { type Language, type Problem, type ProblemInput, type Submission, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
@@ -66,18 +66,18 @@ function runStateOf(s: Submission, submit: boolean, cases: TestCase[], d: Proble
 function usePanes(narrow: boolean) {
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
-  const [pane, setPaneState] = useState<Pane>('problem');
+  const [pane, setPane] = useState<Pane>('problem');
   const paneRef = useRef(pane);
   const [unseen, setUnseen] = useState(false);
-  const setPane = useCallback((p: Pane) => {
+  const selectPane = useCallback((p: Pane) => {
     paneRef.current = p;
-    setPaneState(p);
+    setPane(p);
     if (p === 'result') setUnseen(false);
   }, []);
   /** 결과를 보여 줄 때: 휴대폰이면 결과 탭으로 */
   const showResult = useCallback(() => {
-    if (narrowRef.current) setPane('result');
-  }, [setPane]);
+    if (narrowRef.current) selectPane('result');
+  }, [selectPane]);
   /** 다른 탭을 보는 중에 결과가 나오면 새 결과 표시 */
   const markUnseenIfHidden = useCallback(() => {
     if (narrowRef.current && paneRef.current !== 'result') setUnseen(true);
@@ -85,8 +85,8 @@ function usePanes(narrow: boolean) {
   // 휴대폰 코드·결과 탭: 앱 상단바·문제 제목 줄을 숨겨 에디터·결과를 넓게(문제 탭으로 가면 다시 보인다)
   const codeFocus = narrow && pane !== 'problem';
   // 코드를 쓰는 중(에디터 초점 = 화상 키보드 열림): 탭·실행 바까지 숨겨 코드만 보여 준다
-  const [typingRaw, setTyping] = useState(false);
-  const typing = narrow && pane === 'code' && typingRaw;
+  const [editorFocused, setEditorFocused] = useState(false);
+  const typing = narrow && pane === 'code' && editorFocused;
   useEffect(() => {
     const root = document.documentElement;
     if (codeFocus) root.dataset.codeFocus = '';
@@ -98,7 +98,7 @@ function usePanes(narrow: boolean) {
       delete root.dataset.typing;
     };
   }, [codeFocus, typing]);
-  return { pane, setPane, unseen, showResult, markUnseenIfHidden, codeFocus, setTyping };
+  return { pane, selectPane, unseen, showResult, markUnseenIfHidden, codeFocus, setEditorFocused };
 }
 
 type Tab = 'desc' | 'cases' | 'memo';
@@ -350,7 +350,7 @@ function Editor({ problem, onDeleted, onNext, onList }: Readonly<{ problem: Prob
         onSaveStarter={saveAsStarter}
       />
       {editing && !panes.codeFocus && <p className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-[12px] text-warn">편집 모드 · 바꾼 내용은 모든 사용자에게 적용돼요</p>}
-      {narrow && <PaneTabs pane={panes.pane} onPane={panes.setPane} compact={panes.codeFocus} runner={runner} unseen={panes.unseen} />}
+      {narrow && <PaneTabs pane={panes.pane} onPane={panes.selectPane} compact={panes.codeFocus} runner={runner} unseen={panes.unseen} />}
       {solvedOpen && <SolvedDialog solvedMs={solve.timer.solvedMs ?? solve.timer.elapsedMs} onNext={onNext} onList={onList} onClose={() => setSolvedOpen(false)} />}
       <div ref={rowRef} className="relative flex min-h-0 flex-1 flex-col md:flex-row" style={{ '--left': `${layout.leftPct}%` } as React.CSSProperties}>
         <Paused solve={solve} />
@@ -370,7 +370,7 @@ function Editor({ problem, onDeleted, onNext, onList }: Readonly<{ problem: Prob
           readOnly={guest}
           docKey={`${lang}:${resets}`}
           onCode={(v) => patch({ code: { ...draftRef.current.code, [lang]: v } })}
-          onFocusChange={panes.setTyping}
+          onFocusChange={panes.setEditorFocused}
           runner={runner}
           editorPct={layout.editorPct}
           onEditorPct={(v) => setLayout('editorPct', v)}
@@ -434,13 +434,12 @@ function RunFooter({
           코드 실행
         </button>
         <button type="button" className={`btn-primary touch-target ${narrow ? 'flex-[1.4]' : 'min-w-32'}`} disabled={pending} onClick={runner.doSubmit} title={hiddenCount ? `히든 케이스 ${hiddenCount}개로 채점` : '보이는 케이스로 채점'}>
-          {pending ? (
+          {pending && (
             <>
               <Spinner size={14} /> {run.kind === 'running' && run.submit ? '채점 중' : '실행 중'}
             </>
-          ) : (
-            narrow ? '제출 후 채점' : '제출 후 채점하기'
           )}
+          {!pending && (narrow ? '제출 후 채점' : '제출 후 채점하기')}
         </button>
       </div>
     </footer>
@@ -507,7 +506,7 @@ function TitleBar({
         <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-[15px] font-bold">{draft.title}</h1>
       )}
       <BookmarkStar id={problem.id} bookmarked={summaries.data?.find((p) => p.id === problem.id)?.bookmarked} />
-      {!guest && <SaveBadge state={saveState} onRetry={() => void queue?.flush(problem.id)} />}
+      {!guest && <SaveBadge state={saveState} onRetry={() => { if (queue) void queue.flush(problem.id); }} />}
       {/* 휴대폰: 도구는 한 줄로 두고 가로로 밀어서 본다 */}
       <div className={narrow ? 'no-scrollbar flex w-full min-w-0 basis-full items-center gap-2 overflow-x-auto whitespace-nowrap' : 'contents'}>
         {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}

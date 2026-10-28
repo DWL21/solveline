@@ -316,6 +316,32 @@ export class StoreError extends Error {
 
 const isUniqueViolation = (e: unknown) => e instanceof Error && 'code' in e && (e as { code: string }).code === 'SQLITE_CONSTRAINT_UNIQUE';
 
+/** 마이그레이션 하나를 적용하고 _migrations에 기록한다 */
+function applyMigration(db: Db, m: Migration, i: number) {
+  if (typeof m === 'function') {
+    db.transaction(() => {
+      m(db);
+      db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
+    })();
+    return;
+  }
+  const sql = typeof m === 'string' ? m : m.sql;
+  const fkOff = typeof m !== 'string';
+  if (fkOff) db.pragma('foreign_keys = OFF'); // 트랜잭션 안에서는 바꿀 수 없으므로 밖에서 끈다
+  try {
+    db.transaction(() => {
+      db.exec(sql);
+      db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
+      if (fkOff) {
+        const broken = db.pragma('foreign_key_check') as unknown[];
+        if (broken.length) throw new Error(`마이그레이션 ${i} 뒤 외래 키 위반 ${broken.length}건`);
+      }
+    })();
+  } finally {
+    if (fkOff) db.pragma('foreign_keys = ON');
+  }
+}
+
 /** dataDir가 ':memory:'면 메모리 DB (테스트용) */
 export function openDb(dataDir: string): Db {
   let db: Db;
@@ -334,31 +360,7 @@ export function openDb(dataDir: string): Db {
   db.pragma('busy_timeout = 5000');
   db.exec('CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY)');
   const applied = new Set(db.prepare('SELECT id FROM _migrations').pluck().all() as number[]);
-  for (const [i, m] of migrations.entries()) {
-    if (applied.has(i)) continue;
-    if (typeof m === 'function') {
-      db.transaction(() => {
-        m(db);
-        db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
-      })();
-      continue;
-    }
-    const sql = typeof m === 'string' ? m : m.sql;
-    const fkOff = typeof m !== 'string';
-    if (fkOff) db.pragma('foreign_keys = OFF'); // 트랜잭션 안에서는 바꿀 수 없으므로 밖에서 끈다
-    try {
-      db.transaction(() => {
-        db.exec(sql);
-        db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
-        if (fkOff) {
-          const broken = db.pragma('foreign_key_check') as unknown[];
-          if (broken.length) throw new Error(`마이그레이션 ${i} 뒤 외래 키 위반 ${broken.length}건`);
-        }
-      })();
-    } finally {
-      if (fkOff) db.pragma('foreign_keys = ON');
-    }
-  }
+  for (const [i, m] of migrations.entries()) if (!applied.has(i)) applyMigration(db, m, i);
   return db;
 }
 

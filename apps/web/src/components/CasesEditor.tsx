@@ -25,8 +25,8 @@ function ParamsInput({ params, onChange }: Readonly<{ params: string[]; onChange
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
-        if (next.join(',') !== params.join(',')) onChange(next);
-        else setText(params.join(', '));
+        if (next.join(',') === params.join(',')) setText(params.join(', '));
+        else onChange(next);
       }}
     />
   );
@@ -54,6 +54,9 @@ function Field({ value, label, multiline, readOnly, onChange }: Readonly<{ value
     <input className="field" value={value} aria-label={label} onChange={(e) => onChange(e.target.value)} />
   );
 }
+
+/** j번째 인자만 바꾼 인자 목록. 길이는 매개변수 수에 맞춘다. */
+const withArg = (args: string[], params: string[], j: number, v: string) => params.map((_, k) => (k === j ? v : (args[k] ?? '')));
 
 /** 케이스 목록(보이는/히든/내 케이스 공용). readOnly면 보기만 한다. */
 function CaseList({
@@ -100,7 +103,7 @@ function CaseList({
                     readOnly={readOnly}
                     value={c.args[j] ?? ''}
                     label={`${label} ${i + 1} ${p}`}
-                    onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
+                    onChange={(v) => update(c.id, { args: withArg(c.args, params, j, v) })}
                   />
                 </label>
               ))}
@@ -139,7 +142,7 @@ function CaseList({
                       readOnly={readOnly}
                       value={c.args[j] ?? ''}
                       label={`${label} ${i + 1} ${p}`}
-                      onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
+                      onChange={(v) => update(c.id, { args: withArg(c.args, params, j, v) })}
                     />
                   </td>
                 ))}
@@ -293,6 +296,12 @@ function TimeLimit({ value, onChange }: Readonly<{ value: number; onChange: (ms:
   );
 }
 
+/** 히든 케이스 펼치기 버튼 문구 */
+function toggleLabel(open: boolean, count: number) {
+  if (open) return '접기';
+  return count ? '펼쳐서 보기' : '추가하기';
+}
+
 type HiddenState = 'saved' | 'dirty' | 'saving' | 'error';
 
 function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId: string; mode: ProblemMode; params: string[]; summary: TestsetRef | null }>) {
@@ -340,7 +349,7 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
           히든 케이스 {count} <span className="font-normal text-faint">— 제출 후 채점에만 사용</span>
         </h3>
         <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          {open ? '접기' : count ? '펼쳐서 보기' : '추가하기'}
+          {toggleLabel(open, count)}
         </button>
         {open && state !== 'saved' && (
           <span className={`inline-flex items-center gap-1 text-[11.5px] ${state === 'error' ? 'text-bad' : 'text-faint'}`}>

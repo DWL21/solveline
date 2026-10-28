@@ -96,6 +96,7 @@ def loads_literal(text):
 # 요청이 도착하기 전에 온 중지도 기억해 둔다(오래된 기록은 지운다).
 CANCEL_TTL_S = 60 * 60
 CANCELLED_MSG = "중지되어 실행하지 않았습니다."
+SOLUTION_FILE = "solution.py"
 
 
 class Job:
@@ -326,9 +327,9 @@ def _java_main_class(code):
 def prepare(lang, code, work, job=None):
     """컴파일한다. 실패 시 (False, 메시지)."""
     if lang == "python":
-        with open(os.path.join(work, "solution.py"), "w", encoding="utf-8") as f:
+        with open(os.path.join(work, SOLUTION_FILE), "w", encoding="utf-8") as f:
             f.write(code)
-        p = run_proc([sys.executable, "-m", "py_compile", "solution.py"], work, timeout=COMPILE_TIMEOUT_S, job=job)
+        p = run_proc([sys.executable, "-m", "py_compile", SOLUTION_FILE], work, timeout=COMPILE_TIMEOUT_S, job=job)
         if p.status != "ok":
             return False, (p.stderr or p.stdout).replace(work + "/", "")
         return True, ""
@@ -418,7 +419,7 @@ def run_function_case(lang, work, args, expected, limit_s, job=None):
 def run_stdin_case(lang, code, work, stdin, expected, limit_s, job=None):
     timeout = limit_s + STARTUP_SLACK_S[lang]
     if lang == "python":
-        p = run_proc([sys.executable, "solution.py"], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout, job=job)
+        p = run_proc([sys.executable, SOLUTION_FILE], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout, job=job)
     else:
         p = run_proc(java_cmd(_java_main_class(code)), work, stdin.encode("utf-8"), timeout=timeout, job=job)
     res = _base_result(p, p.stdout)

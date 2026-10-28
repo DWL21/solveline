@@ -21,16 +21,16 @@ export function SolvedDialog({
   }, [onClose]);
 
   return (
-    // 바깥(어두운 배경)을 누르거나 Esc를 누르면 닫힌다. 안쪽을 누르면 닫히지 않는다(대상이 배경 자신일 때만 닫기).
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      role="dialog"
+    // 바깥(어두운 배경)을 누르거나 Esc를 누르면 닫힌다. 안쪽을 누르면 닫히지 않는다.
+    // 배경 클릭은 뒤에 깐 버튼이 받는다(키보드로는 Esc·닫기 버튼을 쓰므로 탭 순서와 읽기 대상에서 뺀다).
+    <dialog
+      open
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 h-auto max-h-none w-auto max-w-none text-inherit"
       aria-modal="true"
       aria-labelledby="solved-title"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
     >
-      <div className="w-full max-w-sm rounded-xl border border-ok/40 bg-panel p-6 text-center shadow-2xl">
+      <button type="button" tabIndex={-1} aria-hidden="true" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <div className="relative w-full max-w-sm rounded-xl border border-ok/40 bg-panel p-6 text-center shadow-2xl">
         <p id="solved-title" className="text-[20px] font-bold text-ok">
           ✓ 정답입니다!
         </p>
@@ -55,6 +55,6 @@ export function SolvedDialog({
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

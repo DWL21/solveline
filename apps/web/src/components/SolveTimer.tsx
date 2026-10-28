@@ -41,7 +41,7 @@ export function useSolveTimer(problem: Problem, queue: DraftQueue | null) {
   // 맞춤·초기화·일시정지는 바로 동기화한다.
   const [bump, setBump] = useState(0);
   useEffect(() => {
-    if (bump) void queue?.flush(problem.id);
+    if (bump && queue) void queue.flush(problem.id);
   }, [bump, queue, problem.id]);
 
   const markSolved = useCallback(() => {
@@ -73,6 +73,7 @@ export function SolveTimerBadge({
   onResume: () => void;
 }>) {
   const solved = timer.solvedMs !== null;
+  const pauseIcon = timer.paused ? '⏸' : '⏱';
   return (
     <span className="inline-flex items-center gap-1">
       <span
@@ -80,7 +81,7 @@ export function SolveTimerBadge({
         title={solved ? '맞춘 순간의 풀이 시간' : '풀이 시간'}
         aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}에 맞춤` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >
-        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `${timer.paused ? '⏸' : '⏱'} ${formatDuration(timer.elapsedMs)}`}
+        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `${pauseIcon} ${formatDuration(timer.elapsedMs)}`}
       </span>
       {!solved &&
         (timer.paused ? (
@@ -108,7 +109,7 @@ export function SolveTimerBadge({
 /** 일시정지 중에는 문제·에디터·결과를 흐리게 가린다(멈춘 동안 풀 수 없게). */
 export function PausedOverlay({ elapsedMs, onResume }: Readonly<{ elapsedMs: number; onResume: () => void }>) {
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="타이머 일시정지됨">
+    <dialog open className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="타이머 일시정지됨">
       <div className="flex flex-col items-center gap-3 rounded-xl border border-line-strong bg-panel/95 px-8 py-6 text-center shadow-2xl">
         <p className="text-[13px] font-bold text-dim">일시정지됨</p>
         <p className="font-mono text-[32px] font-bold tabular-nums">{formatDuration(elapsedMs)}</p>
@@ -116,6 +117,6 @@ export function PausedOverlay({ elapsedMs, onResume }: Readonly<{ elapsedMs: num
           ▶ 다시 시작
         </button>
       </div>
-    </div>
+    </dialog>
   );
 }

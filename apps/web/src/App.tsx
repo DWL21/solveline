@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Language, ProblemMode, Session } from '@solveline/shared';
 import { ApiError, api, qk } from './lib/api.ts';
@@ -59,6 +59,12 @@ function Main() {
   return <Shell key={session.data.user?.email ?? 'guest'} />;
 }
 
+/** 목록에서 id 바로 뒤 문제(없으면 null) */
+function nextProblemId(id: string, list: { id: string }[]) {
+  const i = list.findIndex((p) => p.id === id);
+  return i >= 0 ? (list[i + 1]?.id ?? null) : null;
+}
+
 function Shell() {
   const me = useMe();
   const sync = useDraftSync(me?.email);
@@ -86,12 +92,33 @@ function Shell() {
   // 다음 문제: 들어온 목록(마지막으로 본 범위)의 순서에서 현재 문제 바로 뒤
   const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
-  let nextId: string | null = null;
-  if (route.kind === 'problem' && problems.data && collections.data) {
-    const list = scopeList(lastScope, problems.data, collections.data);
-    const i = list.findIndex((p) => p.id === route.id);
-    nextId = i >= 0 ? (list[i + 1]?.id ?? null) : null;
-  }
+  const nextId = route.kind === 'problem' && problems.data && collections.data ? nextProblemId(route.id, scopeList(lastScope, problems.data, collections.data)) : null;
+
+  let page: ReactNode;
+  if (route.kind === 'problem')
+    page = (
+      <Suspense fallback={<WorkspaceSkeleton />}>
+        <Workspace
+          problemId={route.id}
+          onDeleted={() => go({ kind: 'home', scope: lastScope })}
+          onNext={nextId ? () => go({ kind: 'problem', id: nextId }) : undefined}
+          onList={() => go({ kind: 'home', scope: lastScope })}
+        />
+      </Suspense>
+    );
+  else if (route.kind === 'submissions') page = <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />;
+  else
+    page = (
+      <div key={homeKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <Home
+          scope={route.scope}
+          onScope={(scope) => go({ kind: 'home', scope })}
+          onPick={(id) => go({ kind: 'problem', id })}
+          onNew={() => setCreating(true)}
+        />
+        <LegalFooter admin={!!me?.owner} />
+      </div>
+    );
 
   return (
     <div className="flex h-full flex-col bg-ink">
@@ -120,28 +147,7 @@ function Shell() {
         </div>
       </header>
 
-      {route.kind === 'problem' ? (
-        <Suspense fallback={<WorkspaceSkeleton />}>
-        <Workspace
-          problemId={route.id}
-          onDeleted={() => go({ kind: 'home', scope: lastScope })}
-          onNext={nextId ? () => go({ kind: 'problem', id: nextId }) : undefined}
-          onList={() => go({ kind: 'home', scope: lastScope })}
-        />
-        </Suspense>
-      ) : route.kind === 'submissions' ? (
-        <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />
-      ) : (
-        <div key={homeKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <Home
-            scope={route.scope}
-            onScope={(scope) => go({ kind: 'home', scope })}
-            onPick={(id) => go({ kind: 'problem', id })}
-            onNew={() => setCreating(true)}
-          />
-          <LegalFooter admin={!!me?.owner} />
-        </div>
-      )}
+      {page}
 
       {creating && (
         <NewProblemDialog
@@ -227,7 +233,7 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
     },
   });
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="새 문제">
+    <dialog open className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="새 문제">
       <form
         className="w-full max-w-md rounded-xl border border-line bg-panel p-5 shadow-2xl"
         onSubmit={(e) => {
@@ -304,6 +310,6 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
           </button>
         </div>
       </form>
-    </div>
+    </dialog>
   );
 }

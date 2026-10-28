@@ -11,6 +11,18 @@ const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 �
 const day = (iso: string) => new Date(iso).toLocaleDateString('ko-KR');
 const time = (iso: string) => new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
 
+/** 관리자 로그인 실패 문구 */
+function loginError(error: unknown, isError: boolean) {
+  if (error instanceof ApiError) return error.status === 401 ? '비밀번호가 맞지 않아요' : error.message;
+  return isError ? '들어가지 못했어요' : null;
+}
+
+/** 점수 색: 만점·안 풂·그 밖 */
+function scoreColor(score: number | null) {
+  if (score === 100) return 'text-ok';
+  return score === null ? 'text-faint' : 'text-warn';
+}
+
 /** 관리자 모드: 마스터 비밀번호로만 연다. 사용자에게 편집 권한을 주고, 신규 가입 허용 여부를 관리한다. */
 export function AdminPage() {
   const session = useQuery({ queryKey: qk.admin, queryFn: adminApi.session, staleTime: Infinity, retry: false });
@@ -32,7 +44,7 @@ function AdminLogin() {
     e.preventDefault();
     if (password && !login.isPending) login.mutate();
   };
-  const error = login.error instanceof ApiError ? (login.error.status === 401 ? '비밀번호가 맞지 않아요' : login.error.message) : login.isError ? '들어가지 못했어요' : null;
+  const error = loginError(login.error, login.isError);
   return (
     <div className="flex min-h-full items-center justify-center bg-ink px-4 py-10">
       <main className="w-full max-w-sm">
@@ -277,7 +289,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
               {u.problems.map((p) => (
                 <tr key={p.problemId} className="border-t border-line">
                   <td className="truncate px-2 py-1.5">{p.title}</td>
-                  <td className={`px-2 py-1.5 text-right font-semibold ${p.score === 100 ? 'text-ok' : p.score === null ? 'text-faint' : 'text-warn'}`}>
+                  <td className={`px-2 py-1.5 text-right font-semibold ${scoreColor(p.score)}`}>
                     {p.score === 100 ? '✓' : (p.score ?? '—')}
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono text-dim">{formatDuration(p.solvedMs ?? p.elapsedMs)}</td>
@@ -298,7 +310,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate">{s.problemTitle ?? '(스크립트 실행)'}</span>
                 <span className={`shrink-0 font-semibold ${s.score === 100 ? 'text-ok' : 'text-dim'}`}>
-                  {s.kind === 'submit' && s.score !== null ? (s.score === 100 ? '✓' : `${s.score}점`) : ''}
+                  {s.kind === 'submit' && s.score !== null && (s.score === 100 ? '✓' : `${s.score}점`)}
                 </span>
               </div>
               <p className="mt-0.5 text-[11.5px] whitespace-nowrap text-faint tabular-nums">
@@ -328,9 +340,9 @@ function SignupControl() {
   return (
     <section className="max-w-xl rounded-lg border border-line bg-panel p-5">
       <h1 className="text-[16px] font-bold">신규 가입</h1>
-      <p role="status" className={`mt-4 font-semibold ${enabled ? 'text-ok' : 'text-warn'}`}>
+      <output className={`block mt-4 font-semibold ${enabled ? 'text-ok' : 'text-warn'}`}>
         {enabled ? '✓ 신규 가입 허용 중' : '✗ 신규 가입 중지 중'}
-      </p>
+      </output>
       <p className="mt-2 text-[13px] text-dim">중지하면 새 계정을 만들 수 없어요. 가입 절차를 진행 중인 계정에도 적용돼요. 기존 회원은 계속 로그인하고 이용할 수 있어요.</p>
       <button
         type="button"
@@ -338,10 +350,11 @@ function SignupControl() {
         disabled={save.isPending}
         onClick={() => save.mutate(!enabled)}
       >
-        {save.isPending ? '저장 중…' : enabled ? '신규 가입 중지' : '신규 가입 허용'}
+        {save.isPending && '저장 중…'}
+        {!save.isPending && (enabled ? '신규 가입 중지' : '신규 가입 허용')}
       </button>
       {save.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(save.error)}</p>}
-      {save.isSuccess && <p role="status" className="mt-3 text-[13px] text-dim">설정을 저장했어요.</p>}
+      {save.isSuccess && <output className="block mt-3 text-[13px] text-dim">설정을 저장했어요.</output>}
     </section>
   );
 }

@@ -164,7 +164,14 @@ export function CodeEditor({
         doc: value,
         extensions: [
           keymap.of([
-            { key: 'Mod-Enter', preventDefault: true, run: () => (cb.current.onRun(), true) },
+            {
+              key: 'Mod-Enter',
+              preventDefault: true,
+              run: () => {
+                cb.current.onRun();
+                return true;
+              },
+            },
           ]),
           editorSetup,
           layout.current.of(layoutFor(compact)),
@@ -215,7 +222,7 @@ export function CodeEditor({
     if (!el || !compact) return;
     let start: { dist: number; font: number } | null = null;
     const dist = (t: TouchList) => Math.hypot(t[0]!.clientX - t[1]!.clientX, t[0]!.clientY - t[1]!.clientY);
-    const current = () => parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || DEFAULT_FONT;
+    const current = () => Number.parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || DEFAULT_FONT;
     const clampFont = (v: number) => Math.round(Math.min(MAX_FONT, Math.max(MIN_FONT, v)));
     // iOS(Safari·Chrome)는 두 손가락 동작을 화면 확대 제스처로 먼저 가져간다 → 제스처 이벤트로 받아 코드 글자에만 적용한다.
     // 키보드가 열려 있든 닫혀 있든 같게 동작한다.
@@ -320,16 +327,22 @@ function FastScroll({ view }: Readonly<{ view: { current: EditorView | null } }>
       const size = clientHeight / scrollHeight;
       setPos((p) => ({ top: scrollHeight > clientHeight ? scrollTop / (scrollHeight - clientHeight) : 0, size, show: p.show }));
     };
+    const hideUnlessDragging = () => {
+      if (!dragging.current) setPos((p) => ({ ...p, show: false }));
+    };
     const onScroll = () => {
       measure();
       setPos((p) => ({ ...p, show: true }));
       if (hide.current) clearTimeout(hide.current);
-      hide.current = setTimeout(() => !dragging.current && setPos((p) => ({ ...p, show: false })), 1200);
+      hide.current = setTimeout(hideUnlessDragging, 1200);
     };
     // 에디터가 만들어진 뒤에 붙는다
     const attach = () => {
       scroller = view.current?.scrollDOM ?? null;
-      if (!scroller) return void (raf = requestAnimationFrame(attach));
+      if (!scroller) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
       scroller.addEventListener('scroll', onScroll, { passive: true });
       measure();
     };

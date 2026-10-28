@@ -1,5 +1,5 @@
 import { Language } from '@solveline/shared';
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
 import { useMe } from '../lib/me.ts';
@@ -75,7 +75,7 @@ export function Home({ scope, onScope, onPick, onNew }: Readonly<{ scope: Scope;
   useEffect(() => setLimit(PAGE), [scopeKey, filter, bookmarksOnly]);
 
   const failed = [problems, folders, collections].find((q) => q.isError);
-  if (failed) return <LoadError error={failed.error} onRetry={() => void failed.refetch()} />;
+  if (failed) return <LoadError error={failed.error} onRetry={() => failed.refetch()} />;
   if (!problems.data || !folders.data || !collections.data) return <ListSkeleton />;
 
   const all = problems.data;
@@ -93,6 +93,36 @@ export function Home({ scope, onScope, onPick, onNew }: Readonly<{ scope: Scope;
   const unfiled = all.filter((p) => !p.folderId).length;
   const folderName = new Map(folders.data.map((f) => [f.id, f.name]));
   const title = scopeTitle(effective, folder, node);
+
+  let listBody: ReactNode;
+  if (all.length === 0)
+    listBody = (
+      <div className="flex flex-col items-center gap-2 py-16 text-center">
+        <p className="text-[15px] font-bold">아직 문제가 없어요</p>
+        <p className="text-[13px] text-dim">{editor ? '문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.' : '문제가 등록되면 여기에 보여요.'}</p>
+      </div>
+    );
+  else if (shown.length === 0)
+    listBody = (
+      <p className="py-12 text-center text-[13px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
+    );
+  else
+    listBody = (
+      <>
+      <ol className="overflow-hidden rounded-lg border border-line bg-panel">
+        {shown.slice(0, limit).map((p) => (
+          <ProblemRow
+            key={p.id}
+            p={p}
+            order={inCollection ? list.indexOf(p) + 1 : null}
+            folderLabel={effective.kind !== 'folder' && p.folderId ? folderName.get(p.folderId) : undefined}
+            onPick={onPick}
+          />
+        ))}
+      </ol>
+      {shown.length > limit && <MoreSentinel onMore={() => setLimit((n) => n + PAGE)} remaining={shown.length - limit} />}
+      </>
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -147,29 +177,7 @@ export function Home({ scope, onScope, onPick, onNew }: Readonly<{ scope: Scope;
               </button>
             )}
           </div>
-          {all.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-16 text-center">
-              <p className="text-[15px] font-bold">아직 문제가 없어요</p>
-              <p className="text-[13px] text-dim">{editor ? '문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.' : '문제가 등록되면 여기에 보여요.'}</p>
-            </div>
-          ) : shown.length === 0 ? (
-            <p className="py-12 text-center text-[13px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
-          ) : (
-            <>
-            <ol className="overflow-hidden rounded-lg border border-line bg-panel">
-              {shown.slice(0, limit).map((p) => (
-                <ProblemRow
-                  key={p.id}
-                  p={p}
-                  order={inCollection ? list.indexOf(p) + 1 : null}
-                  folderLabel={effective.kind !== 'folder' && p.folderId ? folderName.get(p.folderId) : undefined}
-                  onPick={onPick}
-                />
-              ))}
-            </ol>
-            {shown.length > limit && <MoreSentinel onMore={() => setLimit((n) => n + PAGE)} remaining={shown.length - limit} />}
-            </>
-          )}
+          {listBody}
           </>}
         </div>
       </div>
@@ -236,11 +244,11 @@ function CollectionCards({ cards, all, signedIn, overview, onScope }: Readonly<{
   );
 }
 
-function LoadError({ error, onRetry }: Readonly<{ error: unknown; onRetry: () => void }>) {
+function LoadError({ error, onRetry }: Readonly<{ error: unknown; onRetry: () => Promise<unknown> }>) {
   return (
     <div className="p-6 text-[13px]">
       <p className="font-semibold text-bad">{errMsg(error)}</p>
-      <button type="button" className="btn-ghost mt-3" onClick={onRetry}>
+      <button type="button" className="btn-ghost mt-3" onClick={() => void onRetry()}>
         다시 시도
       </button>
     </div>
@@ -252,13 +260,17 @@ function resolveScope(scope: Scope, folders: Folder[], collections: Collection[]
   const folder = scope.kind === 'folder' && scope.id ? folders.find((f) => f.id === scope.id) : undefined;
   const collection = scope.kind === 'collection' ? collections.find((c) => c.id === scope.id) : undefined;
   const tree = buildTree(collections);
-  const node = collection ? findNode(tree, collection.name) : scope.kind === 'group' ? findNode(tree, scope.path) : null;
+  let node: CollectionNode | null = null;
+  if (collection) node = findNode(tree, collection.name);
+  else if (scope.kind === 'group') node = findNode(tree, scope.path);
   const missing = (scope.kind === 'folder' && scope.id && !folder) || (scope.kind === 'collection' && !collection) || (scope.kind === 'group' && !node);
   const effective: Scope = missing ? { kind: 'collections' } : scope;
   const overview = effective.kind === 'collections';
   const inCollection = effective.kind === 'collection' || effective.kind === 'group';
   // 첫 화면은 최상위 컬렉션, 컬렉션 안에서는 그 하위를 보여 준다.
-  const cards = overview ? tree : inCollection && node ? node.children : [];
+  let cards: CollectionNode[] = [];
+  if (overview) cards = tree;
+  else if (inCollection && node) cards = node.children;
   return { effective, folder, collection, node, tree, overview, inCollection, cards };
 }
 
@@ -298,6 +310,16 @@ function ProblemRow({ p, order, folderLabel, onPick }: Readonly<{ p: ProblemSumm
 }
 
 type ScopeItem = { scope: Scope; label: string; count: number; group: 'all' | 'folder' | 'collection'; key: string; depth?: number };
+const GROUP_ICON: Record<ScopeItem['group'], string> = { collection: '◆', folder: '▤', all: '☰' };
+const GROUP_COLOR: Record<ScopeItem['group'], string> = { collection: 'text-sky', folder: 'text-warn', all: 'text-faint' };
+const KEY_ICON: Partial<Record<string, string>> = { bookmarks: '★', collections: '◆' };
+
+/** 휴대폰 범위 드롭다운에서 항목 앞에 붙이는 묶음 이름(컬렉션은 깊이만큼 들여 쓴다) */
+function optionPrefix(s: ScopeItem) {
+  if (s.group === 'folder') return '폴더 · ';
+  if (s.group === 'collection') return `컬렉션 · ${'　'.repeat(s.depth ?? 0)}`;
+  return '';
+}
 
 function Sidebar({
   scope,
@@ -332,7 +354,6 @@ function Sidebar({
     ),
   ];
   const current = scopes.find((s) => sameScope(s.scope, scope))?.key ?? 'collections';
-  const icon = (g: ScopeItem['group']) => (g === 'collection' ? '◆' : g === 'folder' ? '▤' : '☰');
 
   const item = (s: ScopeItem) => (
     <li key={s.key}>
@@ -343,8 +364,8 @@ function Sidebar({
         style={s.depth ? { paddingLeft: `${10 + s.depth * 14}px` } : undefined}
         className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised/60 hover:text-text'}`}
       >
-        <span className={`w-4 shrink-0 text-center text-[11px] ${s.group === 'collection' ? 'text-sky' : s.group === 'folder' ? 'text-warn' : 'text-faint'}`} aria-hidden>
-          {s.key === 'bookmarks' ? '★' : s.key === 'collections' ? '◆' : icon(s.group)}
+        <span className={`w-4 shrink-0 text-center text-[11px] ${GROUP_COLOR[s.group]}`} aria-hidden>
+          {KEY_ICON[s.key] ?? GROUP_ICON[s.group]}
         </span>
         <span className="min-w-0 flex-1 truncate">{s.label}</span>
         <span className="text-[11.5px] text-faint">{s.count}</span>
@@ -368,7 +389,7 @@ function Sidebar({
         >
           {scopes.map((s) => (
             <option key={s.key} value={s.key}>
-              {s.group === 'folder' ? '폴더 · ' : s.group === 'collection' ? `컬렉션 · ${'　'.repeat(s.depth ?? 0)}` : ''}
+              {optionPrefix(s)}
               {s.label} ({s.count})
             </option>
           ))}
@@ -433,16 +454,13 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
               ['collection', '◆ 컬렉션'],
             ] as const
           ).map(([k, label]) => (
-            <button
+            <label
               key={k}
-              type="button"
-              role="radio"
-              aria-checked={kind === k}
-              onClick={() => setKind(k)}
-              className={`h-9 rounded text-[13px] font-semibold ${kind === k ? 'bg-raised text-text' : 'text-dim'}`}
+              className={`flex h-9 cursor-pointer items-center justify-center rounded text-[13px] font-semibold has-focus-visible:outline-2 has-focus-visible:outline-accent ${kind === k ? 'bg-raised text-text' : 'text-dim'}`}
             >
+              <input type="radio" name="quick-create-kind" value={k} checked={kind === k} onChange={() => setKind(k)} className="sr-only" />
               {label}
-            </button>
+            </label>
           ))}
         </div>
       )}
@@ -589,7 +607,7 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
       <div className={`mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-faint ${compact ? 'text-[10px]' : 'text-[12px]'}`}>
         <span>문제 {total}</span>
         {node.children.length > 0 && <span>하위 {node.children.length}</span>}
-        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}{solved === total && ` · ${node.name.includes('단계') ? '단계' : node.name.includes('세트') ? '세트' : '컬렉션'} 클리어`}</span>}
+        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}{solved === total && ` · ${clearUnit(node.name)} 클리어`}</span>}
       </div>
       {signedIn && total > 0 && (
         <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden>
@@ -598,6 +616,13 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
       )}
     </button>
   );
+}
+
+/** 다 풀었을 때 붙이는 단위: 이름에 따라 단계·세트·컬렉션 */
+function clearUnit(name: string) {
+  if (name.includes('단계')) return '단계';
+  if (name.includes('세트')) return '세트';
+  return '컬렉션';
 }
 
 const PAGE = 80;

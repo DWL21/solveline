@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SubmissionDetail, SubmissionHistoryItem } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
@@ -8,12 +8,18 @@ import { ResultPanel } from './ResultPanel.tsx';
 const date = (value: string) => new Date(value).toLocaleString('ko-KR');
 const errorText = (error: unknown) => error instanceof ApiError ? error.message : '제출 기록을 불러오지 못했어요';
 
+function statusColor(item: Pick<SubmissionHistoryItem, 'status' | 'score'>) {
+  if (item.score === 100) return 'text-ok';
+  return item.status === 'error' ? 'text-bad' : '';
+}
+
 function statusText(item: Pick<SubmissionHistoryItem, 'status' | 'score'>) {
   if (item.status === 'queued') return '대기 중';
   if (item.status === 'running') return '채점 중';
   if (item.status === 'cancelled') return '중지됨';
   if (item.status === 'error') return '오류';
-  return item.score === null ? '완료' : item.score === 100 ? '✓ 100점' : `${item.score}점`;
+  if (item.score === null) return '완료';
+  return item.score === 100 ? '✓ 100점' : `${item.score}점`;
 }
 
 const isActive = (status: string | undefined) => status === 'queued' || status === 'running';
@@ -77,6 +83,28 @@ export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProble
     refetchInterval: (q) => (q.state.data?.items.some((item) => isActive(item.status)) ? 1500 : false),
   });
   if (!me) return <div className="p-6 text-[13px]">제출 기록은 로그인 후 볼 수 있어요. <a className="text-accent-text underline" href={loginHref()}>로그인</a></div>;
+  let listBody: ReactNode;
+  if (query.isPending) listBody = <p className="text-[13px] text-dim">불러오는 중이에요…</p>;
+  else if (query.isError) listBody = <p className="text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></p>;
+  else if (query.data.items.length === 0 && offset === 0) listBody = <p className="rounded-lg border border-line bg-panel p-5 text-[13px] text-dim">아직 제출한 내역이 없어요.</p>;
+  else
+    listBody = (
+      <>
+        <ol className="overflow-hidden rounded-lg border border-line bg-panel">
+          {query.data.items.map((item) => <li key={item.id} className="border-b border-line last:border-0">
+            <button type="button" onClick={() => setSelected(item.id)} aria-pressed={selected === item.id} className={`w-full p-3 text-left hover:bg-raised ${selected === item.id ? 'bg-raised' : ''}`}>
+              <span className="block truncate text-[13px] font-semibold">{item.problemTitle ?? '삭제된 문제'}</span>
+              <span className="mt-1 flex items-center justify-between gap-2 text-[11.5px] text-dim"><span>{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'}</span><span className={statusColor(item)}>{statusText(item)}</span></span>
+            </button>
+          </li>)}
+        </ol>
+        <div className="mt-3 flex justify-between gap-2">
+          <button type="button" className="btn-ghost" disabled={offset === 0} onClick={() => { setOffset(Math.max(0, offset - 20)); setSelected(null); }}>이전</button>
+          <button type="button" className="btn-ghost" disabled={query.data.nextOffset === null} onClick={() => { setOffset(query.data.nextOffset!); setSelected(null); }}>다음</button>
+        </div>
+      </>
+    );
+
   return (
     <main className="pb-safe min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
@@ -85,24 +113,7 @@ export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProble
         <div className="mt-5 flex flex-col gap-4 lg:flex-row">
           {/* 좁은 화면: 제출을 고르면 목록 대신 상세를 크게 보여 준다 */}
           <section className={`w-full shrink-0 lg:block lg:w-80 ${selected ? 'hidden' : ''}`} aria-label="제출 목록">
-            {query.isPending ? <p className="text-[13px] text-dim">불러오는 중이에요…</p> : query.isError ? (
-              <p className="text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></p>
-            ) : query.data.items.length === 0 && offset === 0 ? <p className="rounded-lg border border-line bg-panel p-5 text-[13px] text-dim">아직 제출한 내역이 없어요.</p> : (
-              <>
-                <ol className="overflow-hidden rounded-lg border border-line bg-panel">
-                  {query.data.items.map((item) => <li key={item.id} className="border-b border-line last:border-0">
-                    <button type="button" onClick={() => setSelected(item.id)} aria-pressed={selected === item.id} className={`w-full p-3 text-left hover:bg-raised ${selected === item.id ? 'bg-raised' : ''}`}>
-                      <span className="block truncate text-[13px] font-semibold">{item.problemTitle ?? '삭제된 문제'}</span>
-                      <span className="mt-1 flex items-center justify-between gap-2 text-[11.5px] text-dim"><span>{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'}</span><span className={item.score === 100 ? 'text-ok' : item.status === 'error' ? 'text-bad' : ''}>{statusText(item)}</span></span>
-                    </button>
-                  </li>)}
-                </ol>
-                <div className="mt-3 flex justify-between gap-2">
-                  <button type="button" className="btn-ghost" disabled={offset === 0} onClick={() => { setOffset(Math.max(0, offset - 20)); setSelected(null); }}>이전</button>
-                  <button type="button" className="btn-ghost" disabled={query.data.nextOffset === null} onClick={() => { setOffset(query.data.nextOffset!); setSelected(null); }}>다음</button>
-                </div>
-              </>
-            )}
+            {listBody}
           </section>
           {selected ? <Detail key={selected} id={selected} onClose={() => setSelected(null)} onPickProblem={onPickProblem} /> : <div className="hidden min-h-40 flex-1 items-center justify-center rounded-lg border border-line bg-panel p-4 text-[13px] text-faint lg:flex">제출을 선택하면 당시 코드와 채점 결과를 볼 수 있어요.</div>}
         </div>
