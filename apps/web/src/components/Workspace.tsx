@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { lastSubmissionOf, type Language, type Problem, type ProblemInput, type ProblemSummary, type Submission, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { BookmarkStar } from './BookmarkStar.tsx';
+import { Icon } from './Icon.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';
 import { CodeEditor } from './CodeEditor.tsx';
@@ -117,7 +118,7 @@ const paneClass = (narrow: boolean, shown: boolean, narrowClass: string, wideCla
 async function flushEdits(queue: Queue, id: string) {
   const pendingEdits = () => Object.keys(queue?.read(id)?.patch ?? {}).some((key) => key !== 'timer');
   while (queue && pendingEdits()) {
-    if (!(await queue.flush(id))) throw new ApiError(0, 'sync_failed', '변경 내용을 동기화하지 못했어요. 연결을 확인해 주세요.');
+    if (!(await queue.flush(id))) throw new ApiError(0, 'sync_failed', '변경 내용을 저장하지 못했어요. 인터넷 연결을 확인해 주세요.');
   }
 }
 
@@ -238,7 +239,7 @@ function useRunner({
   const doRun = useCallback(() => {
     if (runMut.isPending) return;
     const cases = [...draftRef.current.cases.filter((c) => !c.hidden), ...draftRef.current.myCases];
-    if (cases.length === 0) return refuse('실행할 테스트 케이스가 없어요. 케이스를 추가하세요.');
+    if (cases.length === 0) return refuse('실행할 테스트 케이스가 없어요. 테스트 케이스를 추가해 주세요.');
     runMut.mutate({ cases, submit: false });
   }, [runMut, draftRef, refuse]);
 
@@ -413,7 +414,7 @@ function RunFooter({
   return (
     <footer className={`pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'keyboard-hide typing-hide' : 'flex-wrap'}`}>
       <button type="button" className="btn-ghost touch-target" onClick={onReset} aria-label="초기화" title="시작 코드로 되돌리기">
-        {narrow ? '↺' : '초기화'}
+        {narrow ? <Icon name="reset" /> : '초기화'}
       </button>
       <button type="button" className={`btn-ghost touch-target ${narrow ? 'hidden' : ''}`} onClick={onAddCase}>
         테스트 케이스 추가하기
@@ -449,7 +450,7 @@ function StopButton({ runner }: Readonly<{ runner: Runner }>) {
           <Spinner size={13} /> 중지 중
         </>
       ) : (
-        '■ 중지'
+        '중지'
       )}
     </button>
   );
@@ -529,8 +530,8 @@ function LastScore({ problem }: Readonly<{ problem: Problem }>) {
   if (!sub) return null;
   const solved = sub.score === 100;
   return (
-    <span className={`text-[12px] font-semibold ${solved ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
-      {solved ? '✓' : `△ ${sub.score}점`}
+    <span className={`text-[12.5px] font-semibold whitespace-nowrap ${solved ? 'text-ok' : 'text-warn'}`} title={`최근 제출 ${new Date(sub.at).toLocaleString('ko-KR')}`}>
+      {solved ? '✓ 해결' : `${sub.score}점`}
     </span>
   );
 }
@@ -568,7 +569,6 @@ function EditTools({
         type="button"
         className={editing ? 'btn-primary px-3' : 'btn-ghost px-3'}
         aria-pressed={editing}
-        title="문제 내용·채점 케이스·폴더를 바꿉니다. 바꾸면 모든 사용자에게 적용돼요."
         onClick={onToggle}
       >
         {editing ? '편집 끝내기' : '편집 모드'}
@@ -610,7 +610,7 @@ function ResultDot({ pending, unseen }: Readonly<{ pending: boolean; unseen: boo
 function tabLabel(t: Tab, draft: ProblemInput): string {
   if (t === 'desc') return '문제 설명';
   if (t === 'cases') return `테스트 케이스 ${draft.cases.filter((c) => !c.hidden).length + draft.myCases.length}`;
-  return draft.memo.trim() ? '메모 •' : '메모';
+  return '메모';
 }
 
 function ProblemTabs({ tab, onTab, guest, draft }: Readonly<{ tab: Tab; onTab: (t: Tab) => void; guest: boolean; draft: ProblemInput }>) {
@@ -620,6 +620,7 @@ function ProblemTabs({ tab, onTab, guest, draft }: Readonly<{ tab: Tab; onTab: (
       {tabs.map((t) => (
         <button key={t} type="button" onClick={() => onTab(t)} className={`h-full shrink-0 border-b-2 px-3 ${tab === t ? 'border-accent text-text' : 'border-transparent hover:text-text'}`}>
           {tabLabel(t, draft)}
+          {t === 'memo' && draft.memo.trim() && <span className="ml-1 inline-block size-1.5 rounded-full bg-accent-text align-middle" aria-label="작성됨" />}
         </button>
       ))}
     </div>
@@ -632,7 +633,7 @@ function ProblemBody({ tab, problem, draft, patch, guest, editing }: Readonly<{ 
       <textarea
         value={draft.memo}
         onChange={(e) => patch({ memo: e.target.value })}
-        placeholder="풀이 아이디어, 막힌 부분, 다시 볼 점을 적어 두세요. 나만 볼 수 있어요."
+        placeholder="나만 볼 수 있는 메모예요."
         aria-label="내 메모"
         className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
       />
@@ -663,7 +664,7 @@ function Description({ value, editing, onChange }: Readonly<{ value: string; edi
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="문제 설명을 Markdown으로 작성하세요. 제목, 목록, 표, 코드 블록, 링크를 쓸 수 있어요."
+        placeholder="문제 설명 (Markdown)"
         className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
         autoFocus
       />
@@ -675,7 +676,7 @@ function Description({ value, editing, onChange }: Readonly<{ value: string; edi
           {value}
         </ReactMarkdown>
       ) : (
-        <span className="text-faint">문제 설명이 없어요.</span>
+        <span className="text-faint">문제 설명이 없어요</span>
       )}
     </div>
   );
@@ -735,10 +736,10 @@ function CodePane({
   );
 }
 
-function FolderName({ id }: { id: string | null }) {
+function FolderName({ id }: Readonly<{ id: string | null }>) {
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const name = folders.data?.find((f) => f.id === id)?.name;
-  return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">▤ {name}</span> : null;
+  return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">{name}</span> : null;
 }
 
 function FolderSelect({ value, onChange }: Readonly<{ value: string | null; onChange: (id: string | null) => void }>) {
@@ -751,10 +752,10 @@ function FolderSelect({ value, onChange }: Readonly<{ value: string | null; onCh
       onChange={(e) => onChange(e.target.value || null)}
       className="h-[34px] max-w-40 rounded-md border border-line-strong bg-raised px-2 text-[13px] outline-none focus:border-accent"
     >
-      <option value="">▤ 내 폴더 없음</option>
+      <option value="">폴더 없음</option>
       {folders.data?.map((f) => (
         <option key={f.id} value={f.id}>
-          ▤ {f.name}
+          {f.name}
         </option>
       ))}
     </select>
@@ -774,7 +775,7 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
       try {
         return await api.setCollectionItems(collection.id, [problemId]);
       } catch {
-        throw new Error('컬렉션은 만들었지만 문제를 추가하지 못했어요. 목록에서 다시 선택해 주세요.');
+        throw new Error('컬렉션은 만들었지만 이 문제를 넣지 못했어요. 목록에서 다시 체크해 주세요.');
       }
     },
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.collections }),
@@ -803,7 +804,7 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
   return (
     <div ref={box} className="relative">
       <button type="button" className="btn-ghost px-2.5" aria-expanded={open} onClick={() => setOpen((v) => !v)} title="컬렉션">
-        <span className="text-sky">◆</span> 컬렉션{mine > 0 ? ` ${mine}` : ''}
+        컬렉션{mine > 0 ? ` ${mine}` : ''}
       </button>
       {open && (
         <div className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-2 shadow-2xl">
@@ -850,12 +851,12 @@ function SaveBadge({ state, onRetry }: Readonly<{ state: DraftState; onRetry: ()
   if (state === 'error' || state === 'storage-error')
     return (
       <button type="button" onClick={onRetry} className="text-[12px] font-semibold text-bad underline">
-        {state === 'storage-error' ? '로컬 저장 실패 · 서버 저장' : '기기에 보관 중 · 동기화 재시도'}
+        {state === 'storage-error' ? '임시 저장 실패 · 다시 저장' : '저장 안 됨 · 다시 시도'}
       </button>
     );
   return (
     <span className="inline-flex items-center gap-1 text-[12px] text-faint" aria-live="polite">
-      {state === 'saved' || state === 'local' ? '✓ 저장됨' : <><Spinner size={11} /> 동기화 중</>}
+      {state === 'saved' || state === 'local' ? '저장됨' : <><Spinner size={11} /> 저장 중</>}
     </span>
   );
 }

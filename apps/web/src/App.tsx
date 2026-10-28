@@ -8,6 +8,7 @@ import { LegalFooter, PrivacyPage, TermsPage } from './components/Legal.tsx';
 import { SignupScreen } from './components/SignupScreen.tsx';
 import { AdminPage } from './components/AdminPage.tsx';
 import { Avatar } from './components/Avatar.tsx';
+import { Icon } from './components/Icon.tsx';
 import { BootScreen, Spinner, WorkspaceSkeleton } from './components/Loading.tsx';
 import { Home, scopeList } from './components/Home.tsx';
 import { SubmissionHistoryPage } from './components/SubmissionHistoryPage.tsx';
@@ -115,17 +116,21 @@ function Shell() {
           onScope={(scope) => go({ kind: 'home', scope })}
           onPick={(id) => go({ kind: 'problem', id })}
           onNew={() => setCreating(true)}
+          footer={<LegalFooter admin={!!me?.owner} />}
         />
-        <LegalFooter admin={!!me?.owner} />
       </div>
     );
 
+  const ide = route.kind === 'problem';
+  const navLink = (active: boolean) =>
+    `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
+
   return (
     <div className="flex h-full flex-col bg-ink">
-      <header className="code-focus-hide flex h-12 shrink-0 items-center gap-2 border-b border-line bg-[#0f1922] px-3 sm:px-4">
+      <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
         <a
           href="#/"
-          className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-raised"
+          className="-ml-1 flex items-center gap-2 rounded-md px-1 py-1"
           title="문제 선택 화면으로"
           onClick={(e) => {
             e.preventDefault();
@@ -134,15 +139,30 @@ function Shell() {
           }}
         >
           <img src="/icon.svg" alt="" className="size-6" />
-          <span className="text-[15px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
+          <span className="text-[16px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
         </a>
-        {route.kind === 'problem' && (
-          <button type="button" className="btn-quiet ml-1" onClick={() => go({ kind: 'home', scope: lastScope })}>
-            ← 문제 목록
+        {ide ? (
+          <button type="button" className="btn-quiet ml-1 gap-1 px-2" onClick={() => go({ kind: 'home', scope: lastScope })}>
+            <Icon name="left" size={14} /> 문제 목록
           </button>
+        ) : (
+          <nav className="ml-2 flex h-full items-center gap-4 max-sm:hidden" aria-label="주 메뉴">
+            <a href="#/" className={navLink(route.kind === 'home')} aria-current={route.kind === 'home' ? 'page' : undefined}>
+              문제
+            </a>
+            {me && (
+              <a href="#/submissions" className={navLink(route.kind === 'submissions')} aria-current={route.kind === 'submissions' ? 'page' : undefined}>
+                제출 기록
+              </a>
+            )}
+          </nav>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {me && <a href="#/submissions" className={`btn-quiet ${route.kind === 'submissions' ? 'text-accent-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>}
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+          {me && (ide ? (
+            <a href="#/submissions" className="btn-quiet px-2 text-[13px]">제출 기록</a>
+          ) : (
+            <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
+          ))}
           <UserMenu onLogout={() => logout.mutate()} />
         </div>
       </header>
@@ -181,24 +201,24 @@ function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
   }, [open]);
   if (!me)
     return (
-      <a href={loginHref()} className="btn-primary min-h-8 px-3 text-[12.5px]">
+      <a href={loginHref()} className="btn-primary min-h-8 px-3.5">
         로그인
       </a>
     );
   const temporary = me.email.endsWith('@temporary.invalid');
-  const label = temporary ? me.name : me.email;
+  const label = me.name || me.email;
   return (
     <div className="relative" data-user-menu>
-      <button type="button" className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-raised" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="flex items-center gap-2 rounded-full py-1 pr-1 pl-1 hover:bg-raised sm:pr-2.5" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Avatar picture={me.picture} email={me.email} name={temporary ? me.name : undefined} size={24} />
-        <span className="hidden max-w-56 truncate text-[12.5px] text-dim sm:inline">{label}</span>
+        <span className="hidden max-w-44 truncate text-[13px] font-semibold text-dim sm:inline">{label}</span>
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-1.5 shadow-2xl">
+        <div className="absolute right-0 z-40 mt-1.5 w-60 rounded-lg border border-line bg-panel p-1.5 shadow-2xl">
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
             <p className="truncate text-[13px] font-semibold">{me.name || me.email}</p>
             <p className="truncate text-[12px] text-dim">{temporary ? '임시 계정' : me.email}</p>
-            {me.editor && <p className="mt-1 text-[11.5px] font-bold text-accent-text">편집 권한</p>}
+            {me.editor && <p className="mt-1.5 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-[11.5px] font-semibold text-accent-text">편집 권한</p>}
           </div>
           <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-raised" onClick={onLogout}>
             로그아웃
@@ -235,13 +255,13 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
   return (
     <dialog open className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="새 문제">
       <form
-        className="w-full max-w-md rounded-xl border border-line bg-panel p-5 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-2xl"
         onSubmit={(e) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <h2 className="text-[16px] font-bold">새 문제</h2>
+        <h2 className="text-[17px] font-bold">새 문제</h2>
         <label className="mt-4 flex flex-col gap-1.5">
           <span className="text-[12px] font-bold text-dim">제목</span>
           <input className="field font-sans text-[14px]" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 두 개 뽑아서 더하기" autoFocus />
@@ -251,8 +271,8 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
           <div className="grid grid-cols-2 gap-2">
             {(
               [
-                ['function', 'solution 함수', '함수를 완성하는 문제'],
-                ['stdin', '표준 입출력', 'PCCE·입출력 문제'],
+                ['function', 'solution 함수', '함수의 반환값으로 채점'],
+                ['stdin', '표준 입출력', '입력을 읽고 출력으로 채점'],
               ] as const
             ).map(([m, name, hint]) => (
               <label key={m} className={`cursor-pointer rounded-md border p-3 ${mode === m ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-dim'}`}>
@@ -268,9 +288,9 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
           <select
             value={folderId ?? ''}
             onChange={(e) => setFolderId(e.target.value || null)}
-            className="h-[34px] rounded-md border border-line-strong bg-raised px-2 text-[13px] outline-none focus:border-accent"
+            className="h-[34px] rounded-md border border-line-strong bg-panel px-2 text-[13px] outline-none focus:border-accent"
           >
-            <option value="">폴더 없음</option>
+            <option value="">선택 안 함</option>
             {folders.data?.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -279,22 +299,20 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
           </select>
         </label>
         {collection && (
-          <p className="mt-2 text-[12px] text-faint">
-            <span className="text-sky">◆</span> "{collection.name}" 컬렉션 끝에 추가돼요.
-          </p>
+          <p className="mt-2 text-[12px] text-faint">'{collection.name}' 컬렉션 맨 뒤에 추가돼요.</p>
         )}
         <label className="mt-4 flex flex-col gap-1.5">
           <span className="text-[12px] font-bold text-dim">언어</span>
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value as Language)}
-            className="h-[34px] rounded-md border border-line-strong bg-raised px-2 text-[13px] font-semibold outline-none focus:border-accent"
+            className="h-[34px] rounded-md border border-line-strong bg-panel px-2 text-[13px] font-semibold outline-none focus:border-accent"
           >
             <option value="java">Java</option>
             <option value="python">Python3</option>
           </select>
         </label>
-        {create.isError && <p className="mt-3 text-[13px] font-semibold text-bad">{create.error instanceof ApiError ? create.error.message : '만들지 못했어요'}</p>}
+        {create.isError && <p className="mt-3 text-[13px] font-semibold text-bad">{create.error instanceof ApiError ? create.error.message : '문제를 만들지 못했어요'}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className="btn-quiet" onClick={onClose}>
             취소

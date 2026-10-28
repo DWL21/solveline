@@ -27,8 +27,8 @@ test.describe('문제 풀기', { tag: '@R3' }, () => {
     await expect(home.heading).toContainText('컬렉션');
     await home.showAll();
     await home.search.fill(p.title);
-    await expect(home.row(p.title).getByLabel('맞춤')).toBeVisible();
-    await evidence(page, '문제 목록에 맞춤(✓) 표시가 남는다');
+    await expect(home.row(p.title).getByLabel('해결')).toBeVisible();
+    await evidence(page, '문제 목록에 해결(✓) 표시가 남는다');
   });
 
   test('오답이면 기댓값과 실행 결과를 비교해 보여 준다', async ({ page, workspace, seedProblem }) => {

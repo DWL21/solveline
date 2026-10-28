@@ -44,7 +44,7 @@ function Field({ value, label, multiline, readOnly, onChange }: Readonly<{ value
     );
   if (value.length > BIG_FIELD)
     return (
-      <div className="field cursor-default truncate text-faint" title={`${value.length.toLocaleString()}자 — 너무 커서 여기서는 편집할 수 없어요`} aria-label={label}>
+      <div className="field cursor-default truncate text-faint" title={`${value.length.toLocaleString()}자 · 너무 커서 여기서는 편집할 수 없어요`} aria-label={label}>
         {value.slice(0, 40)}… <span className="text-[11px]">({(value.length / 1024).toFixed(0)}KB)</span>
       </div>
     );
@@ -223,7 +223,7 @@ export function CasesEditor({
       {editing && <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />}
       {mode === 'function' && editing && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[12px] font-bold text-dim">매개변수 이름 (쉼표로 구분)</span>
+          <span className="text-[12px] font-bold text-dim">매개변수 (쉼표로 구분)</span>
           <ParamsInput
             params={params}
             onChange={(next) => {
@@ -246,7 +246,7 @@ export function CasesEditor({
         )}
         {editing && (
           <button type="button" className="btn-ghost mt-2" disabled={cases.length >= MAX_CASES} onClick={() => onCases([...cases, newCase(params.length)])}>
-            + 기본 케이스 추가
+            기본 케이스 추가
           </button>
         )}
       </section>
@@ -258,7 +258,7 @@ export function CasesEditor({
         </h3>
         {myCases.length > 0 && <CaseList mode={mode} params={params} cases={myCases} label="내 테스트" onChange={onMyCases} />}
         <button type="button" className="btn-ghost mt-2" disabled={myCases.length >= MAX_CASES} onClick={() => onMyCases([...myCases, newCase(params.length)])}>
-          + 테스트 케이스 추가
+          테스트 케이스 추가
         </button>
       </section>
       )}
@@ -299,7 +299,7 @@ function TimeLimit({ value, onChange }: Readonly<{ value: number; onChange: (ms:
 /** 히든 케이스 펼치기 버튼 문구 */
 function toggleLabel(open: boolean, count: number) {
   if (open) return '접기';
-  return count ? '펼쳐서 보기' : '추가하기';
+  return count ? '펼치기' : '추가';
 }
 
 type HiddenState = 'saved' | 'dirty' | 'saving' | 'error';
@@ -346,7 +346,7 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
     <section className="border-t border-line pt-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-[12px] font-bold text-dim">
-          히든 케이스 {count} <span className="font-normal text-faint">— 제출 후 채점에만 사용</span>
+          히든 케이스 {count} <span className="font-normal text-faint">· 제출할 때만 써요</span>
         </h3>
         <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
           {toggleLabel(open, count)}
@@ -357,7 +357,7 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
           </span>
         )}
       </div>
-      {!open && count === 0 && <p className="py-2 text-[12.5px] text-faint">히든 케이스가 없으면 제출할 때 보이는 케이스로 채점해요.</p>}
+      {!open && count === 0 && <p className="py-2 text-[12.5px] text-faint">히든 케이스가 없으면 기본 케이스로 채점해요.</p>}
       {open && q.isPending && <LinesSkeleton />}
       {open && q.isError && (
         <div className="flex flex-wrap items-center gap-2 py-2">
@@ -371,7 +371,7 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
         <div className="mt-1">
           {cases.length > 0 && <CaseList mode={mode} params={params} cases={cases} label="히든 테스트" onChange={change} />}
           <button type="button" className="btn-quiet mt-1 px-2 text-[12px]" disabled={cases.length >= MAX_HIDDEN} onClick={() => change([...cases, newCase(params.length, true)])}>
-            + 히든 케이스 추가
+            히든 케이스 추가
           </button>
         </div>
       )}

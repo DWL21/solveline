@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EMPTY_TIMER, type Problem, type ProblemTimer } from '@solveline/shared';
 import type { DraftQueue } from '../lib/draft-queue.ts';
 import { formatDuration } from '../lib/time.ts';
+import { Icon } from './Icon.tsx';
 
 /** 타이머가 늦게 깨어나도(절전·백그라운드 제한) 한 번에 크게 늘지 않게 */
 const MAX_TICK_MS = 5000;
@@ -73,34 +74,33 @@ export function SolveTimerBadge({
   onResume: () => void;
 }>) {
   const solved = timer.solvedMs !== null;
-  const pauseIcon = timer.paused ? '⏸' : '⏱';
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : 'bg-raised text-text'}`}
-        title={solved ? '맞춘 순간의 풀이 시간' : '풀이 시간'}
-        aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}에 맞춤` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
+        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : timer.paused ? 'bg-raised text-dim' : 'bg-raised text-text'}`}
+        title={solved ? '정답을 맞힌 시점의 풀이 시간' : '풀이 시간'}
+        aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}, 해결` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >
-        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `${pauseIcon} ${formatDuration(timer.elapsedMs)}`}
+        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : formatDuration(timer.elapsedMs)}
       </span>
       {!solved &&
         (timer.paused ? (
-          <button type="button" className="btn-quiet min-h-7 px-1.5 text-[13px]" title="다시 시작" aria-label="타이머 다시 시작" onClick={onResume}>
-            ▶
+          <button type="button" className="btn-quiet min-h-7 px-1.5" title="다시 시작" aria-label="타이머 다시 시작" onClick={onResume}>
+            <Icon name="play" size={14} filled />
           </button>
         ) : (
-          <button type="button" className="btn-quiet min-h-7 px-1.5 text-[13px]" title="일시정지" aria-label="타이머 일시정지" onClick={onPause}>
-            ⏸
+          <button type="button" className="btn-quiet min-h-7 px-1.5" title="일시정지" aria-label="타이머 일시정지" onClick={onPause}>
+            <Icon name="pause" size={14} />
           </button>
         ))}
       <button
         type="button"
-        className="btn-quiet min-h-7 px-1.5 text-[13px]"
+        className="btn-quiet min-h-7 px-1.5"
         title="풀이 시간 초기화"
         aria-label="풀이 시간 초기화"
         onClick={() => confirm('풀이 시간을 초기화할까요?') && onReset()}
       >
-        ↺
+        <Icon name="reset" size={14} />
       </button>
     </span>
   );
@@ -111,10 +111,10 @@ export function PausedOverlay({ elapsedMs, onResume }: Readonly<{ elapsedMs: num
   return (
     <dialog open className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="타이머 일시정지됨">
       <div className="flex flex-col items-center gap-3 rounded-xl border border-line-strong bg-panel/95 px-8 py-6 text-center shadow-2xl">
-        <p className="text-[13px] font-bold text-dim">일시정지됨</p>
+        <p className="text-[13px] font-semibold text-dim">일시정지</p>
         <p className="font-mono text-[32px] font-bold tabular-nums">{formatDuration(elapsedMs)}</p>
         <button type="button" className="btn-primary min-h-11 px-6 text-[15px]" onClick={onResume} autoFocus>
-          ▶ 다시 시작
+          다시 시작
         </button>
       </div>
     </dialog>
