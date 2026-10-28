@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HiddenCases, JudgeStatus, judgeHeaders, Runtime, TestsetRef, type JudgeJob, type TestCase } from '@solveline/shared';
+import { HiddenCases, JudgeStatus, judgeHeaders, judgeStreamHeaders, Runtime, TestsetRef, type JudgeJob, type TestCase } from '@solveline/shared';
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -21,6 +21,10 @@ export interface Judge {
   cancel(id: string): Promise<JudgeStatus | null>;
   putTestset(cases: TestCase[]): Promise<TestsetRef | null>;
   testset(hash: string): Promise<TestCase[] | null>;
+  /** 큰 히든 테스트셋을 해석하지 않고 흘려보낸다. 응답 본문은 저장한 케이스({data:{cases}}) 그대로다. */
+  putTestsetStream(body: ReadableStream<Uint8Array>): Promise<{ ref: TestsetRef | null; response: Response }>;
+  /** 저장한 테스트셋 응답({data:{cases}})을 해석하지 않고 그대로. 없으면 null */
+  testsetStream(hash: string): Promise<Response | null>;
   runtime(): Promise<Runtime>;
 }
 
@@ -76,6 +80,42 @@ export class HttpJudge implements Judge {
 
   async testset(hash: string) {
     return (await this.call(HiddenCases, 'GET', `/testsets/${encodeURIComponent(hash)}`))?.cases ?? null;
+  }
+
+  async putTestsetStream(body: ReadableStream<Uint8Array>) {
+    const path = '/testsets?echo=1';
+    const res = await this.raw(path, {
+      method: 'PUT',
+      // Node의 fetch는 스트림 본문에 duplex를 요구한다(Worker는 무시한다)
+      ...({ duplex: 'half' } as object),
+      body,
+      headers: { 'content-type': 'application/json', ...(await judgeStreamHeaders(this.secret, 'PUT', path)) },
+    }, 120_000);
+    if (!res.ok) throw await this.error(res);
+    const hash = res.headers.get('x-testset-hash');
+    const count = Number(res.headers.get('x-testset-count'));
+    return { ref: hash && hash !== 'none' ? { hash, count } : null, response: res };
+  }
+
+  async testsetStream(hash: string) {
+    const path = `/testsets/${encodeURIComponent(hash)}`;
+    const res = await this.raw(path, { headers: await judgeHeaders(this.secret, 'GET', path, '') }, 60_000);
+    if (res.status === 404) return null;
+    if (!res.ok) throw await this.error(res);
+    return res;
+  }
+
+  private async raw(path: string, init: RequestInit, timeoutMs: number) {
+    try {
+      return await this.fetchImpl(`${this.baseUrl}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      throw new JudgeError(502, 'judge_unreachable', `채점 서버에 연결할 수 없습니다: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  private async error(res: Response) {
+    const err = ErrorEnvelope.safeParse(await res.json().catch(() => null));
+    return err.success ? new JudgeError(res.status, err.data.error.code, err.data.error.message) : new JudgeError(502, 'judge_error', `채점 서버 오류 (${res.status})`);
   }
 
   async runtime() {

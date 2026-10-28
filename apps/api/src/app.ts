@@ -634,19 +634,23 @@ export function createApp(deps: AppDeps) {
   });
 
   // ─── 히든 테스트셋(공용 채점 케이스): 편집 권한자만 보고 고친다 ───
+  // 히든 테스트셋은 수 MB라 Worker(CPU 10ms)에서 해석하지 않는다. 권한만 확인하고 judge와 본문을 그대로 주고받는다(검사·저장은 judge).
+  const jsonBody = (body: BodyInit | null) => new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8' } });
+
   app.get('/api/problems/:id/hidden', editorOnly, async (c) => {
     const ref = await problems.hiddenRef(c.req.param('id')!);
     if (ref === false) return fail(c, 404, 'not_found', '없는 문제입니다.');
-    return ok(c, HiddenCases, { cases: ref ? ((await judge.testset(ref.hash)) ?? []) : [] });
+    const res = ref ? await judge.testsetStream(ref.hash) : null;
+    return res ? jsonBody(res.body) : ok(c, HiddenCases, { cases: [] });
   });
 
   app.put('/api/problems/:id/hidden', editorOnly, async (c) => {
-    const body = await readJson(c, HiddenCases);
-    if (!body) return fail(c, 400, 'invalid_request', '히든 케이스 형식이 올바르지 않습니다.');
     if ((await problems.hiddenRef(c.req.param('id')!)) === false) return fail(c, 404, 'not_found', '없는 문제입니다.');
-    const ref = await judge.putTestset(body.cases.map((x) => ({ ...x, hidden: true })));
+    const body = c.req.raw.body;
+    if (!body) return fail(c, 400, 'invalid_request', '히든 케이스 형식이 올바르지 않습니다.');
+    const { ref, response } = await judge.putTestsetStream(body);
     await problems.setHidden(c.req.param('id')!, ref);
-    return ok(c, HiddenCases, { cases: ref ? ((await judge.testset(ref.hash)) ?? []) : [] });
+    return jsonBody(response.body);
   });
 
   // ─── 제출: 기록은 여기, 실행은 judge ───
