@@ -1,6 +1,6 @@
 # 0006. 공용 문제 데이터는 R2와 Worker에서 읽고, 사용자 데이터는 pahidc에 둔다
 
-- 상태: 코드 반영 완료. **R2 데이터 이전과 Worker의 R2 읽기는 운영자 승인 후 켠다**(아래 「켜는 순서」)
+- 상태: 코드 반영 완료. R2 데이터 이전과 Worker의 R2 읽기는 2026-10-28 운영자 승인으로 진행(아래 「켜는 순서」)
 - 날짜: 2026-10-28
 
 ## 배경
@@ -102,27 +102,32 @@ SQLite는 공용 문제의 **쓰기 원본**으로 남는다. 사용자 데이�
 
 DB가 커지거나 api를 여러 대 띄워야 할 때의 Postgres·Redis 이전은 기존 로드맵을 따른다.
 
-## 켜는 순서(운영자 승인 필요)
+## 켜는 순서(2026-10-28 운영자 승인으로 진행)
 
-코드는 R2 설정이 없으면 예전과 같이 동작한다. Worker는 R2 대신 pahidc `/api/catalog/*`에서 읽어 캐시하고, API는 아무것도 올리지 않는다. 아래 단계는 각각 운영자 승인을 받은 뒤 진행한다.
+코드는 R2 설정이 없으면 예전과 같이 동작한다. Worker는 R2 대신 pahidc `/api/catalog/*`에서 읽어 캐시하고, API는 아무것도 올리지 않는다.
 
-1. Cloudflare에서 비공개 R2 버킷(예: `solveline-catalog`)을 만들고, 그 버킷만 Object Read & Write할 수 있는 API 토큰을 만든다.
-2. **데이터 이전**:
-   - GitHub Environment `production`에 variables `R2_ACCOUNT_ID`·`R2_BUCKET`과 secrets `R2_ACCESS_KEY_ID`·`R2_SECRET_ACCESS_KEY`를 넣고 배포(`workflow_dispatch`)한다.
-   - api가 시작하면서 문제 전체와 테스트셋을 올린다. 로그에 `[catalog] R2 게시: 문제 N개, 테스트셋 M개`가 나오는지 확인한다.
-   - **진행 중인 문제 편집 작업이 끝난 뒤** 켠다. 그 뒤의 편집은 저장할 때마다 자동으로 게시된다.
-3. **Worker의 R2 읽기**:
-   - Pages 프로젝트 `solveline`에 R2 바인딩 `CATALOG`(위 버킷)와 환경 변수 `CATALOG_SOURCE=r2`를 추가하고 다시 배포한다.
-   - 대시보드 대신 `apps/web/wrangler.toml`로 둘 수도 있다. 이때 Pages 설정을 파일이 대신하므로 기존 대시보드 설정을 함께 옮긴다.
-4. 확인:
+**R2 API 키를 서버에 두지 않는다.** R2 바인딩은 Pages Worker만 갖는다. pahidc는 Worker의 내부 경로 `/api/internal/r2`로 쓴다.
+- 공유 비밀 `R2_PROXY_SECRET`을 확인한다(GitHub secret과 Pages 비밀에 같은 값).
+- `catalog/`·`testsets/` 아래만 다룬다.
+- 본문은 해석하지 않고 흘려보내므로 Worker CPU를 거의 쓰지 않는다.
+
+1. 비공개 R2 버킷 `solveline-catalog`를 만든다. `apps/web/wrangler.toml`에 바인딩 `CATALOG`가 있다(이 파일이 대시보드의 바인딩·변수 설정을 대신한다).
+2. 32자 이상의 임의 값을 만들어 GitHub Environment `production` secret `R2_PROXY_SECRET`과 Pages 비밀 `R2_PROXY_SECRET`에 넣는다.
+3. **데이터 이전**(배포):
+   - api가 시작하면서 문제 전체와 테스트셋을 Worker를 거쳐 올린다.
+   - 배포 중에는 Worker가 API보다 늦게 올라오므로 성공할 때까지 1분마다 다시 시도한다.
+   - 로그에 `[catalog] R2 게시: 문제 N개, 테스트셋 M개`가 나오는지 본다.
+   - 그 뒤의 편집(히든 테스트셋 보강 포함)은 저장할 때마다 자동으로 게시된다.
+4. **Worker의 R2 읽기**: `wrangler.toml`에 `[vars] CATALOG_SOURCE = "r2"`를 넣고 배포한다.
+5. 확인:
    - `/api/catalog/index` 응답의 `ETag`가 R2 형식인지 본다.
    - 문제를 편집한 뒤 다른 브라우저에서 2분 안에 반영되는지 본다.
    - pahidc 로그에서 `/api/catalog/*` 요청이 줄었는지 본다.
 
 ## 롤백
 
-- Worker: Pages 환경 변수 `CATALOG_SOURCE`를 지우면 다시 pahidc에서 읽는다(캐시는 그대로).
-- API: R2 변수를 지우고 배포하면 게시를 멈춘다. SQLite와 로컬 테스트셋은 지우지 않았으므로 데이터 손실이 없다.
+- Worker: `wrangler.toml`의 `CATALOG_SOURCE`를 지우고 배포하면 다시 pahidc에서 읽는다(캐시는 그대로).
+- API: `R2_PROXY_SECRET`을 지우고 배포하면 게시를 멈춘다. SQLite와 로컬 테스트셋은 지우지 않았으므로 데이터 손실이 없다.
 - 웹: 예전 `/api/problems` 경로가 그대로 있다. 이전 Pages 배포로 되돌려도 동작한다.
 
 ## 한계와 다음 일

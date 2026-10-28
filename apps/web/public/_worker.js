@@ -27,6 +27,49 @@ const hasSession = (request) => {
 
 const fromR2 = (env) => !!env.CATALOG && env.CATALOG_SOURCE === 'r2';
 
+/** 길이가 같은 문자열을 끝까지 비교한다(시간 차로 비밀을 알아내지 못하게) */
+function sameSecret(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+const R2_KEY = /^(catalog|testsets)\/[A-Za-z0-9._\-/]+$/;
+
+/**
+ * pahidc가 R2 API 키 없이 R2에 쓰는 내부 경로(공유 비밀 R2_PROXY_SECRET).
+ * PUT/GET /api/internal/r2/<키>, GET /api/internal/r2?list=<접두사>. catalog/·testsets/ 아래만 다룬다. 본문은 해석하지 않고 흘려보낸다.
+ */
+async function r2Proxy(request, env, url) {
+  if (!env.CATALOG || !sameSecret(request.headers.get('Authorization') ?? '', `Bearer ${env.R2_PROXY_SECRET ?? ''}`)) {
+    return json({ error: { code: 'unauthorized', message: '권한이 없습니다.' } }, 401);
+  }
+  const prefix = url.searchParams.get('list');
+  if (prefix !== null) {
+    if (!R2_KEY.test(`${prefix}x`)) return json({ error: { code: 'invalid_key', message: '허용되지 않은 경로입니다.' } }, 400);
+    const keys = [];
+    let cursor;
+    do {
+      const page = await env.CATALOG.list({ prefix, cursor });
+      keys.push(...page.objects.map((o) => o.key));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    return json({ keys });
+  }
+  const key = decodeURIComponent(url.pathname.slice('/api/internal/r2/'.length));
+  if (!R2_KEY.test(key) || key.includes('..')) return json({ error: { code: 'invalid_key', message: '허용되지 않은 경로입니다.' } }, 400);
+  if (request.method === 'PUT') {
+    await env.CATALOG.put(key, request.body, { httpMetadata: { contentType: request.headers.get('Content-Type') ?? 'application/octet-stream' } });
+    return json({ data: { stored: key } });
+  }
+  if (request.method === 'GET') {
+    const obj = await env.CATALOG.get(key);
+    return obj ? new Response(obj.body, { headers: { 'Content-Type': obj.httpMetadata?.contentType ?? 'application/octet-stream', 'Cache-Control': 'no-store' } }) : json({ error: { code: 'not_found', message: '없습니다.' } }, 404);
+  }
+  return json({ error: { code: 'method_not_allowed', message: '지원하지 않는 요청입니다.' } }, 405);
+}
+
 /** 쿠키 없이 API에서 읽는다(공용 데이터라 사용자에 따라 달라지지 않는다). */
 const fetchOrigin = (path) => fetch(`https://${API_HOST}${path}`, { headers: { Accept: 'application/json' } });
 
@@ -139,6 +182,7 @@ export default {
     if (url.hostname !== PRODUCTION_HOST && url.pathname !== '/api/health') {
       return json({ error: { code: 'PREVIEW_API_DISABLED', message: '운영 사이트에서 이용해 주세요.' } }, 403);
     }
+    if (url.pathname === '/api/internal/r2' || url.pathname.startsWith('/api/internal/r2/')) return r2Proxy(request, env, url);
     if (request.method === 'GET') {
       const p = url.pathname;
       if (p === '/api/catalog/index') {

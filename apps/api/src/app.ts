@@ -10,7 +10,6 @@ const TestSessionRequest = z.object({ email: z.string().trim().toLowerCase().ema
 import {
   Bookmark,
   CatalogIndex,
-  CatalogProblem,
   MyProblemState,
   MyProblemSummary,
   Collection,
@@ -467,9 +466,13 @@ export function createApp(deps: AppDeps) {
     c.header('ETag', `"${cat.indexVersion}"`);
     return ok(c, CatalogIndex, cat.index);
   });
+  /** 목록의 version을 만든 그 바이트를 그대로 준다(다시 직렬화하면 키 순서가 달라져 Worker의 해시 검사에 걸린다) */
   app.get('/api/catalog/problems/:id', (c) => {
-    const p = problems.catalogProblem(c.req.param('id'));
-    return p ? ok(c, CatalogProblem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
+    const d = currentCatalog().details.find((x) => x.id === c.req.param('id'));
+    if (!d) return fail(c, 404, 'not_found', '없는 문제입니다.');
+    c.header('ETag', `"${d.version}"`);
+    c.header('Content-Type', 'application/json; charset=utf-8');
+    return c.body(d.json);
   });
 
   // ─── 이하 Google 로그인 필요. 단 문제·폴더·실행 환경 조회(GET)는 비회원도 된다(작성 코드 등은 비어 있다). ───
