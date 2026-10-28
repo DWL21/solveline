@@ -25,13 +25,43 @@ services:
     mem_limit: 1536m
     cpus: 2
     pids_limit: 512
+  # 채점(0007): 제출 대기열·디스패처·테스트셋 캐시. runner를 부르는 것은 judge뿐이다.
+  judge:
+    logging: *logging
+    build:
+      context: .
+      dockerfile: docker/judge.Dockerfile
+    restart: unless-stopped
+    # runner(sandbox)와 api(default) 사이에 있다. 포트를 호스트에 열지 않는다.
+    networks: [default, sandbox]
+    # JUDGE_SECRET·R2_PROXY_SECRET(배포 시 생성). 사용자 데이터·로그인 비밀은 받지 않는다.
+    env_file:
+      - path: /etc/solveline/judge.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "8790"
+      DATA_DIR: /data
+      # 테스트셋을 Worker(/api/internal/r2)를 거쳐 R2에 올린다
+      WEB_ORIGIN: https://solveline.simplyimg.com
+      # 채점 결과를 보낼 API(서명, 성공할 때까지 재시도)
+      RESULTS_URL: http://api:8787
+      # runner를 늘리면 쉼표로 더한다 (예: http://runner:8000,http://runner2:8000)
+      RUNNER_URLS: http://runner:8000
+      RUNNER_SLOTS: "2"
+    volumes:
+      - /var/lib/solveline:/data
+    depends_on:
+      runner:
+        condition: service_healthy
   api:
     logging: *logging
     build:
       context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
-    networks: [default, sandbox]
+    # runner에 직접 닿지 않는다(sandbox 네트워크 밖). 실행은 judge에 맡긴다.
+    networks: [default]
     # GitHub Environment(production) secrets·variables로 배포 시 생성된다.
     env_file:
       - path: /etc/solveline/api.env
@@ -41,13 +71,11 @@ services:
       PORT: "8787"
       DATA_DIR: /data
       WEB_ORIGIN: https://solveline.simplyimg.com
-      # runner를 늘리면 쉼표로 더한다 (예: http://runner:8000,http://runner2:8000)
-      RUNNER_URLS: http://runner:8000
-      RUNNER_SLOTS: "2"
+      JUDGE_URL: http://judge:8790
     volumes:
       - /var/lib/solveline:/data
     depends_on:
-      runner:
+      judge:
         condition: service_healthy
   web:
     logging: *logging

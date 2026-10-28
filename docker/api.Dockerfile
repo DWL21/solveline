@@ -8,6 +8,8 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
+# api는 @solveline/judge/r2(R2 저장소)를 쓴다
+COPY apps/judge/package.json apps/judge/
 RUN pnpm install --frozen-lockfile --prod=false --filter @solveline/api...
 
 FROM node:24-bookworm-slim
@@ -15,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=deps /app /app
 COPY packages/shared packages/shared
+COPY apps/judge apps/judge
 COPY apps/api apps/api
 ENV NODE_ENV=production PORT=8787 DATA_DIR=/data HOME=/tmp
 WORKDIR /app/apps/api

@@ -1,4 +1,4 @@
-# 자동화 테스트 환경: 운영과 같은 runner·api 이미지(같은 격리 옵션)에 테스트 설정만 바꾼다.
+# 자동화 테스트 환경: 운영과 같은 runner·judge·api 이미지(같은 격리 옵션)에 테스트 설정만 바꾼다.
 # 데이터는 tmpfs라 매번 빈 상태에서 시작한다. 실행: scripts/test-env.sh up
 name: solveline-test
 services:
@@ -20,11 +20,29 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 1536m
     pids_limit: 512
+  judge:
+    build:
+      context: .
+      dockerfile: docker/judge.Dockerfile
+    networks: [default, sandbox]
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=700
+    environment:
+      NODE_ENV: test
+      PORT: "8790"
+      DATA_DIR: /data
+      RESULTS_URL: http://api:8787
+      RUNNER_URLS: http://runner:8000
+      RUNNER_SLOTS: "2"
+      JUDGE_SECRET: ${E2E_JUDGE_SECRET:?scripts/test-env.sh로 실행하세요}
+    depends_on:
+      runner:
+        condition: service_healthy
   api:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
-    networks: [default, sandbox]
+    networks: [default]
     tmpfs:
       - /data:uid=1000,gid=1000,mode=700
     environment:
@@ -32,18 +50,18 @@ services:
       PORT: "8787"
       DATA_DIR: /data
       WEB_ORIGIN: http://localhost:${E2E_PORT:-8090}
-      RUNNER_URLS: http://runner:8000
-      RUNNER_SLOTS: "2"
+      JUDGE_URL: http://judge:8790
       # 실행할 때마다 scripts/test-env.sh가 만든다(저장소에 두지 않는다)
       SESSION_SECRET: ${E2E_SESSION_SECRET:?scripts/test-env.sh로 실행하세요}
       TEST_AUTH_TOKEN: ${E2E_TEST_AUTH_TOKEN:?scripts/test-env.sh로 실행하세요}
       ACCESS_PASSWORD: ${E2E_MASTER_PASSWORD:?scripts/test-env.sh로 실행하세요}
+      JUDGE_SECRET: ${E2E_JUDGE_SECRET:?scripts/test-env.sh로 실행하세요}
       OWNER_EMAIL: owner@e2e.test
       # 로그인 버튼이 보이게 하는 가짜 값(테스트는 Google로 가지 않는다)
       GOOGLE_CLIENT_ID: e2e-dummy-client
       GOOGLE_CLIENT_SECRET: e2e-dummy-secret
     depends_on:
-      runner:
+      judge:
         condition: service_healthy
   web:
     build:

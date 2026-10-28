@@ -12,6 +12,7 @@ function run(status) {
   try {
     mkdirSync(join(cwd, 'scripts'), { recursive: true });
     mkdirSync(join(cwd, 'apps/api'), { recursive: true });
+    mkdirSync(join(cwd, 'apps/judge'), { recursive: true });
     mkdirSync(bin);
     copyFileSync(new URL('./sonar.sh', import.meta.url), join(cwd, 'scripts/sonar.sh'));
     const stub = (name, body) => writeFileSync(join(bin, name), `#!/bin/sh\nset -eu\n${body}\n`, { mode: 0o755 });
