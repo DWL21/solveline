@@ -7,7 +7,7 @@ import { ApiError, api, qk } from '../lib/api.ts';
 import { ListSkeleton } from './Loading.tsx';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import type { Scope } from '../lib/route.ts';
-import { ancestors, buildTree, findNode, flatten, problemIdsUnder, type CollectionNode } from '../lib/collections.ts';
+import { ancestors, buildTree, collectionProgress, findNode, flatten, problemIdsUnder, siblingNodes, type CollectionNode } from '../lib/collections.ts';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const byTitle = (a: ProblemSummary, b: ProblemSummary) => a.title.localeCompare(b.title, 'ko', { numeric: true });
@@ -30,7 +30,8 @@ export function scopeList(scope: Scope, all: ProblemSummary[], collections: Coll
   const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
   if (scope.kind === 'collection') {
     const col = collections.find((c) => c.id === scope.id);
-    if (col) return pick(col.problemIds);
+    const node = col && findNode(buildTree(collections), col.name);
+    if (node) return pick(problemIdsUnder(node));
   }
   // 묶음: 하위 컬렉션의 문제를 모아서
   if (scope.kind === 'group') {
@@ -98,7 +99,10 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const cards = effective.kind === 'all' ? tree : inCollection && node ? node.children : [];
 
   const list = scopeList(effective, all, collections.data);
-  const solved = list.filter((p) => p.lastSubmission?.score === 100).length;
+  const progress = collectionProgress(list);
+  const solved = progress.solved;
+  const siblings = node && node.depth > 0 ? siblingNodes(tree, node) : null;
+  const levelLabel = node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션';
 
   const q = filter.trim().toLowerCase();
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
@@ -148,6 +152,13 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
                 ✓ {solved}/{list.length}
               </span>
             )}
+            {inCollection && signedIn && progress.cleared && <span className="text-[12px] font-semibold text-ok">✓ {levelLabel} 클리어</span>}
+            {siblings && (
+              <div className="ml-auto flex items-center gap-1">
+                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`이전 ${levelLabel}`} title={`이전 ${levelLabel}`} disabled={!siblings.previous} onClick={() => siblings.previous && onScope(scopeOfNode(siblings.previous))}>‹</button>
+                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`다음 ${levelLabel}`} title={`다음 ${levelLabel}`} disabled={!siblings.next} onClick={() => siblings.next && onScope(scopeOfNode(siblings.next))}>›</button>
+              </div>
+            )}
             {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
@@ -168,7 +179,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
           <div className="mt-3 mb-4 flex flex-wrap items-center gap-2">
             <input
               className="field w-full font-sans sm:w-72"
-              placeholder="제목·유형·레벨 검색 (예: Lv2, DP)"
+              placeholder="제목·유형·단계 검색 (예: 3단계, DP)"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               aria-label="문제 검색"
@@ -511,7 +522,7 @@ function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode;
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
         <span>문제 {total}</span>
         {node.children.length > 0 && <span>하위 {node.children.length}</span>}
-        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}</span>}
+        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}{solved === total && ` · ${node.name.includes('단계') ? '단계' : node.name.includes('세트') ? '세트' : '컬렉션'} 클리어`}</span>}
       </div>
       {signedIn && total > 0 && (
         <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden>
