@@ -68,3 +68,11 @@ export function collectionProgress<T extends { id: string; lastSubmission?: { sc
   const solved = problems.filter((p) => p.lastSubmission?.score === 100).length;
   return { solved, total: problems.length, cleared: problems.length > 0 && solved === problems.length, next: problems.find((p) => p.lastSubmission?.score !== 100) };
 }
+
+/** 같은 부모 아래의 이전·다음 항목을 반환한다. */
+export function siblingNodes(nodes: CollectionNode[], node: CollectionNode) {
+  const parentPath = node.path.split('/').slice(0, -1).join('/');
+  const siblings = parentPath ? findNode(nodes, parentPath)?.children ?? [] : nodes;
+  const index = siblings.findIndex((sibling) => sibling.path === node.path);
+  return { previous: index > 0 ? siblings[index - 1] : undefined, next: index >= 0 ? siblings[index + 1] : undefined };
+}

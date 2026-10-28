@@ -2,12 +2,12 @@ import { Language } from '@solveline/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
-import { loginHref, useMe } from '../lib/me.ts';
+import { useMe } from '../lib/me.ts';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { ListSkeleton } from './Loading.tsx';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import type { Scope } from '../lib/route.ts';
-import { ancestors, buildTree, collectionProgress, findNode, flatten, problemIdsUnder, type CollectionNode } from '../lib/collections.ts';
+import { ancestors, buildTree, collectionProgress, findNode, flatten, problemIdsUnder, siblingNodes, type CollectionNode } from '../lib/collections.ts';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const byTitle = (a: ProblemSummary, b: ProblemSummary) => a.title.localeCompare(b.title, 'ko', { numeric: true });
@@ -101,6 +101,8 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const list = scopeList(effective, all, collections.data);
   const progress = collectionProgress(list);
   const solved = progress.solved;
+  const siblings = node && node.depth > 0 ? siblingNodes(tree, node) : null;
+  const levelLabel = node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션';
 
   const q = filter.trim().toLowerCase();
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
@@ -150,17 +152,16 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
                 ✓ {solved}/{list.length}
               </span>
             )}
+            {inCollection && signedIn && progress.cleared && <span className="text-[12px] font-semibold text-ok">✓ {levelLabel} 클리어</span>}
+            {siblings && (
+              <div className="ml-auto flex items-center gap-1">
+                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`이전 ${levelLabel}`} title={`이전 ${levelLabel}`} disabled={!siblings.previous} onClick={() => siblings.previous && onScope(scopeOfNode(siblings.previous))}>‹</button>
+                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`다음 ${levelLabel}`} title={`다음 ${levelLabel}`} disabled={!siblings.next} onClick={() => siblings.next && onScope(scopeOfNode(siblings.next))}>›</button>
+              </div>
+            )}
             {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
-          {inCollection && list.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
-              {signedIn ? (
-                progress.cleared ? <span className="font-semibold text-ok">✓ {node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션'} 클리어</span> :
-                  <button type="button" className="btn-primary" onClick={() => progress.next && onPick(progress.next.id)}>다음 미완료 문제 풀기</button>
-              ) : <span className="text-dim">로그인하면 풀이 진행 상황을 확인할 수 있어요. <a className="text-sky underline" href={loginHref()}>로그인</a></span>}
-            </div>
-          )}
           {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
           {cards.length > 0 && (
             <section className="mt-3 mb-5" aria-label={effective.kind === 'all' ? '컬렉션' : '하위 컬렉션'}>

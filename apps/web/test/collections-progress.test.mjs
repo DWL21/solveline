@@ -44,3 +44,19 @@ test('직접 문제가 없는 상위 컬렉션도 하위 문제를 모은다', a
   assert.deepEqual(problemIdsUnder(tree[0]), ['a']);
   assert.deepEqual(problemIdsUnder(buildTree([{ name: '빈 과정', problemIds: [] }])[0]), []);
 });
+
+test('같은 부모의 항목을 자연순으로 탐색하고 양끝에서 멈춘다', async () => {
+  const { buildTree, siblingNodes } = await import('../src/lib/collections.ts');
+  const tree = buildTree([
+    { name: '과정/10단계', problemIds: [] },
+    { name: '과정/2단계', problemIds: [] },
+    { name: '과정/1단계', problemIds: [] },
+    { name: '다른 과정/1단계', problemIds: [] },
+  ]);
+  const stages = tree.find((node) => node.name === '과정').children;
+  assert.equal(siblingNodes(tree, stages[0]).previous, undefined);
+  assert.equal(siblingNodes(tree, stages[0]).next.name, '2단계');
+  assert.equal(siblingNodes(tree, stages[1]).previous.name, '1단계');
+  assert.equal(siblingNodes(tree, stages[1]).next.name, '10단계');
+  assert.equal(siblingNodes(tree, stages[2]).next, undefined);
+});
