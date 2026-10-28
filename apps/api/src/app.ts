@@ -165,21 +165,23 @@ export function createApp(deps: AppDeps) {
   });
   app.notFound((c) => fail(c, 404, 'not_found', '없는 경로입니다.'));
 
-  // 공용 문제 데이터를 바꾸는 요청(편집 권한·관리자 모드)이 성공하면 R2에 게시한 뒤 응답한다.
-  // 그래야 편집한 사람이 바로 새로 읽을 때(?fresh=1) R2에서도 새 내용을 받는다.
+  // 공용 문제 데이터를 바꾸는 요청(편집 권한·관리자 모드)이 성공하면 메모리의 목록을 버리고, R2가 있으면 게시한 뒤 응답한다.
+  // 그래야 편집한 사람이 바로 새로 읽을 때(?fresh=1) 새 내용을 받는다.
   const CATALOG_WRITE = /^\/api\/(problems|collections|admin\/collections|admin\/problems)(\/|$)/;
-  if (catalog)
-    app.use('/api/*', async (c, next) => {
-      await next();
-      if (c.req.method === 'GET' || c.res.status >= 400 || !CATALOG_WRITE.test(c.req.path)) return;
-      if (!c.req.path.startsWith('/api/admin/') && !c.get('editor')) return;
-      try {
-        await catalog.sync();
-      } catch (e) {
-        // 게시에 실패해도 SQLite에는 저장됐다. 다음 변경이나 재시작 때 다시 맞춘다.
-        log.error('[catalog] R2 게시 실패', e);
-      }
-    });
+  let built: { at: number; cat: ReturnType<typeof buildCatalog> } | null = null;
+  app.use('/api/*', async (c, next) => {
+    await next();
+    if (c.req.method === 'GET' || c.res.status >= 400 || !CATALOG_WRITE.test(c.req.path)) return;
+    if (!c.req.path.startsWith('/api/admin/') && !c.get('editor')) return;
+    built = null;
+    if (!catalog) return;
+    try {
+      await catalog.sync();
+    } catch (e) {
+      // 게시에 실패해도 SQLite에는 저장됐다. 다음 변경이나 재시작 때 다시 맞춘다.
+      log.error('[catalog] R2 게시 실패', e);
+    }
+  });
 
   // ─── 공개 ───
   app.get('/api/health', (c) => c.json({ data: { status: 'up' } }));
@@ -455,8 +457,7 @@ export function createApp(deps: AppDeps) {
   });
 
   // ─── 카탈로그(공용 문제 데이터, 로그인과 무관): Worker가 R2가 없을 때 여기서 읽어 엣지에 캐시한다 ───
-  let built: { at: number; cat: ReturnType<typeof buildCatalog> } | null = null;
-  /** 같은 순간의 요청이 몰려도 한 번만 만든다(1초) */
+  /** 같은 순간의 요청이 몰려도 한 번만 만든다(1초, 공용 데이터를 바꾸면 바로 버린다) */
   const currentCatalog = () => {
     if (!built || now() - built.at > 1000) built = { at: now(), cat: buildCatalog(catalogSource()) };
     return built.cat;

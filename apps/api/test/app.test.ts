@@ -916,6 +916,9 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
     expect(detail).not.toHaveProperty('code');
     expect(detail).not.toHaveProperty('memo');
     expect((await s.app.request('/api/catalog/problems/none')).status).toBe(404);
+    // 목록을 막 읽은 직후에 바꿔도 다음 목록에 바로 보인다(1초 재사용분을 버린다)
+    await E('POST', '/api/collections', { name: '바로 보임', description: '' });
+    expect(CatalogIndex.parse((await (await s.app.request('/api/catalog/index')).json()).data).collections.map((x) => x.name)).toContain('바로 보임');
 
     // 내 상태는 로그인해야 하고, 상태가 있는 문제만 온다
     expect((await s.app.request('/api/me/problems')).status).toBe(401);
