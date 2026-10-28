@@ -22,7 +22,12 @@ if (!config.ownerEmail) log.warn('[config] OWNER_EMAIL이 없어 예전 데이�
 const db = openDb(config.dataDir);
 const testsets = new TestsetStore(join(config.dataDir, 'testsets'));
 const runners = config.runnerUrls.map((u) => new RunnerClient(u));
-const objectStore = config.r2 ? new R2ObjectStore(config.r2) : config.r2ProxySecret ? new WorkerR2Store(config.webOrigin, config.r2ProxySecret) : null;
+/** 카탈로그를 올릴 곳: R2 키가 있으면 직접, 없으면 Worker를 거친다 */
+function objectStoreOf() {
+  if (config.r2) return new R2ObjectStore(config.r2);
+  return config.r2ProxySecret ? new WorkerR2Store(config.webOrigin, config.r2ProxySecret) : null;
+}
+const objectStore = objectStoreOf();
 const { app, dispatcher, problems, submissions, catalog } = createApp({ config, db, runners, testsets, objectStore });
 
 const moved = await problems.migrateInlineHidden();
@@ -31,7 +36,7 @@ dispatcher.start();
 if (catalog) {
   // R2와 맞춘다: 로컬에 없는 테스트셋은 받아 오고, 바뀐 문제·테스트셋은 올린다(처음 켤 때 전체 이전).
   // 배포 중에는 Worker(새 R2 경로)가 API보다 늦게 올라오므로 성공할 때까지 1분마다 다시 시도한다(최대 1시간).
-  void (async () => {
+  const syncCatalog = async () => {
     for (let attempt = 1; attempt <= 60; attempt++) {
       try {
         const restored = await catalog.hydrate();
@@ -44,7 +49,8 @@ if (catalog) {
         await new Promise((r) => setTimeout(r, 60_000).unref());
       }
     }
-  })();
+  };
+  void syncCatalog();
 } else log.info('[catalog] R2 설정이 없어 게시하지 않습니다(SQLite·로컬 테스트셋만 사용).');
 const backup = new BackupJob(db, config.dataDir, problems, submissions, testsets);
 backup.start();

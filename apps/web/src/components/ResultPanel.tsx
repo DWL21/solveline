@@ -23,8 +23,15 @@ const label: Record<CaseResult['status'], string> = {
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(ms % 1000 ? 1 : 0)}초`;
 
-const tone = (status: CaseResult['status']) =>
-  status === 'pass' ? 'text-ok' : status === 'fail' || status === 'error' ? 'text-bad' : status === 'timeout' ? 'text-warn' : 'text-dim';
+/** 케이스 상태 색과 앞 기호(통과·실패는 색만으로 구분하지 않는다) */
+const STATUS_STYLE: Record<CaseResult['status'], { color: string; mark: string }> = {
+  pass: { color: 'text-ok', mark: '✓ ' },
+  fail: { color: 'text-bad', mark: '✗ ' },
+  done: { color: 'text-dim', mark: '' },
+  error: { color: 'text-bad', mark: '✗ ' },
+  timeout: { color: 'text-warn', mark: '' },
+  skipped: { color: 'text-dim', mark: '' },
+};
 
 /** 실행 결과 줄: 함수형은 반환값, 입출력형은 출력. 시간 초과·에러는 그 사실만. */
 function actual(r: CaseResult, mode: ProblemMode, limitMs: number) {
@@ -41,11 +48,14 @@ function actual(r: CaseResult, mode: ProblemMode, limitMs: number) {
   }
 }
 
-const show = (v: string | null, mode: ProblemMode) => (v === null ? 'null' : mode === 'stdin' ? v.trimEnd() : v);
+function show(v: string | null, mode: ProblemMode) {
+  if (v === null) return 'null';
+  return mode === 'stdin' ? v.trimEnd() : v;
+}
 
 const stats = (r: CaseResult) => `${r.timeMs.toFixed(2)}ms, ${r.memoryMb.toFixed(1)}MB`;
 
-export function ResultPanel({ state }: { state: RunState }) {
+export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
   if (state.kind === 'idle')
     return (
       <p className="p-4 text-[13px] text-faint">
@@ -54,7 +64,7 @@ export function ResultPanel({ state }: { state: RunState }) {
     );
   if (state.kind === 'running')
     return (
-      <div className="flex items-center gap-2.5 p-4 text-[13px] text-dim" role="status" aria-live="polite">
+      <output className="flex items-center gap-2.5 p-4 text-[13px] text-dim" aria-live="polite">
         <Spinner size={16} className="text-accent-text" />
         {state.ahead ? (
           <span>
@@ -63,7 +73,7 @@ export function ResultPanel({ state }: { state: RunState }) {
         ) : (
           <span>{state.submit ? '채점 중입니다…' : '실행 중입니다…'}</span>
         )}
-      </div>
+      </output>
     );
   if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
   if (state.kind === 'cancelled') return <p className="p-4 text-[13px] font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
@@ -91,8 +101,8 @@ export function ResultPanel({ state }: { state: RunState }) {
           <section key={r.id} className="rounded-md border border-line bg-base/60 px-3 py-2.5">
             <header className="mb-1.5 flex flex-wrap items-baseline gap-x-2 font-sans">
               <b className="text-[13px] text-text">테스트 {i + 1}</b>
-              <span className={`text-[12.5px] font-bold ${tone(r.status)}`}>
-                {r.status === 'pass' ? '✓ ' : r.status === 'fail' || r.status === 'error' ? '✗ ' : ''}
+              <span className={`text-[12.5px] font-bold ${STATUS_STYLE[r.status].color}`}>
+                {STATUS_STYLE[r.status].mark}
                 {label[r.status]}
               </span>
               {r.status !== 'skipped' && <span className="ml-auto text-[11.5px] text-faint tabular-nums">{stats(r)}</span>}
@@ -130,7 +140,7 @@ export function ResultPanel({ state }: { state: RunState }) {
   );
 }
 
-function CompileError({ output }: { output: string }) {
+function CompileError({ output }: Readonly<{ output: string }>) {
   return (
     <div className="p-4">
       <p className="mb-2 text-[13px] font-bold text-bad">컴파일 에러</p>
@@ -149,7 +159,7 @@ const gradedLabel: Record<CaseResult['status'], string> = {
 };
 
 /** 채점 결과: 테스트별 통과/실패와 시간·메모리, 마지막에 점수 */
-function Graded({ result, score }: { result: RunResult; score: number }) {
+function Graded({ result, score }: Readonly<{ result: RunResult; score: number }>) {
   const passed = result.results.filter((r) => r.status === 'pass').length;
   return (
     <div className="p-4 text-[13px]">

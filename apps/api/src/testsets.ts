@@ -11,9 +11,9 @@ const HASH = /^[0-9a-f]{64}$/;
  * dir이 ':memory:'면 메모리에만 둔다(테스트용).
  */
 export class TestsetStore {
-  private mem = new Map<string, string>();
+  private readonly mem = new Map<string, string>();
 
-  constructor(private dir: string) {
+  constructor(private readonly dir: string) {
     if (dir !== ':memory:') mkdirSync(dir, { recursive: true });
   }
 
@@ -60,7 +60,7 @@ export class TestsetStore {
   }
 
   /** 어디서도 쓰지 않고 minAgeMs보다 오래된 파일을 지운다. 지운 개수를 돌려준다. */
-  gc(inUse: Set<string>, minAgeMs = 24 * 3600_000, now = Date.now()): number {
+  gc(inUse: Set<string>, minAgeMs = 24 * 3_600_000, now = Date.now()): number {
     if (this.dir === ':memory:') return 0;
     let removed = 0;
     for (const name of readdirSync(this.dir)) {

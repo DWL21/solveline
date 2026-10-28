@@ -1,10 +1,10 @@
 /** 키(IP)별 고정 창 요청 제한. 단일 프로세스 메모리. */
 export class RateLimiter {
-  private hits = new Map<string, { count: number; resetAt: number }>();
+  private readonly hits = new Map<string, { count: number; resetAt: number }>();
 
   constructor(
-    private limit: number,
-    private windowMs: number,
+    private readonly limit: number,
+    private readonly windowMs: number,
   ) {}
 
   /** 허용되면 0, 막히면 다시 시도할 수 있을 때까지 남은 초 */

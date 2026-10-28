@@ -5,6 +5,8 @@ import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
 import { log, redact } from './redact.ts';
 
+type ClaimedJob = NonNullable<ReturnType<SubmissionStore['claim']>>;
+
 const RUN_TEXT_LIMIT = 20_000;
 const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}\n… (${t.length.toLocaleString()}자 중 ${n.toLocaleString()}자만 표시)` : t);
 
@@ -57,7 +59,7 @@ export type NewSubmission = {
 };
 
 export class SubmissionStore {
-  constructor(private db: Db) {}
+  constructor(private readonly db: Db) {}
 
   insert(s: NewSubmission, now = new Date()): string {
     const id = randomUUID();
@@ -185,20 +187,20 @@ export class SubmissionStore {
  * runner는 상태가 없으므로 RUNNER_URLS에 주소를 더하면 처리량이 늘어난다.
  */
 export class Dispatcher {
-  private active = new Map<RunnerClient, number>();
-  private waiters = new Map<string, ((s: Submission) => void)[]>();
+  private readonly active = new Map<RunnerClient, number>();
+  private readonly waiters = new Map<string, ((s: Submission) => void)[]>();
   /** 상태 변화(대기 순번·실행 시작·끝남)를 기다리는 조회 요청 */
-  private watchers = new Set<() => void>();
+  private readonly watchers = new Set<() => void>();
   /** 실행 중인 제출 → 맡은 runner, 중지 요청을 받은 제출 */
-  private running = new Map<string, RunnerClient>();
-  private cancelling = new Set<string>();
+  private readonly running = new Map<string, RunnerClient>();
+  private readonly cancelling = new Set<string>();
 
   constructor(
-    private store: SubmissionStore,
-    private problems: ProblemStore,
-    private testsets: TestsetStore,
-    private runners: RunnerClient[],
-    private slotsPerRunner: number,
+    private readonly store: SubmissionStore,
+    private readonly problems: ProblemStore,
+    private readonly testsets: TestsetStore,
+    private readonly runners: RunnerClient[],
+    private readonly slotsPerRunner: number,
   ) {
     for (const r of runners) this.active.set(r, 0);
   }
@@ -288,15 +290,32 @@ export class Dispatcher {
     return best;
   }
 
-  private async execute(job: NonNullable<ReturnType<SubmissionStore['claim']>>, runner: RunnerClient) {
+  private runJobOf(job: ClaimedJob): RunJob {
+    const run: RunJob = { language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.time_limit_ms, jobId: job.id };
+    const hash = job.testset_hash;
+    if (hash) run.testset = { hash, raw: () => this.testsets.raw(hash) };
+    else run.cases = JSON.parse(job.cases ?? '[]') as TestCase[];
+    return run;
+  }
+
+  /** 제출 점수를 계산하고 문제의 마지막 제출로 기록한다 */
+  private async recordScore(job: ClaimedJob, result: RunResult, total: number): Promise<number> {
+    const last = lastSubmissionOf(result, total, job.language, new Date().toISOString());
+    if (job.problem_id && job.user_id) await this.problems.setLastSubmission(job.problem_id, job.user_id, last);
+    return last.score;
+  }
+
+  private fail(id: string, e: unknown) {
+    if (this.cancelling.has(id)) return this.store.finish(id, { cancelled: null });
+    const msg = e instanceof Error ? e.message : String(e);
+    log.error(`[queue] 제출 ${id} 실패`, e);
+    this.store.finish(id, { error: redact(msg) });
+  }
+
+  private async execute(job: ClaimedJob, runner: RunnerClient) {
     this.running.set(job.id, runner);
     try {
-      const run: RunJob = { language: job.language, mode: job.mode, code: job.code, timeLimitMs: job.time_limit_ms, jobId: job.id };
-      if (job.testset_hash) {
-        const hash = job.testset_hash;
-        run.testset = { hash, raw: () => this.testsets.raw(hash) };
-      } else run.cases = JSON.parse(job.cases ?? '[]') as TestCase[];
-      const raw = await runner.run(run);
+      const raw = await runner.run(this.runJobOf(job));
       const ids = JSON.parse(job.case_ids) as string[];
       const result: RunResult = { compile: raw.compile, results: raw.results.map((r, i) => trimResult({ ...r, id: ids[i] ?? String(i) }, job.kind)) };
       if (raw.cancelled || this.cancelling.has(job.id)) {
@@ -304,20 +323,10 @@ export class Dispatcher {
         this.store.finish(job.id, { cancelled: job.kind === 'run' ? result : null });
         return;
       }
-      let score: number | null = null;
-      if (job.kind === 'submit') {
-        const last = lastSubmissionOf(result, ids.length, job.language, new Date().toISOString());
-        score = last.score;
-        if (job.problem_id && job.user_id) await this.problems.setLastSubmission(job.problem_id, job.user_id, last);
-      }
+      const score = job.kind === 'submit' ? await this.recordScore(job, result, ids.length) : null;
       this.store.finish(job.id, { result, score });
     } catch (e) {
-      if (this.cancelling.has(job.id)) this.store.finish(job.id, { cancelled: null });
-      else {
-        const msg = e instanceof Error ? e.message : String(e);
-        log.error(`[queue] 제출 ${job.id} 실패`, e);
-        this.store.finish(job.id, { error: redact(msg) });
-      }
+      this.fail(job.id, e);
     } finally {
       this.running.delete(job.id);
       this.cancelling.delete(job.id);

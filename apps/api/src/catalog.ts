@@ -61,10 +61,10 @@ export class CatalogPublisher {
   private chain: Promise<unknown> = Promise.resolve();
 
   constructor(
-    private store: ObjectStore,
-    private source: () => Promise<CatalogSource>,
-    private testsets: TestsetStore,
-    private testsetsInUse: () => Promise<Set<string>>,
+    private readonly store: ObjectStore,
+    private readonly source: () => Promise<CatalogSource>,
+    private readonly testsets: TestsetStore,
+    private readonly testsetsInUse: () => Promise<Set<string>>,
   ) {}
 
   sync(): Promise<SyncResult> {

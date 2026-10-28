@@ -11,7 +11,7 @@ const MAX_HIDDEN = 200;
 const HIDDEN_SAVE_DELAY_MS = 500;
 
 /** 매개변수 이름 입력: 쉼표로 구분. 타이핑 중 빈 칸을 지우지 않도록 로컬 텍스트를 따로 둔다. */
-function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: string[]) => void }) {
+function ParamsInput({ params, onChange }: Readonly<{ params: string[]; onChange: (p: string[]) => void }>) {
   const [text, setText] = useState(params.join(', '));
   useEffect(() => setText(params.join(', ')), [params]);
   return (
@@ -25,8 +25,8 @@ function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: str
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
-        if (next.join(',') !== params.join(',')) onChange(next);
-        else setText(params.join(', '));
+        if (next.join(',') === params.join(',')) setText(params.join(', '));
+        else onChange(next);
       }}
     />
   );
@@ -35,7 +35,7 @@ function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: str
 const BIG_FIELD = 10_000;
 
 /** 큰 값(효율성 케이스)은 입력칸에 넣으면 화면이 느려지므로 읽기 전용으로 크기와 앞부분만 보여 준다. */
-function Field({ value, label, multiline, readOnly, onChange }: { value: string; label: string; multiline?: boolean; readOnly?: boolean; onChange: (v: string) => void }) {
+function Field({ value, label, multiline, readOnly, onChange }: Readonly<{ value: string; label: string; multiline?: boolean; readOnly?: boolean; onChange: (v: string) => void }>) {
   if (readOnly)
     return (
       <div className={`field cursor-default font-mono ${multiline ? 'min-h-10 whitespace-pre-wrap' : 'truncate'}`} aria-label={label} title={value.length > 200 ? `${value.length.toLocaleString()}자` : value}>
@@ -55,6 +55,9 @@ function Field({ value, label, multiline, readOnly, onChange }: { value: string;
   );
 }
 
+/** j번째 인자만 바꾼 인자 목록. 길이는 매개변수 수에 맞춘다. */
+const withArg = (args: string[], params: string[], j: number, v: string) => params.map((_, k) => (k === j ? v : (args[k] ?? '')));
+
 /** 케이스 목록(보이는/히든/내 케이스 공용). readOnly면 보기만 한다. */
 function CaseList({
   mode,
@@ -63,14 +66,14 @@ function CaseList({
   label,
   readOnly,
   onChange,
-}: {
+}: Readonly<{
   mode: ProblemMode;
   params: string[];
   cases: TestCase[];
   label: string;
   readOnly?: boolean;
   onChange: (c: TestCase[]) => void;
-}) {
+}>) {
   const narrow = useNarrow();
   const update = (id: string, patch: Partial<TestCase>) => onChange(cases.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const remove = (id: string) => onChange(cases.filter((c) => c.id !== id));
@@ -100,7 +103,7 @@ function CaseList({
                     readOnly={readOnly}
                     value={c.args[j] ?? ''}
                     label={`${label} ${i + 1} ${p}`}
-                    onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
+                    onChange={(v) => update(c.id, { args: withArg(c.args, params, j, v) })}
                   />
                 </label>
               ))}
@@ -139,7 +142,7 @@ function CaseList({
                       readOnly={readOnly}
                       value={c.args[j] ?? ''}
                       label={`${label} ${i + 1} ${p}`}
-                      onChange={(v) => update(c.id, { args: params.map((_, k) => (k === j ? v : (c.args[k] ?? ''))) })}
+                      onChange={(v) => update(c.id, { args: withArg(c.args, params, j, v) })}
                     />
                   </td>
                 ))}
@@ -199,7 +202,7 @@ export function CasesEditor({
   onParams,
   onCases,
   onMyCases,
-}: {
+}: Readonly<{
   problemId: string;
   /** 비회원: 내 테스트 케이스를 만들 수 없다 */
   guest?: boolean;
@@ -214,7 +217,7 @@ export function CasesEditor({
   onParams: (p: string[]) => void;
   onCases: (c: TestCase[]) => void;
   onMyCases: (c: TestCase[]) => void;
-}) {
+}>) {
   return (
     <div className="flex flex-col gap-4 p-4">
       {editing && <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />}
@@ -266,7 +269,7 @@ export function CasesEditor({
 }
 
 /** 시간 제한(초). 함수형은 solution 호출 시간, 입출력형은 실행 시간 기준. 0.1~10초. */
-function TimeLimit({ value, onChange }: { value: number; onChange: (ms: number) => void }) {
+function TimeLimit({ value, onChange }: Readonly<{ value: number; onChange: (ms: number) => void }>) {
   const [text, setText] = useState(String(value / 1000));
   useEffect(() => setText(String(value / 1000)), [value]);
   const commit = () => {
@@ -293,9 +296,15 @@ function TimeLimit({ value, onChange }: { value: number; onChange: (ms: number) 
   );
 }
 
+/** 히든 케이스 펼치기 버튼 문구 */
+function toggleLabel(open: boolean, count: number) {
+  if (open) return '접기';
+  return count ? '펼치기' : '추가';
+}
+
 type HiddenState = 'saved' | 'dirty' | 'saving' | 'error';
 
-function HiddenCases({ problemId, mode, params, summary }: { problemId: string; mode: ProblemMode; params: string[]; summary: TestsetRef | null }) {
+function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId: string; mode: ProblemMode; params: string[]; summary: TestsetRef | null }>) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(true);
   const q = useQuery({ queryKey: qk.hidden(problemId), queryFn: () => api.hidden(problemId), enabled: open, staleTime: Infinity });
@@ -340,7 +349,7 @@ function HiddenCases({ problemId, mode, params, summary }: { problemId: string; 
           히든 케이스 {count} <span className="font-normal text-faint">· 제출할 때만 써요</span>
         </h3>
         <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          {open ? '접기' : count ? '펼치기' : '추가'}
+          {toggleLabel(open, count)}
         </button>
         {open && state !== 'saved' && (
           <span className={`inline-flex items-center gap-1 text-[11.5px] ${state === 'error' ? 'text-bad' : 'text-faint'}`}>

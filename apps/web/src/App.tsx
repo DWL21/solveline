@@ -1,8 +1,8 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Language, ProblemMode, Session } from '@solveline/shared';
 import { ApiError, api, qk } from './lib/api.ts';
-import { useRoute, type Scope } from './lib/route.ts';
+import { useRoute, type Route, type Scope } from './lib/route.ts';
 import { LoginScreen } from './components/LoginScreen.tsx';
 import { LegalFooter, PrivacyPage, TermsPage } from './components/Legal.tsx';
 import { SignupScreen } from './components/SignupScreen.tsx';
@@ -21,7 +21,7 @@ const loadWorkspace = () => import('./components/Workspace.tsx');
 const Workspace = lazy(() => loadWorkspace().then((m) => ({ default: m.Workspace })));
 const prefetchWorkspace = () => {
   const run = () => void loadWorkspace();
-  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 3000 });
+  if ('requestIdleCallback' in globalThis) globalThis.requestIdleCallback(run, { timeout: 3000 });
   else setTimeout(run, 1500);
 };
 
@@ -60,6 +60,12 @@ function Main() {
   return <Shell key={session.data.user?.email ?? 'guest'} />;
 }
 
+/** 목록에서 id 바로 뒤 문제(없으면 null) */
+function nextProblemId(id: string, list: { id: string }[]) {
+  const i = list.findIndex((p) => p.id === id);
+  return i >= 0 ? (list[i + 1]?.id ?? null) : null;
+}
+
 function Shell() {
   const me = useMe();
   const sync = useDraftSync(me?.email);
@@ -87,81 +93,48 @@ function Shell() {
   // 다음 문제: 들어온 목록(마지막으로 본 범위)의 순서에서 현재 문제 바로 뒤
   const problems = useQuery({ queryKey: qk.problems, queryFn: api.problems });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
-  let nextId: string | null = null;
-  if (route.kind === 'problem' && problems.data && collections.data) {
-    const list = scopeList(lastScope, problems.data, collections.data);
-    const i = list.findIndex((p) => p.id === route.id);
-    nextId = i >= 0 ? (list[i + 1]?.id ?? null) : null;
-  }
+  const nextId = route.kind === 'problem' && problems.data && collections.data ? nextProblemId(route.id, scopeList(lastScope, problems.data, collections.data)) : null;
 
-  const ide = route.kind === 'problem';
-  const navLink = (active: boolean) =>
-    `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
-
-  return (
-    <div className="flex h-full flex-col bg-ink">
-      <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
-        <a
-          href="#/"
-          className="-ml-1 flex items-center gap-2 rounded-md px-1 py-1"
-          title="문제 선택 화면으로"
-          onClick={(e) => {
-            e.preventDefault();
-            setHomeKey((k) => k + 1);
-            go({ kind: 'home', scope: { kind: 'collections' } });
-          }}
-        >
-          <img src="/icon.svg" alt="" className="size-6" />
-          <span className="text-[16px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
-        </a>
-        {ide ? (
-          <button type="button" className="btn-quiet ml-1 gap-1 px-2" onClick={() => go({ kind: 'home', scope: lastScope })}>
-            <Icon name="left" size={14} /> 문제 목록
-          </button>
-        ) : (
-          <nav className="ml-2 flex h-full items-center gap-4 max-sm:hidden" aria-label="주 메뉴">
-            <a href="#/" className={navLink(route.kind === 'home')} aria-current={route.kind === 'home' ? 'page' : undefined}>
-              문제
-            </a>
-            {me && (
-              <a href="#/submissions" className={navLink(route.kind === 'submissions')} aria-current={route.kind === 'submissions' ? 'page' : undefined}>
-                제출 기록
-              </a>
-            )}
-          </nav>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-          {me && (ide ? (
-            <a href="#/submissions" className="btn-quiet px-2 text-[13px]">제출 기록</a>
-          ) : (
-            <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
-          ))}
-          <UserMenu onLogout={() => logout.mutate()} />
-        </div>
-      </header>
-
-      {route.kind === 'problem' ? (
-        <Suspense fallback={<WorkspaceSkeleton />}>
+  let page: ReactNode;
+  if (route.kind === 'problem')
+    page = (
+      <Suspense fallback={<WorkspaceSkeleton />}>
         <Workspace
           problemId={route.id}
           onDeleted={() => go({ kind: 'home', scope: lastScope })}
           onNext={nextId ? () => go({ kind: 'problem', id: nextId }) : undefined}
           onList={() => go({ kind: 'home', scope: lastScope })}
         />
-        </Suspense>
-      ) : route.kind === 'submissions' ? (
-        <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />
-      ) : (
-        <div key={homeKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <Home
-            scope={route.scope}
-            onScope={(scope) => go({ kind: 'home', scope })}
-            onPick={(id) => go({ kind: 'problem', id })}
-            onNew={() => setCreating(true)}
-            footer={<LegalFooter admin={!!me?.owner} />}
-          />
-        </div>
-      )}
+      </Suspense>
+    );
+  else if (route.kind === 'submissions') page = <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />;
+  else
+    page = (
+      <div key={homeKey} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <Home
+          scope={route.scope}
+          onScope={(scope) => go({ kind: 'home', scope })}
+          onPick={(id) => go({ kind: 'problem', id })}
+          onNew={() => setCreating(true)}
+          footer={<LegalFooter admin={!!me?.owner} />}
+        />
+      </div>
+    );
+
+  return (
+    <div className="flex h-full flex-col bg-ink">
+      <AppHeader
+        route={route}
+        signedIn={!!me}
+        onLogo={() => {
+          setHomeKey((k) => k + 1);
+          go({ kind: 'home', scope: { kind: 'collections' } });
+        }}
+        onList={() => go({ kind: 'home', scope: lastScope })}
+        onLogout={() => logout.mutate()}
+      />
+
+      {page}
 
       {creating && (
         <NewProblemDialog
@@ -177,8 +150,57 @@ function Shell() {
   );
 }
 
+
+const navLink = (active: boolean) =>
+  `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
+
+/** 상단바: 로고, 주 메뉴(문제 화면에서는 목록으로 돌아가기), 제출 기록, 계정 */
+function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ route: Route; signedIn: boolean; onLogo: () => void; onList: () => void; onLogout: () => void }>) {
+  const ide = route.kind === 'problem';
+  return (
+    <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
+      <a
+        href="#/"
+        className="-ml-1 flex items-center gap-2 rounded-md px-1 py-1"
+        title="문제 선택 화면으로"
+        onClick={(e) => {
+          e.preventDefault();
+          onLogo();
+        }}
+      >
+        <img src="/icon.svg" alt="" className="size-6" />
+        <span className="text-[16px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
+      </a>
+      {ide ? (
+        <button type="button" className="btn-quiet ml-1 gap-1 px-2" onClick={onList}>
+          <Icon name="left" size={14} /> 문제 목록
+        </button>
+      ) : (
+        <nav className="ml-2 flex h-full items-center gap-4 max-sm:hidden" aria-label="주 메뉴">
+          <a href="#/" className={navLink(route.kind === 'home')} aria-current={route.kind === 'home' ? 'page' : undefined}>
+            문제
+          </a>
+          {signedIn && (
+            <a href="#/submissions" className={navLink(route.kind === 'submissions')} aria-current={route.kind === 'submissions' ? 'page' : undefined}>
+              제출 기록
+            </a>
+          )}
+        </nav>
+      )}
+      <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+        {signedIn && (ide ? (
+          <a href="#/submissions" className="btn-quiet px-2 text-[13px]">제출 기록</a>
+        ) : (
+          <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
+        ))}
+        <UserMenu onLogout={onLogout} />
+      </div>
+    </header>
+  );
+}
+
 /** 상단바 오른쪽: 로그인한 계정. 누르면 로그아웃. */
-function UserMenu({ onLogout }: { onLogout: () => void }) {
+function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
   const me = useMe();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -224,7 +246,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
 }
 
 /** 새 문제: 보던 폴더를 기본값으로 하고, 컬렉션을 보던 중이면 그 컬렉션 끝에 넣는다. */
-function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose: () => void; onCreated: (id: string) => void }) {
+function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope; onClose: () => void; onCreated: (id: string) => void }>) {
   const qc = useQueryClient();
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
@@ -247,7 +269,7 @@ function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose
     },
   });
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="새 문제">
+    <dialog open className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="새 문제">
       <form
         className="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-2xl"
         onSubmit={(e) => {
@@ -322,6 +344,6 @@ function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose
           </button>
         </div>
       </form>
-    </div>
+    </dialog>
   );
 }

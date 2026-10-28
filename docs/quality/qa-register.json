@@ -16,7 +16,7 @@
   ],
   "risks": [
     { "id": "RR-01", "risk": "첫 화면·로그인·약관의 색 대비 부족(axe serious)", "severity": "S3", "mitigation": "색 토큰 대비를 4.5:1 이상으로 조정하고 axe serious까지 CI에서 차단", "status": "해결" },
-    { "id": "RR-02", "risk": "풀이 화면 Editor(복잡도 67) 등 8개 함수가 인지 복잡도 15를 넘음(첫 화면·가입·제출 기록은 분리해 해소)", "severity": "S4", "mitigation": "기능 변경 때마다 하위 컴포넌트·훅으로 분리", "status": "열림" },
+    { "id": "RR-02", "risk": "풀이 화면·첫 화면 컴포넌트와 runner 실행 함수의 인지 복잡도가 높음", "severity": "S4", "mitigation": "훅·하위 컴포넌트·작은 함수로 분리해 Sonar S3776 0건. 새로 생기면 기능 변경 PR에서 분리", "status": "해결" },
     { "id": "RR-03", "risk": "SonarQube 보안 핫스팟은 사람이 검토해야 함", "severity": "S3", "mitigation": "핫스팟 6건 검토 결과를 docs/quality/hotspot-review.md에 기록(모두 안전), 새로 생기면 PR에서 갱신", "status": "해결" },
     { "id": "RR-04", "risk": "실제 Google 로그인·실기기 키보드는 자동화가 대신하지 못함", "severity": "S3", "mitigation": "출시 전 수동 확인(탐색 테스트)", "status": "수용" },
     { "id": "RR-05", "risk": "부하·장애 복구·백업 복원은 기능 검증 범위 밖", "severity": "S3", "mitigation": "독립 환경에서 별도 계획", "status": "수용" }

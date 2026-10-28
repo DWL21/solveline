@@ -83,7 +83,7 @@ const wrapIndent = ViewPlugin.fromClass(
       for (const { from, to } of view.visibleRanges) {
         for (let pos = from; pos <= to; ) {
           const line = view.state.doc.lineAt(pos);
-          const lead = /^[ \t]*/.exec(line.text)![0].replace(/\t/g, '    ').length;
+          const lead = /^[ \t]*/.exec(line.text)![0].replaceAll('\t', '    ').length;
           const hang = lead + 2;
           marks.push(Decoration.line({ attributes: { style: `padding-left: calc(${hang}ch + 6px); text-indent: -${hang}ch` } }).range(line.from));
           pos = line.to + 1;
@@ -126,7 +126,7 @@ export function CodeEditor({
   visible = true,
   compact = false,
   onFocusChange,
-}: {
+}: Readonly<{
   /** 에디터에 초점이 들어오고 나갈 때(휴대폰에서는 화상 키보드가 열리고 닫힐 때) */
   onFocusChange?: (focused: boolean) => void;
   readOnly?: boolean;
@@ -139,7 +139,7 @@ export function CodeEditor({
   language: Language;
   onChange: (v: string) => void;
   onRun: () => void;
-}) {
+}>) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const lang = useRef(new Compartment());
@@ -164,7 +164,14 @@ export function CodeEditor({
         doc: value,
         extensions: [
           keymap.of([
-            { key: 'Mod-Enter', preventDefault: true, run: () => (cb.current.onRun(), true) },
+            {
+              key: 'Mod-Enter',
+              preventDefault: true,
+              run: () => {
+                cb.current.onRun();
+                return true;
+              },
+            },
           ]),
           editorSetup,
           layout.current.of(layoutFor(compact)),
@@ -215,11 +222,11 @@ export function CodeEditor({
     if (!el || !compact) return;
     let start: { dist: number; font: number } | null = null;
     const dist = (t: TouchList) => Math.hypot(t[0]!.clientX - t[1]!.clientX, t[0]!.clientY - t[1]!.clientY);
-    const current = () => parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || DEFAULT_FONT;
+    const current = () => Number.parseFloat(getComputedStyle(el.querySelector('.cm-content') ?? el).fontSize) || DEFAULT_FONT;
     const clampFont = (v: number) => Math.round(Math.min(MAX_FONT, Math.max(MIN_FONT, v)));
     // iOS(Safari·Chrome)는 두 손가락 동작을 화면 확대 제스처로 먼저 가져간다 → 제스처 이벤트로 받아 코드 글자에만 적용한다.
     // 키보드가 열려 있든 닫혀 있든 같게 동작한다.
-    if ('ongesturestart' in window) {
+    if ('ongesturestart' in globalThis) {
       let base = 0;
       const gStart = (e: Event) => {
         e.preventDefault();
@@ -305,7 +312,7 @@ const MAX_FONT = 22;
  * 긴 코드를 빨리 오가는 손잡이(오른쪽 가장자리). 스크롤하면 잠깐 나타나고, 끌면 그 위치로 바로 이동한다.
  * 휴대폰에서는 브라우저 스크롤바가 보이지 않고 끌 수도 없어서 따로 둔다.
  */
-function FastScroll({ view }: { view: { current: EditorView | null } }) {
+function FastScroll({ view }: Readonly<{ view: { current: EditorView | null } }>) {
   const [pos, setPos] = useState({ top: 0, size: 1, show: false });
   const dragging = useRef<{ startY: number; startTop: number } | null>(null);
   const hide = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -320,16 +327,22 @@ function FastScroll({ view }: { view: { current: EditorView | null } }) {
       const size = clientHeight / scrollHeight;
       setPos((p) => ({ top: scrollHeight > clientHeight ? scrollTop / (scrollHeight - clientHeight) : 0, size, show: p.show }));
     };
+    const hideUnlessDragging = () => {
+      if (!dragging.current) setPos((p) => ({ ...p, show: false }));
+    };
     const onScroll = () => {
       measure();
       setPos((p) => ({ ...p, show: true }));
       if (hide.current) clearTimeout(hide.current);
-      hide.current = setTimeout(() => !dragging.current && setPos((p) => ({ ...p, show: false })), 1200);
+      hide.current = setTimeout(hideUnlessDragging, 1200);
     };
     // 에디터가 만들어진 뒤에 붙는다
     const attach = () => {
       scroller = view.current?.scrollDOM ?? null;
-      if (!scroller) return void (raf = requestAnimationFrame(attach));
+      if (!scroller) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
       scroller.addEventListener('scroll', onScroll, { passive: true });
       measure();
     };

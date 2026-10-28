@@ -7,7 +7,7 @@ import { Icon } from './Icon.tsx';
 
 const queue = new BookmarkQueue((owner, id, value) => api.setBookmark(id, value, owner));
 
-export function BookmarkStar({ id, bookmarked }: { id: string; bookmarked: boolean | undefined }) {
+export function BookmarkStar({ id, bookmarked }: Readonly<{ id: string; bookmarked: boolean | undefined }>) {
   const me = useMe();
   const qc = useQueryClient();
   const label = bookmarked ? '북마크 해제' : '북마크 추가';

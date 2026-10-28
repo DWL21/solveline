@@ -16,7 +16,7 @@ const paths = {
 
 export type IconName = keyof typeof paths;
 
-export function Icon({ name, size = 16, filled = false, ...rest }: { name: IconName; size?: number; filled?: boolean } & SVGProps<SVGSVGElement>) {
+export function Icon({ name, size = 16, filled = false, ...rest }: Readonly<{ name: IconName; size?: number; filled?: boolean } & SVGProps<SVGSVGElement>>) {
   return (
     <svg
       width={size}

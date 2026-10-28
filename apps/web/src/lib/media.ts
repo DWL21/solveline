@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 
 /** CSS 미디어 쿼리 결과를 따라간다(화면 회전·창 크기 변경 포함) */
 export function useMediaQuery(query: string): boolean {
-  const [match, setMatch] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  const [match, setMatch] = useState(() => typeof globalThis.matchMedia === 'function' && globalThis.matchMedia(query).matches);
   useEffect(() => {
-    const m = window.matchMedia(query);
+    const m = globalThis.matchMedia(query);
     const on = () => setMatch(m.matches);
     on();
     m.addEventListener('change', on);

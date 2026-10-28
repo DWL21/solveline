@@ -36,24 +36,24 @@ export function useDraftSync(owner: string | undefined) {
       // 목록은 코드·메모 입력마다 갱신할 필요가 없다. 열려 있을 때만 새로 읽는다.
       void qc.invalidateQueries({ queryKey: qk.problems, refetchType: 'none' });
     };
-    const interval = setInterval(() => void queue.tick(), 1_000);
+    const interval = setInterval(() => void queue.tick(), 1000);
     const online = () => void queue.flushAll();
     const hide = () => { if (document.visibilityState === 'hidden') void queue.flushAll(true); };
     const pagehide = () => void queue.flushAll(true);
     const storage = (event: StorageEvent) => { if (event.key?.startsWith(queue.prefix)) queue.notify(); };
     const beforeUnload = (event: BeforeUnloadEvent) => { if (queue.hasUnpersisted()) event.preventDefault(); };
-    window.addEventListener('online', online);
-    window.addEventListener('pagehide', pagehide);
-    window.addEventListener('storage', storage);
-    window.addEventListener('beforeunload', beforeUnload);
+    globalThis.addEventListener('online', online);
+    globalThis.addEventListener('pagehide', pagehide);
+    globalThis.addEventListener('storage', storage);
+    globalThis.addEventListener('beforeunload', beforeUnload);
     document.addEventListener('visibilitychange', hide);
     return () => {
       queue.stop(); queue.onSaved = undefined;
       clearInterval(interval);
-      window.removeEventListener('online', online);
-      window.removeEventListener('pagehide', pagehide);
-      window.removeEventListener('storage', storage);
-      window.removeEventListener('beforeunload', beforeUnload);
+      globalThis.removeEventListener('online', online);
+      globalThis.removeEventListener('pagehide', pagehide);
+      globalThis.removeEventListener('storage', storage);
+      globalThis.removeEventListener('beforeunload', beforeUnload);
       document.removeEventListener('visibilitychange', hide);
     };
   }, [queue, qc]);

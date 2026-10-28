@@ -40,7 +40,7 @@ export function LoginScreen() {
     try {
       await api.temporaryLogin();
       const next = new URLSearchParams(location.search).get('next');
-      location.href = next && /^\/(?![\/\\])/.test(next) && next.length < 300 ? next : '/';
+      location.href = next && /^\/(?![/\\])/.test(next) && next.length < 300 ? next : '/';
     } catch (e) {
       setTemporaryError(e instanceof Error ? e.message : '임시 계정을 만들지 못했어요');
       setPending(false);
@@ -79,7 +79,7 @@ export function LoginScreen() {
           </p>
           <div className="my-6 flex items-center gap-3 text-[12px] text-faint" aria-hidden>
             <span className="h-px flex-1 bg-line" />
-            또는
+            <span>또는</span>
             <span className="h-px flex-1 bg-line" />
           </div>
           <button type="button" disabled={pending || closed} onClick={temporaryLogin} className="btn-ghost min-h-12 w-full text-[15px]">
