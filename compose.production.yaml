@@ -32,7 +32,7 @@ services:
       context: .
       dockerfile: docker/judge.Dockerfile
     restart: unless-stopped
-    # runner(sandbox)와 api(default) 사이에 있다. 포트를 호스트에 열지 않는다.
+    # runner(sandbox)와 게이트웨이(default) 사이에 있다. 포트를 호스트에 열지 않는다.
     networks: [default, sandbox]
     # JUDGE_SECRET·R2_PROXY_SECRET(배포 시 생성). 사용자 데이터·로그인 비밀은 받지 않는다.
     env_file:
@@ -53,32 +53,6 @@ services:
       - /var/lib/solveline:/data
     depends_on:
       runner:
-        condition: service_healthy
-  # 예전 Node API. 2026-10-28부터 API는 Pages Worker(D1)가 맡는다(0007 5단계). 기본으로는 띄우지 않고,
-  # 롤백할 때만 --profile legacy로 다시 띄운다. 이미지와 /var/lib/solveline/solveline.db는 남겨 둔다.
-  api:
-    profiles: [legacy]
-    logging: *logging
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-    restart: unless-stopped
-    # runner에 직접 닿지 않는다(sandbox 네트워크 밖). 실행은 judge에 맡긴다.
-    networks: [default]
-    # GitHub Environment(production) secrets·variables로 배포 시 생성된다.
-    env_file:
-      - path: /etc/solveline/api.env
-        required: false
-    environment:
-      NODE_ENV: production
-      PORT: "8787"
-      DATA_DIR: /data
-      WEB_ORIGIN: https://solveline.simplyimg.com
-      JUDGE_URL: http://judge:8790
-    volumes:
-      - /var/lib/solveline:/data
-    depends_on:
-      judge:
         condition: service_healthy
   web:
     logging: *logging
