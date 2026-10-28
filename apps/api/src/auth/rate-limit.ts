@@ -12,11 +12,11 @@ const retryAfter = (resetAt: number, now: number) => Math.max(1, Math.ceil((rese
 
 /** 단일 프로세스 메모리(pahidc api). */
 export class RateLimiter implements Limiter {
-  private hits = new Map<string, { count: number; resetAt: number }>();
+  private readonly hits = new Map<string, { count: number; resetAt: number }>();
 
   constructor(
-    private limit: number,
-    private windowMs: number,
+    private readonly limit: number,
+    private readonly windowMs: number,
   ) {}
 
   async hit(key: string, now = Date.now()): Promise<number> {

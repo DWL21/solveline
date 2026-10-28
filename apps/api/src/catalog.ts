@@ -58,8 +58,8 @@ export class CatalogPublisher {
   private chain: Promise<unknown> = Promise.resolve();
 
   constructor(
-    private store: ObjectStore,
-    private source: () => Promise<CatalogSource>,
+    private readonly store: ObjectStore,
+    private readonly source: () => Promise<CatalogSource>,
   ) {}
 
   sync(): Promise<SyncResult> {

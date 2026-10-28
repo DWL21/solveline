@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EMPTY_TIMER, type Problem, type ProblemTimer } from '@solveline/shared';
 import type { DraftQueue } from '../lib/draft-queue.ts';
 import { formatDuration } from '../lib/time.ts';
+import { Icon } from './Icon.tsx';
 
 /** 타이머가 늦게 깨어나도(절전·백그라운드 제한) 한 번에 크게 늘지 않게 */
-const MAX_TICK_MS = 5_000;
+const MAX_TICK_MS = 5000;
 
 /**
  * 풀이 시간 자동 측정. 문제 화면이 열려 있고 탭이 보일 때만 늘어난다.
@@ -41,7 +42,7 @@ export function useSolveTimer(problem: Problem, queue: DraftQueue | null) {
   // 맞춤·초기화·일시정지는 바로 동기화한다.
   const [bump, setBump] = useState(0);
   useEffect(() => {
-    if (bump) void queue?.flush(problem.id);
+    if (bump && queue) void queue.flush(problem.id);
   }, [bump, queue, problem.id]);
 
   const markSolved = useCallback(() => {
@@ -66,56 +67,57 @@ export function SolveTimerBadge({
   onReset,
   onPause,
   onResume,
-}: {
+}: Readonly<{
   timer: ProblemTimer;
   onReset: () => void;
   onPause: () => void;
   onResume: () => void;
-}) {
+}>) {
   const solved = timer.solvedMs !== null;
+  const pausedTone = timer.paused ? 'bg-raised text-dim' : 'bg-raised text-text';
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : 'bg-raised text-text'}`}
-        title={solved ? '맞춘 순간의 풀이 시간' : '풀이 시간'}
-        aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}에 맞춤` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
+        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : pausedTone}`}
+        title={solved ? '정답을 맞힌 시점의 풀이 시간' : '풀이 시간'}
+        aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}, 해결` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >
-        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : `${timer.paused ? '⏸' : '⏱'} ${formatDuration(timer.elapsedMs)}`}
+        {solved ? `✓ ${formatDuration(timer.solvedMs!)}` : formatDuration(timer.elapsedMs)}
       </span>
       {!solved &&
         (timer.paused ? (
-          <button type="button" className="btn-quiet min-h-7 px-1.5 text-[13px]" title="다시 시작" aria-label="타이머 다시 시작" onClick={onResume}>
-            ▶
+          <button type="button" className="btn-quiet min-h-7 px-1.5" title="다시 시작" aria-label="타이머 다시 시작" onClick={onResume}>
+            <Icon name="play" size={14} filled />
           </button>
         ) : (
-          <button type="button" className="btn-quiet min-h-7 px-1.5 text-[13px]" title="일시정지" aria-label="타이머 일시정지" onClick={onPause}>
-            ⏸
+          <button type="button" className="btn-quiet min-h-7 px-1.5" title="일시정지" aria-label="타이머 일시정지" onClick={onPause}>
+            <Icon name="pause" size={14} />
           </button>
         ))}
       <button
         type="button"
-        className="btn-quiet min-h-7 px-1.5 text-[13px]"
+        className="btn-quiet min-h-7 px-1.5"
         title="풀이 시간 초기화"
         aria-label="풀이 시간 초기화"
         onClick={() => confirm('풀이 시간을 초기화할까요?') && onReset()}
       >
-        ↺
+        <Icon name="reset" size={14} />
       </button>
     </span>
   );
 }
 
 /** 일시정지 중에는 문제·에디터·결과를 흐리게 가린다(멈춘 동안 풀 수 없게). */
-export function PausedOverlay({ elapsedMs, onResume }: { elapsedMs: number; onResume: () => void }) {
+export function PausedOverlay({ elapsedMs, onResume }: Readonly<{ elapsedMs: number; onResume: () => void }>) {
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="타이머 일시정지됨">
+    <dialog open className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="타이머 일시정지됨">
       <div className="flex flex-col items-center gap-3 rounded-xl border border-line-strong bg-panel/95 px-8 py-6 text-center shadow-2xl">
-        <p className="text-[13px] font-bold text-dim">일시정지됨</p>
+        <p className="text-[13px] font-semibold text-dim">일시정지</p>
         <p className="font-mono text-[32px] font-bold tabular-nums">{formatDuration(elapsedMs)}</p>
         <button type="button" className="btn-primary min-h-11 px-6 text-[15px]" onClick={onResume} autoFocus>
-          ▶ 다시 시작
+          다시 시작
         </button>
       </div>
-    </div>
+    </dialog>
   );
 }

@@ -16,7 +16,7 @@ export function normalizeLiteral(text: string, where: string): string {
     return t;
   } catch {
     if (t.includes("'") && !t.includes('"')) {
-      const fixed = t.replace(/'/g, '"');
+      const fixed = t.replaceAll("'", '"');
       try {
         JSON.parse(fixed);
         return fixed;
@@ -31,10 +31,10 @@ export function normalizeLiteral(text: string, where: string): string {
 /** 즉시 실행용(보이는) 케이스의 리터럴을 미리 검사해 400으로 알린다. 해석은 runner가 한다. */
 export function validateCases(mode: RunRequest['mode'], cases: TestCase[]) {
   if (mode !== 'function') return;
-  cases.forEach((c, i) => {
-    c.args.forEach((a, j) => normalizeLiteral(a, `테스트 ${i + 1} 매개변수 ${j + 1}`));
+  for (const [i, c] of cases.entries()) {
+    for (const [j, a] of c.args.entries()) normalizeLiteral(a, `테스트 ${i + 1} 매개변수 ${j + 1}`);
     if (c.expected.trim()) normalizeLiteral(c.expected, `테스트 ${i + 1} 기댓값`);
-  });
+  }
 }
 
 type RawResult = { compile: RunResult['compile']; results: Omit<RunResult['results'][number], 'id'>[] };
@@ -56,7 +56,7 @@ export type RunJob = {
 export class RunnerClient {
   constructor(
     readonly baseUrl: string,
-    private fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   private async post(path: string, body: string, method = 'POST') {

@@ -14,7 +14,12 @@ def run(req):
             c["args"] = [json.dumps(a) for a in c["args"]]
         if "expected" in c:
             e = c["expected"]
-            c["expected"] = "" if e is None else (e if req["mode"] == "stdin" else json.dumps(e))
+            if e is None:
+                c["expected"] = ""
+            elif req["mode"] == "stdin":
+                c["expected"] = e
+            else:
+                c["expected"] = json.dumps(e)
     return server.execute(req)
 
 JAVA_SUM = """
