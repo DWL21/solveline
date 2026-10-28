@@ -613,11 +613,11 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
         </span>
         <Icon name="right" size={compact ? 14 : 16} className="mt-1 shrink-0 text-faint transition group-hover:translate-x-0.5 group-hover:text-text" />
       </span>
-      <span className={`mt-auto flex items-center gap-3 text-faint ${compact ? 'text-[12.5px]' : 'text-[13px]'}`}>
-        <span className="shrink-0">{meta}</span>
+      <span className={`mt-auto flex min-w-0 items-center text-faint ${compact ? 'flex-wrap gap-x-2 gap-y-1 text-[12.5px]' : 'gap-3 text-[13px]'}`}>
+        <span className={compact ? 'min-w-0 basis-full break-words' : 'shrink-0'}>{meta}</span>
         {signedIn && total > 0 && (
           <>
-            <span className="h-1 min-w-8 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
+            <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
               <span className="block h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
             </span>
             <span className={`shrink-0 tabular-nums ${solved === total ? 'font-semibold text-ok' : ''}`}>

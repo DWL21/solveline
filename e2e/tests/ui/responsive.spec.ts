@@ -4,6 +4,27 @@ import { evidence } from '../../src/evidence.ts';
 
 /** 휴대폰(@mobile)·태블릿(@tablet) 배치. 프로젝트(기기)별로 같은 시나리오가 돈다. */
 test.describe('휴대폰 문제 화면 @mobile', { tag: '@R8' }, () => {
+  test('로그인한 사용자의 하위 컬렉션 진행률이 카드 안에 표시된다', async ({ page, pageSignIn, seedProblem, editorApi }) => {
+    const p = await seedProblem();
+    const root = `모바일 컬렉션 ${p.id.slice(0, 6)}`;
+    const child = await editorApi.createCollection({ name: `${root}/1단계 · 기초 구현`, description: '' });
+    await editorApi.createCollection({ name: `${root}/1단계 · 기초 구현/01세트`, description: '' });
+    await editorApi.setCollectionItems(child.id, [p.id]);
+    await pageSignIn();
+    await page.goto('/#/');
+    const group = page.getByRole('region', { name: '컬렉션', exact: true }).getByRole('listitem').filter({ hasText: root });
+    const card = group.getByRole('button', { name: /1단계 · 기초 구현/ });
+    await expect(card).toContainText('0/1');
+    const overflowing = await card.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return [...element.querySelectorAll('span')].some((span) => {
+        const box = span.getBoundingClientRect();
+        return box.left < bounds.left - 1 || box.right > bounds.right + 1;
+      });
+    });
+    expect(overflowing).toBe(false);
+  });
+
   test('코드 탭은 상단 메뉴를 숨기고, 실행하면 결과 탭으로 넘어간다', async ({ page, pageSignIn, seedProblem, workspace }) => {
     const p = await seedProblem({ language: 'python' });
     await pageSignIn();

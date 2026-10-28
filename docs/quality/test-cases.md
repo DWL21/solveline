@@ -18,7 +18,7 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 | R5 | 편집 권한자가 바꾼 공용 문제·컬렉션은 모두에게 적용되고 입력을 검증한다 | 큼 | API 5 · UI 2 |
 | R6 | 관리자 모드는 마스터 비밀번호로만 들어가고 편집 권한을 줄 수 있다 | 큼 | UI 2 |
 | R7 | 작성한 코드는 자동 저장되어 새로고침해도 남는다 | 큼 | UI 1 |
-| R8 | 휴대폰·태블릿에서도 문제를 읽고 풀 수 있다 | 중간 | UI 5 |
+| R8 | 휴대폰·태블릿에서도 문제를 읽고 풀 수 있다 | 중간 | UI 7 |
 | R9 | 주요 화면에 치명적인 접근성 위반이 없다 | 중간 | UI 3 |
 | R10 | API는 공유 계약·오류 형식·보안 헤더를 지킨다 | 큼 | API 3 |
 | R11 | 운영 사이트의 핵심 경로가 살아 있다 | 큼 | 스모크 4 |
@@ -53,6 +53,7 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 | TC-20 | R7·R3 | 코드를 쓰고 기다린 뒤 새로고침한다 | 서버에 저장되고 새로고침 뒤에도 남는다 | 사용자 여정 | `ui/solve.spec.ts` |
 | TC-21 | R8 | 휴대폰에서 코드 탭으로 실행한다 | 상단 메뉴가 숨고 결과 탭으로 넘어간다 | 기기 호환 | `ui/responsive.spec.ts` |
 | TC-22 | R8 | 휴대폰에서 주요 화면을 연다 | 가로로 넘치지 않는다 | 기기 호환 | `ui/responsive.spec.ts` |
+| TC-31 | R8 | 로그인 후 휴대폰에서 하위 컬렉션을 본다 | 진행률과 숫자가 카드 경계 안에 표시된다 | 기기 호환 | `ui/responsive.spec.ts` |
 | TC-23 | R8 | 태블릿에서 문제 화면을 연다 | 탭 없이 좌우로 나눠 보인다 | 기기 호환 | `ui/responsive.spec.ts` |
 | TC-24 | R9 | 첫 화면·로그인·약관을 axe로 검사한다 | critical·serious 위반 0, 나머지는 리포트에 남긴다 | 접근성 | `ui/a11y.spec.ts` |
 | TC-25 | R10 | 비회원 조회 API를 호출한다 | 모든 응답이 공유 Zod 계약과 맞는다 | 계약 테스트 | `api/contract.spec.ts` |
