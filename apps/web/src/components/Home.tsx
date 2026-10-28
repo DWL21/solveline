@@ -104,6 +104,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const progress = collectionProgress(list);
   const solved = progress.solved;
   const siblings = node && node.depth > 0 ? siblingNodes(tree, node) : null;
+  const parent = node && node.depth > 0 ? findNode(tree, node.path.split('/').slice(0, -1).join('/')) : null;
   const levelLabel = node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션';
 
   const q = filter.trim().toLowerCase();
@@ -127,15 +128,19 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
           {effective.kind === 'all' && <button type="button" className="mb-2 text-[12.5px] text-dim hover:text-text" onClick={() => onScope({ kind: 'collections' })}>‹ 컬렉션</button>}
-          {inCollection && node && node.depth > 0 && (
+          {inCollection && node && (
             <nav className="mb-1 flex flex-wrap items-center gap-1 text-[12.5px] text-dim" aria-label="컬렉션 경로">
+              <span className="flex items-center gap-1">
+                <button type="button" className="text-sky hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
+                <span className="text-faint">/</span>
+              </span>
               {ancestors(node.path)
                 .slice(0, -1)
                 .map((path) => {
                   const n = findNode(tree, path);
                   return (
                     <span key={path} className="flex items-center gap-1">
-                      <button type="button" className="hover:text-text hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
+                      <button type="button" className="text-sky hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
                         {n?.name ?? path}
                       </button>
                       <span className="text-faint">/</span>
@@ -145,6 +150,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             </nav>
           )}
           <div className="mb-1 flex flex-wrap items-center gap-2">
+            {inCollection && node && <button type="button" className="btn-ghost" aria-label="돌아가기" title="돌아가기" onClick={() => onScope(parent ? scopeOfNode(parent) : { kind: 'collections' })}>←</button>}
             <h1 className="text-[18px] font-bold">
               {inCollection && <span className="mr-1.5 text-sky">◆</span>}
               {effective.kind === 'folder' && <span className="mr-1.5 text-warn">▤</span>}
@@ -169,10 +175,15 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
           {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
           {cards.length > 0 && (
             <section className="mt-3 mb-5" aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
-              <ul className="grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3">
+              <ul className={overview ? "grid grid-cols-1 gap-5" : "grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3"}>
                 {cards.map((n) => (
-                  <li key={n.path}>
-                    <CollectionCard node={n} all={all} signedIn={signedIn} onOpen={() => onScope(scopeOfNode(n))} />
+                  <li key={n.path} className="min-w-0">
+                    <CollectionCard node={n} all={all} signedIn={signedIn} stretch={!overview || n.children.length === 0} onOpen={() => onScope(scopeOfNode(n))} />
+                    {overview && n.children.length > 0 && (
+                      <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                        {n.children.map((child) => <CollectionCard key={child.path} node={child} all={all} signedIn={signedIn} compact onOpen={() => onScope(scopeOfNode(child))} />)}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -503,7 +514,7 @@ function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'
 }
 
 /** 컬렉션 카드: 이름, 문제 수, (로그인 시) 맞힌 비율, 하위 컬렉션 수 */
-function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode; all: ProblemSummary[]; signedIn: boolean; onOpen: () => void }) {
+function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch = true }: { node: CollectionNode; all: ProblemSummary[]; signedIn: boolean; onOpen: () => void; compact?: boolean; stretch?: boolean }) {
   const ids = new Set(problemIdsUnder(node));
   const total = ids.size;
   const solved = all.filter((p) => ids.has(p.id) && p.lastSubmission?.score === 100).length;
@@ -514,18 +525,18 @@ function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode;
     <button
       type="button"
       onClick={onOpen}
-      className="group flex h-full w-full flex-col gap-2 rounded-xl border border-line bg-panel p-3 text-left sm:p-4 transition-colors hover:border-sky/50 hover:bg-raised"
+      className={`group flex w-full flex-col rounded-xl border border-line bg-panel text-left transition-colors hover:border-sky/50 hover:bg-raised ${compact ? 'gap-1 p-2' : 'gap-2 p-3 sm:p-4'} ${stretch ? 'h-full' : ''}`}
     >
       <div className="flex items-start gap-2">
         <span className="mt-0.5 text-[12px] text-sky" aria-hidden>
           ◆
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14.5px] font-bold">{node.name}</span>
-          {desc ? <span className="mt-0.5 line-clamp-1 text-[12px] text-dim">{desc}</span> : null}
+          <span className={`block truncate font-bold ${compact ? 'text-[12px]' : 'text-[14.5px]'}`}>{node.name}</span>
+          {!compact && desc ? <span className="mt-0.5 line-clamp-1 text-[12px] text-dim">{desc}</span> : null}
         </span>
       </div>
-      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
+      <div className={`mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-faint ${compact ? 'text-[10px]' : 'text-[12px]'}`}>
         <span>문제 {total}</span>
         {node.children.length > 0 && <span>하위 {node.children.length}</span>}
         {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}{solved === total && ` · ${node.name.includes('단계') ? '단계' : node.name.includes('세트') ? '세트' : '컬렉션'} 클리어`}</span>}
