@@ -1,10 +1,33 @@
 @import 'tailwindcss';
 
-/* 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤 */
+/*
+ * 목록·로그인 등 둘러보는 화면은 밝은 톤, 문제 풀이 화면(.theme-ide)은 어두운 남색 IDE 톤.
+ * 색은 모두 이 토큰으로만 쓴다. .theme-ide 안에서는 같은 이름의 토큰이 어두운 값으로 바뀐다.
+ */
 @theme {
   --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: 'JetBrains Mono', 'D2Coding', 'SF Mono', Menlo, Consolas, monospace;
 
+  --color-ink: #f4f6f9;
+  --color-base: #ffffff;
+  --color-panel: #ffffff;
+  --color-raised: #eef2f6;
+  --color-line: #e2e7ee;
+  --color-line-strong: #c9d2dd;
+  --color-text: #1b2533;
+  --color-dim: #4a5a6c;
+  --color-faint: #607086;
+  --color-accent: #0066e0;
+  --color-accent-hover: #0057c2;
+  --color-accent-text: #0060d4;
+  --color-sky: #0a68b8;
+  --color-ok: #10804b;
+  --color-bad: #c8312f;
+  --color-warn: #995500;
+  --color-bar: #ffffff;
+}
+
+.theme-ide {
   --color-ink: #0c151c;
   --color-base: #172334;
   --color-panel: #1e2a38;
@@ -21,6 +44,13 @@
   --color-ok: #3ec27d;
   --color-bad: #ff6b6b;
   --color-warn: #f5b94a;
+  --color-bar: #0f1922;
+  color-scheme: dark;
+  color: var(--color-text);
+}
+
+:root {
+  color-scheme: light;
 }
 
 /*
@@ -101,6 +131,9 @@ body {
 }
 
 ::selection {
+  background: rgb(0 120 255 / 0.22);
+}
+.theme-ide ::selection {
   background: rgb(0 120 255 / 0.35);
 }
 
@@ -117,13 +150,13 @@ body {
   @apply btn bg-accent text-white hover:bg-accent-hover;
 }
 @utility btn-ghost {
-  @apply btn border border-line-strong bg-raised text-text hover:border-dim;
+  @apply btn border border-line-strong bg-panel text-text hover:border-faint hover:bg-raised;
 }
 @utility btn-quiet {
   @apply btn text-dim hover:bg-raised hover:text-text;
 }
 @utility field {
-  @apply w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[13px] text-text outline-none placeholder:text-faint focus:border-accent;
+  @apply w-full rounded-md border border-line-strong bg-base px-2.5 py-1.5 font-mono text-[13px] text-text outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/15;
 }
 @utility pane-title {
   @apply flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-[13px] font-bold text-dim;

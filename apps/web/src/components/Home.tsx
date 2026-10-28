@@ -1,11 +1,12 @@
 import { Language } from '@solveline/shared';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
 import { useMe } from '../lib/me.ts';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { ListSkeleton } from './Loading.tsx';
 import { BookmarkStar } from './BookmarkStar.tsx';
+import { Icon } from './Icon.tsx';
 import type { Scope } from '../lib/route.ts';
 import { ancestors, buildTree, collectionProgress, findNode, flatten, problemIdsUnder, siblingNodes, type CollectionNode } from '../lib/collections.ts';
 
@@ -42,25 +43,26 @@ export function scopeList(scope: Scope, all: ProblemSummary[], collections: Coll
   return [...all].sort(byTitle);
 }
 
-/** 마지막 제출 결과 표시: 100점이면 초록 ✓, 아니면 점수 */
+/** 마지막 제출 결과: 100점이면 ✓ 해결, 아니면 점수 */
 export function SolvedMark({ p }: { p: ProblemSummary }) {
   const sub = p.lastSubmission;
   if (!sub) return null;
   if (sub.score === 100)
     return (
-      <span className="shrink-0 text-[14px] font-bold text-ok" title={new Date(sub.at).toLocaleString('ko-KR')} aria-label="맞춤">
-        ✓
+      <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-semibold text-ok" title={new Date(sub.at).toLocaleString('ko-KR')} aria-label="해결">
+        <Icon name="check" size={14} />
+        <span className="max-sm:hidden">해결</span>
       </span>
     );
   return (
-    <span className="shrink-0 text-[11.5px] font-semibold text-warn" title={`최근 제출 ${sub.score}점`}>
-      △ {sub.score}점
+    <span className="shrink-0 text-[13px] font-semibold text-warn tabular-nums" title="최근 제출 점수">
+      {sub.score}점
     </span>
   );
 }
 
 /** 문제 선택 화면: 왼쪽에 전체·폴더·컬렉션, 오른쪽에 그 범위의 문제 목록. */
-export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope: (s: Scope) => void; onPick: (id: string) => void; onNew: () => void }) {
+export function Home({ scope, onScope, onPick, onNew, footer }: { scope: Scope; onScope: (s: Scope) => void; onPick: (id: string) => void; onNew: () => void; footer?: ReactNode }) {
   const me = useMe();
   const editor = !!me?.editor;
   const signedIn = !!me;
@@ -106,62 +108,66 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
         folderCount={(id) => all.filter((p) => p.folderId === id).length}
         tree={tree}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
-          {effective.kind === 'all' && <button type="button" className="mb-2 text-[12.5px] text-dim hover:text-text" onClick={() => onScope({ kind: 'collections' })}>‹ 컬렉션</button>}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl flex-1 px-4 pt-6 pb-10 sm:px-8 sm:pt-8">
+          {effective.kind === 'all' && (
+            <nav className="mb-2 text-[13px]" aria-label="컬렉션 경로">
+              <button type="button" className="text-dim hover:text-text hover:underline" onClick={() => onScope({ kind: 'collections' })}>
+                컬렉션
+              </button>
+            </nav>
+          )}
           {inCollection && node && (
-            <nav className="mb-1 flex flex-wrap items-center gap-1 text-[12.5px] text-dim" aria-label="컬렉션 경로">
-              <span className="flex items-center gap-1">
-                <button type="button" className="text-sky hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
-                <span className="text-faint">/</span>
-              </span>
+            <nav className="mb-2 flex flex-wrap items-center gap-1 text-[13px] text-dim" aria-label="컬렉션 경로">
+              <button type="button" className="hover:text-text hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
               {ancestors(node.path)
                 .slice(0, -1)
                 .map((path) => {
                   const n = findNode(tree, path);
                   return (
                     <span key={path} className="flex items-center gap-1">
-                      <button type="button" className="text-sky hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
+                      <Icon name="right" size={12} className="text-faint" />
+                      <button type="button" className="hover:text-text hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
                         {n?.name ?? path}
                       </button>
-                      <span className="text-faint">/</span>
                     </span>
                   );
                 })}
             </nav>
           )}
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            {inCollection && node && <button type="button" className="btn-ghost" aria-label="돌아가기" title="돌아가기" onClick={() => onScope(parent ? scopeOfNode(parent) : { kind: 'collections' })}>←</button>}
-            <h1 className="text-[18px] font-bold">
-              {inCollection && <span className="mr-1.5 text-sky">◆</span>}
-              {effective.kind === 'folder' && <span className="mr-1.5 text-warn">▤</span>}
-              {title} <span className="text-[14px] font-semibold text-faint">{overview ? cards.length : list.length}</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {inCollection && node && (
+              <button type="button" className="btn-quiet -ml-2 size-9 px-0" aria-label="돌아가기" title="돌아가기" onClick={() => onScope(parent ? scopeOfNode(parent) : { kind: 'collections' })}>
+                <Icon name="left" size={18} />
+              </button>
+            )}
+            <h1 className="min-w-0 text-[22px] font-bold tracking-tight sm:text-[24px]">
+              {title} <span className="text-[16px] font-semibold text-faint tabular-nums">{overview ? cards.length : list.length}</span>
             </h1>
             {overview && <button type="button" className="btn-ghost ml-auto" onClick={() => onScope({ kind: 'all' })}>전체 보기</button>}
-            {list.length > 0 && signedIn && (
-              <span className="text-[12px] font-semibold text-ok" title="100점을 받은 문제">
-                ✓ {solved}/{list.length}
-              </span>
-            )}
-            {inCollection && signedIn && progress.cleared && <span className="text-[12px] font-semibold text-ok">✓ {levelLabel} 클리어</span>}
-            {siblings && (
+            {(siblings || (folder && signedIn) || (collection && editor)) && (
               <div className="ml-auto flex items-center gap-1">
-                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`이전 ${levelLabel}`} title={`이전 ${levelLabel}`} disabled={!siblings.previous} onClick={() => siblings.previous && onScope(scopeOfNode(siblings.previous))}>‹</button>
-                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`다음 ${levelLabel}`} title={`다음 ${levelLabel}`} disabled={!siblings.next} onClick={() => siblings.next && onScope(scopeOfNode(siblings.next))}>›</button>
+                {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
+                {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'collections' })} />}
+                {siblings && (
+                  <>
+                    <button type="button" className="btn-ghost ml-1 size-9 px-0 disabled:opacity-40" aria-label={`이전 ${levelLabel}`} title={`이전 ${levelLabel}`} disabled={!siblings.previous} onClick={() => siblings.previous && onScope(scopeOfNode(siblings.previous))}><Icon name="left" /></button>
+                    <button type="button" className="btn-ghost size-9 px-0 disabled:opacity-40" aria-label={`다음 ${levelLabel}`} title={`다음 ${levelLabel}`} disabled={!siblings.next} onClick={() => siblings.next && onScope(scopeOfNode(siblings.next))}><Icon name="right" /></button>
+                  </>
+                )}
               </div>
             )}
-            {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
-            {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'collections' })} />}
           </div>
-          {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
+          {collection?.description && <p className="mt-2 max-w-2xl text-[14px] leading-relaxed whitespace-pre-wrap text-dim">{collection.description}</p>}
+          {!overview && list.length > 0 && signedIn && <Progress solved={solved} total={list.length} done={inCollection && progress.cleared} />}
           {cards.length > 0 && (
-            <section className="mt-3 mb-5" aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
-              <ul className={overview ? "grid grid-cols-1 gap-5" : "grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3"}>
+            <section className={overview ? 'mt-6' : 'mt-6 mb-2'} aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
+              <ul className={overview ? 'flex flex-col gap-8' : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'}>
                 {cards.map((n) => (
                   <li key={n.path} className="min-w-0">
                     <CollectionCard node={n} all={all} signedIn={signedIn} stretch={!overview || n.children.length === 0} onOpen={() => onScope(scopeOfNode(n))} />
                     {overview && n.children.length > 0 && (
-                      <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                      <div className="mt-3 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">
                         {n.children.map((child) => <CollectionCard key={child.path} node={child} all={all} signedIn={signedIn} compact onOpen={() => onScope(scopeOfNode(child))} />)}
                       </div>
                     )}
@@ -170,33 +176,40 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               </ul>
             </section>
           )}
-          {overview && cards.length === 0 && <p className="py-12 text-center text-[13px] text-faint">아직 컬렉션이 없어요</p>}
+          {overview && cards.length === 0 && <p className="py-16 text-center text-[14px] text-faint">아직 컬렉션이 없어요</p>}
           {!overview && <>
-          <div className="mt-3 mb-4 flex flex-wrap items-center gap-2">
-            <input
-              className="field w-full font-sans sm:w-72"
-              placeholder="제목·유형·단계 검색 (예: 3단계, DP)"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              aria-label="문제 검색"
-            />
-            {signedIn && effective.kind !== 'bookmarks' && <button type="button" aria-pressed={bookmarksOnly} onClick={() => setBookmarksOnly((v) => !v)} className={`btn-ghost ${bookmarksOnly ? 'text-warn' : ''}`}>★ 북마크만 보기</button>}
+          <div className="mt-6 mb-3 flex flex-wrap items-center gap-2">
+            <label className="relative w-full sm:w-72">
+              <Icon name="search" size={15} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
+              <input
+                className="field h-10 pl-9 font-sans text-[14px]"
+                placeholder="문제 제목 검색"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                aria-label="문제 검색"
+              />
+            </label>
+            {signedIn && effective.kind !== 'bookmarks' && (
+              <button type="button" aria-pressed={bookmarksOnly} onClick={() => setBookmarksOnly((v) => !v)} className={`btn-ghost h-10 ${bookmarksOnly ? 'border-accent text-accent-text' : ''}`}>
+                <Icon name="star" size={14} filled={bookmarksOnly} /> 북마크
+              </button>
+            )}
             {editor && (
-              <button type="button" className="btn-primary ml-auto" onClick={onNew} title="편집 권한: 모든 사용자에게 보이는 문제를 만들어요">
-                + 새 문제
+              <button type="button" className="btn-primary ml-auto h-10" onClick={onNew}>
+                <Icon name="plus" size={14} /> 새 문제
               </button>
             )}
           </div>
           {all.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-16 text-center">
-              <p className="text-[15px] font-bold">아직 문제가 없어요</p>
-              <p className="text-[13px] text-dim">{editor ? '문제를 만들고 설명·테스트 케이스를 붙여 넣은 뒤 풀어 보세요.' : '문제가 등록되면 여기에 보여요.'}</p>
+            <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel py-16 text-center">
+              <p className="text-[15px] font-semibold">아직 문제가 없어요</p>
+              {editor && <p className="text-[13px] text-dim">새 문제를 추가해 보세요.</p>}
             </div>
           ) : shown.length === 0 ? (
-            <p className="py-12 text-center text-[13px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
+            <p className="rounded-lg border border-line bg-panel py-14 text-center text-[14px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
           ) : (
             <>
-            <ol className="overflow-hidden rounded-lg border border-line bg-panel">
+            <ol className="overflow-hidden rounded-lg border border-line bg-panel" aria-label="문제 목록">
               {shown.slice(0, limit).map((p) => (
                 <ProblemRow
                   key={p.id}
@@ -212,7 +225,22 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
           )}
           </>}
         </div>
+        {footer}
       </div>
+    </div>
+  );
+}
+
+/** 이 범위에서 맞힌 문제 수 */
+function Progress({ solved, total, done }: { solved: number; total: number; done: boolean }) {
+  return (
+    <div className="mt-4 flex max-w-md items-center gap-3 text-[13px]" title="100점을 받은 문제">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
+        <div className="h-full rounded-full bg-ok" style={{ width: `${total ? (solved / total) * 100 : 0}%` }} />
+      </div>
+      <span className={`shrink-0 font-semibold tabular-nums ${done ? 'text-ok' : 'text-dim'}`}>
+        {done ? '✓ 모두 해결' : `${solved} / ${total} 해결`}
+      </span>
     </div>
   );
 }
@@ -252,28 +280,22 @@ function scopeTitle(scope: Scope, folder: Folder | undefined, node: CollectionNo
 }
 
 function emptyMessage({ q, bookmarksOnly, kind, signedIn, inCollection, hasCards }: { q: string; bookmarksOnly: boolean; kind: Scope['kind']; signedIn: boolean; inCollection: boolean; hasCards: boolean }): string {
-  if (q) return '검색 결과가 없어요';
-  if (bookmarksOnly || kind === 'bookmarks') return signedIn ? '북마크한 문제가 없어요' : '로그인하면 북마크를 사용할 수 있어요';
-  if (inCollection) return hasCards ? '하위 컬렉션을 골라 보세요' : '아직 문제가 없어요';
+  if (q) return `'${q}'에 맞는 문제가 없어요`;
+  if (bookmarksOnly || kind === 'bookmarks') return signedIn ? '북마크한 문제가 없어요' : '로그인하면 북마크를 쓸 수 있어요';
+  if (inCollection) return hasCards ? '위에서 하위 컬렉션을 골라 주세요' : '아직 문제가 없어요';
   return '이 폴더에 문제가 없어요';
 }
 
 function ProblemRow({ p, order, folderLabel, onPick }: { p: ProblemSummary; order: number | null; folderLabel: string | undefined; onPick: (id: string) => void }) {
-  const solved = p.lastSubmission?.score === 100;
   return (
-    <li className="flex items-center border-b border-line last:border-b-0">
-      <BookmarkStar id={p.id} bookmarked={p.bookmarked} />
-      <button
-        type="button"
-        onClick={() => onPick(p.id)}
-        className={`flex min-w-0 flex-1 items-center gap-3 border-l-[3px] px-4 py-3 text-left hover:bg-raised ${solved ? 'border-ok bg-ok/[0.06]' : 'border-transparent'}`}
-      >
-        {order !== null && <span className="w-6 shrink-0 text-right font-mono text-[12px] text-faint">{order}</span>}
-        <span className={`min-w-0 flex-1 truncate text-[14px] font-semibold ${solved ? 'text-ok' : ''}`}>{p.title}</span>
+    <li className="flex items-center border-b border-line last:border-b-0 hover:bg-raised/60">
+      <button type="button" onClick={() => onPick(p.id)} className="flex min-h-13 min-w-0 flex-1 items-center gap-4 py-3 pl-5 text-left">
+        {order !== null && <span className="w-5 shrink-0 text-right text-[13px] text-faint tabular-nums">{order}</span>}
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{p.title}</span>
+        {folderLabel && <span className="hidden max-w-32 shrink-0 truncate rounded bg-raised px-2 py-0.5 text-[12px] text-dim sm:inline">{folderLabel}</span>}
         <SolvedMark p={p} />
-        {folderLabel && <span className="hidden shrink-0 rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-dim sm:inline">{folderLabel}</span>}
-        <span className="shrink-0 text-[11.5px] text-faint" aria-label="지원 언어">{Language.options.map((language) => (language === 'java' ? 'Java' : 'Python')).join(' · ')}</span>
       </button>
+      <BookmarkStar id={p.id} bookmarked={p.bookmarked} />
     </li>
   );
 }
@@ -313,7 +335,8 @@ function Sidebar({
     ),
   ];
   const current = scopes.find((s) => sameScope(s.scope, scope))?.key ?? 'collections';
-  const icon = (g: ScopeItem['group']) => (g === 'collection' ? '◆' : g === 'folder' ? '▤' : '☰');
+  // 컬렉션 안을 보는 중이면 휴대폰 상단에서는 "컬렉션"을 고른 것으로 보여 준다
+  const chip = current.startsWith('c') && current !== 'collections' ? 'collections' : current;
 
   const item = (s: ScopeItem) => (
     <li key={s.key}>
@@ -321,64 +344,60 @@ function Sidebar({
         type="button"
         onClick={() => onScope(s.scope)}
         aria-current={current === s.key ? 'page' : undefined}
-        style={s.depth ? { paddingLeft: `${10 + s.depth * 14}px` } : undefined}
-        className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised/60 hover:text-text'}`}
+        style={s.depth ? { paddingLeft: `${12 + s.depth * 14}px` } : undefined}
+        className={`flex w-full items-center gap-2 rounded-md px-3 py-[7px] text-left text-[14px] ${current === s.key ? 'bg-accent/8 font-semibold text-accent-text' : 'text-dim hover:bg-raised hover:text-text'}`}
       >
-        <span className={`w-4 shrink-0 text-center text-[11px] ${s.group === 'collection' ? 'text-sky' : s.group === 'folder' ? 'text-warn' : 'text-faint'}`} aria-hidden>
-          {s.key === 'bookmarks' ? '★' : s.key === 'collections' ? '◆' : icon(s.group)}
-        </span>
         <span className="min-w-0 flex-1 truncate">{s.label}</span>
-        <span className="text-[11.5px] text-faint">{s.count}</span>
+        <span className={`text-[12px] tabular-nums ${current === s.key ? 'text-accent-text' : 'text-faint'}`}>{s.count}</span>
       </button>
     </li>
   );
 
   return (
     <>
-      {/* 휴대폰: 범위 선택 드롭다운 + 폴더·컬렉션 만들기 */}
-      <div className="border-b border-line bg-base px-4 py-2 md:hidden">
-        <div className="flex gap-2">
-        <select
-          aria-label="보기 범위"
-          value={current}
-          onChange={(e) => {
-            const s = scopes.find((x) => x.key === e.target.value);
-            if (s) onScope(s.scope);
-          }}
-          className="h-10 min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 text-[14px] font-semibold outline-none"
-        >
-          {scopes.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.group === 'folder' ? '폴더 · ' : s.group === 'collection' ? `컬렉션 · ${'　'.repeat(s.depth ?? 0)}` : ''}
-              {s.label} ({s.count})
-            </option>
-          ))}
-        </select>
-        {me && (
-          <button
-            type="button"
-            className="btn-ghost h-10 w-10 shrink-0 px-0 text-[18px]"
-            aria-expanded={creating}
-            aria-label="폴더·컬렉션 만들기"
-            onClick={() => setCreating((v) => !v)}
-          >
-            {creating ? '×' : '+'}
-          </button>
-        )}
+      {/* 휴대폰: 범위를 가로로 넘겨 고른다. 컬렉션 안쪽은 카드로 들어간다. */}
+      <div className="border-b border-line bg-base md:hidden">
+        <div className="no-scrollbar flex items-center gap-2 overflow-x-auto px-4 py-2.5">
+          {scopes
+            .filter((s) => s.group !== 'collection')
+            .map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                aria-current={chip === s.key ? 'page' : undefined}
+                onClick={() => onScope(s.scope)}
+                className={`h-9 shrink-0 rounded-full border px-3.5 text-[13.5px] font-semibold whitespace-nowrap ${chip === s.key ? 'border-text bg-text text-base' : 'border-line-strong text-dim'}`}
+              >
+                {s.label} <span className="font-normal opacity-70">{s.count}</span>
+              </button>
+            ))}
+          {me && (
+            <button
+              type="button"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-dim"
+              aria-expanded={creating}
+              aria-label="폴더·컬렉션 만들기"
+              onClick={() => setCreating((v) => !v)}
+            >
+              <Icon name={creating ? 'close' : 'plus'} size={14} />
+            </button>
+          )}
         </div>
         {creating && me && (
-          <QuickCreate editor={me.editor} onDone={() => setCreating(false)} />
+          <div className="px-4 pb-3">
+            <QuickCreate editor={me.editor} onDone={() => setCreating(false)} />
+          </div>
         )}
       </div>
-      <aside className="hidden w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-base px-3 py-4 md:flex">
-        <ul>{scopes.filter((s) => s.group === 'all').map(item)}</ul>
+      <aside className="hidden w-60 shrink-0 flex-col gap-5 overflow-y-auto border-r border-line bg-base px-3 py-5 md:flex">
+        <ul className="flex flex-col gap-0.5">{scopes.filter((s) => s.group === 'all').map(item)}</ul>
         <section>
           <SectionHeader kind="folder" />
-          <ul>{scopes.filter((s) => s.group === 'folder').map(item)}</ul>
+          <ul className="flex flex-col gap-0.5">{scopes.filter((s) => s.group === 'folder').map(item)}</ul>
         </section>
         <section>
           <SectionHeader kind="collection" />
-          <ul>{scopes.filter((s) => s.group === 'collection').map(item)}</ul>
+          <ul className="flex flex-col gap-0.5">{scopes.filter((s) => s.group === 'collection').map(item)}</ul>
         </section>
       </aside>
     </>
@@ -400,18 +419,18 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
   });
   return (
     <form
-      className="mt-2 flex flex-col gap-2 rounded-lg border border-line bg-panel p-3"
+      className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (name.trim()) create.mutate();
       }}
     >
       {editor && (
-        <div className="grid grid-cols-2 gap-1 rounded-md bg-base p-1" role="radiogroup" aria-label="만들 항목">
+        <div className="grid grid-cols-2 gap-1 rounded-md bg-raised p-1" role="radiogroup" aria-label="만들 항목">
           {(
             [
-              ['folder', '▤ 내 폴더'],
-              ['collection', '◆ 컬렉션'],
+              ['folder', '내 폴더'],
+              ['collection', '컬렉션'],
             ] as const
           ).map(([k, label]) => (
             <button
@@ -420,7 +439,7 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
               role="radio"
               aria-checked={kind === k}
               onClick={() => setKind(k)}
-              className={`h-9 rounded text-[13px] font-semibold ${kind === k ? 'bg-raised text-text' : 'text-dim'}`}
+              className={`h-9 rounded text-[13px] font-semibold ${kind === k ? 'bg-panel text-text shadow-sm' : 'text-dim'}`}
             >
               {label}
             </button>
@@ -430,7 +449,7 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
       <div className="flex gap-2">
         <input
           className="field h-10 min-w-0 flex-1 font-sans text-[14px]"
-          placeholder={kind === 'folder' ? '새 폴더 이름' : '새 컬렉션 이름 (예: 모의고사/1회)'}
+          placeholder={kind === 'folder' ? '폴더 이름' : '컬렉션 이름 (하위는 / 로 구분)'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
@@ -467,25 +486,25 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
   const label = kind === 'folder' ? '폴더' : '컬렉션';
   return (
     <div className="mb-1">
-      <div className="flex items-center px-2.5">
-        <h2 className="flex-1 text-[11.5px] font-bold tracking-wide text-faint">{kind === 'folder' && me ? '내 폴더' : label}</h2>
+      <div className="flex h-7 items-center pr-1 pl-3">
+        <h2 className="flex-1 text-[12px] font-semibold text-faint">{kind === 'folder' && me ? '내 폴더' : label}</h2>
         {canAdd && (
         <button
           type="button"
-          className="touch-target rounded px-1.5 text-[15px] leading-6 text-faint hover:bg-raised hover:text-text"
+          className="touch-target flex size-6 items-center justify-center rounded text-faint hover:bg-raised hover:text-text"
           aria-label={`새 ${label}`}
           title={`새 ${label}`}
           onClick={() => setOpen((v) => !v)}
         >
-          +
+          <Icon name="plus" size={14} />
         </button>
         )}
       </div>
       {open && canAdd && (
-        <form onSubmit={submit} className="mt-1 px-1">
+        <form onSubmit={submit} className="mt-1 mb-1 px-1">
           <input
             className="field font-sans"
-            placeholder={kind === 'collection' ? '컬렉션 이름 (예: 모의고사/1회)' : `${label} 이름`}
+            placeholder={kind === 'collection' ? '컬렉션 이름 (하위는 / 로 구분)' : '폴더 이름'}
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
@@ -519,12 +538,12 @@ function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'
   });
   const label = kind === 'folder' ? '폴더' : '컬렉션';
   return (
-    <div className="ml-auto flex gap-1">
+    <div className="flex gap-1">
       <button
         type="button"
-        className="btn-quiet min-h-7 px-2 text-[12px]"
+        className="btn-quiet min-h-8 px-2.5"
         onClick={() => {
-          const name = prompt(`${label} 이름`, item.name)?.trim();
+          const name = prompt(`새 ${label} 이름`, item.name)?.trim();
           if (name && name !== item.name) rename.mutate(name);
         }}
       >
@@ -532,9 +551,9 @@ function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'
       </button>
       <button
         type="button"
-        className="btn-quiet min-h-7 px-2 text-[12px]"
+        className="btn-quiet min-h-8 px-2.5 hover:text-bad"
         onClick={() =>
-          confirm(kind === 'folder' ? `"${item.name}" 폴더를 지울까요? 안의 문제는 "폴더 없음"으로 남아요.` : `"${item.name}" 컬렉션을 지울까요? 문제는 지워지지 않아요.`) &&
+          confirm(kind === 'folder' ? `'${item.name}' 폴더를 삭제할까요? 폴더 안의 문제는 지워지지 않아요.` : `'${item.name}' 컬렉션을 삭제할까요? 문제는 지워지지 않아요.`) &&
           remove.mutate()
         }
       >
@@ -544,7 +563,7 @@ function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'
   );
 }
 
-/** 컬렉션 카드: 이름, 문제 수, (로그인 시) 맞힌 비율, 하위 컬렉션 수 */
+/** 컬렉션 카드: 이름, 설명 첫 줄, 문제 수, (로그인 시) 맞힌 비율 */
 function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch = true }: { node: CollectionNode; all: ProblemSummary[]; signedIn: boolean; onOpen: () => void; compact?: boolean; stretch?: boolean }) {
   const ids = new Set(problemIdsUnder(node));
   const total = ids.size;
@@ -552,31 +571,34 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
   const pct = total ? Math.round((solved / total) * 100) : 0;
   // 카드에는 설명의 첫 줄만 한 줄로(자세한 규칙·목록은 컬렉션을 열면 보인다)
   const desc = node.collection?.description.trim().split('\n')[0]?.trim();
+  const meta = [`${total}문제`, node.children.length > 0 && `하위 ${node.children.length}개`].filter(Boolean).join(' · ');
   return (
     <button
       type="button"
       onClick={onOpen}
-      className={`group flex w-full flex-col rounded-xl border border-line bg-panel text-left transition-colors hover:border-sky/50 hover:bg-raised ${compact ? 'gap-1 p-2' : 'gap-2 p-3 sm:p-4'} ${stretch ? 'h-full' : ''}`}
+      className={`group flex w-full flex-col rounded-lg border border-line bg-panel text-left transition hover:border-line-strong hover:shadow-md hover:shadow-black/5 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
     >
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 text-[12px] text-sky" aria-hidden>
-          ◆
-        </span>
+      <span className="flex items-start gap-3">
         <span className="min-w-0 flex-1">
-          <span className={`block truncate font-bold ${compact ? 'text-[12px]' : 'text-[14.5px]'}`}>{node.name}</span>
-          {!compact && desc ? <span className="mt-0.5 line-clamp-1 text-[12px] text-dim">{desc}</span> : null}
+          <span className={`block truncate font-bold ${compact ? 'text-[15px]' : 'text-[18px]'}`}>{node.name}</span>
+          {!compact && desc ? <span className="mt-1 line-clamp-1 text-[14px] text-dim">{desc}</span> : null}
         </span>
-      </div>
-      <div className={`mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-faint ${compact ? 'text-[10px]' : 'text-[12px]'}`}>
-        <span>문제 {total}</span>
-        {node.children.length > 0 && <span>하위 {node.children.length}</span>}
-        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}{solved === total && ` · ${node.name.includes('단계') ? '단계' : node.name.includes('세트') ? '세트' : '컬렉션'} 클리어`}</span>}
-      </div>
-      {signedIn && total > 0 && (
-        <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden>
-          <div className="h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
-        </div>
-      )}
+        <Icon name="right" size={compact ? 14 : 16} className="mt-1 shrink-0 text-faint transition group-hover:translate-x-0.5 group-hover:text-text" />
+      </span>
+      <span className={`mt-auto flex items-center gap-3 text-faint ${compact ? 'text-[12.5px]' : 'text-[13px]'}`}>
+        <span className="shrink-0">{meta}</span>
+        {signedIn && total > 0 && (
+          <>
+            <span className="h-1 min-w-8 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
+              <span className="block h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
+            </span>
+            <span className={`shrink-0 tabular-nums ${solved === total ? 'font-semibold text-ok' : ''}`}>
+              {solved === total ? '✓ ' : ''}
+              {solved}/{total}
+            </span>
+          </>
+        )}
+      </span>
     </button>
   );
 }
@@ -594,8 +616,8 @@ function MoreSentinel({ onMore, remaining }: { onMore: () => void; remaining: nu
     return () => io.disconnect();
   }, [onMore]);
   return (
-    <button ref={ref} type="button" className="btn-ghost mt-3 w-full" onClick={onMore}>
-      더 보기 ({remaining})
+    <button ref={ref} type="button" className="btn-ghost mt-3 h-10 w-full" onClick={onMore}>
+      {remaining}개 더 보기
     </button>
   );
 }

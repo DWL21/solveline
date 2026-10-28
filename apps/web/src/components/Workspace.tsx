@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { lastSubmissionOf, type Language, type Problem, type ProblemInput, type ProblemMode, type ProblemSummary, type Submission, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { BookmarkStar } from './BookmarkStar.tsx';
+import { Icon } from './Icon.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
 import { newCase } from '../lib/blank.ts';
 import { CodeEditor } from './CodeEditor.tsx';
@@ -150,7 +151,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     mutationFn: async ({ cases, submit }: { cases: TestCase[]; submit: boolean }) => {
       // 채점은 서버의 공용 케이스를 사용하므로 편집한 내용부터 반영한다.
       while (queue?.read(problem.id) && Object.keys(queue.read(problem.id)!.patch).some((key) => key !== 'timer')) {
-        if (!await queue.flush(problem.id)) throw new ApiError(0, 'sync_failed', '변경 내용을 동기화하지 못했어요. 연결을 확인해 주세요.');
+        if (!await queue.flush(problem.id)) throw new ApiError(0, 'sync_failed', '변경 내용을 저장하지 못했어요. 인터넷 연결을 확인해 주세요.');
       }
       const d = draftRef.current;
       let s = await api.submit({ problemId: problem.id, kind: submit ? 'submit' : 'run', language: d.language, mode: d.mode, code: d.code[d.language], cases });
@@ -208,7 +209,7 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     const cases = [...draftRef.current.cases.filter((c) => !c.hidden), ...draftRef.current.myCases];
     if (cases.length === 0) {
       setTab('cases');
-      setRun({ kind: 'error', message: '실행할 테스트 케이스가 없어요. 케이스를 추가하세요.' });
+      setRun({ kind: 'error', message: '실행할 테스트 케이스가 없어요. 테스트 케이스를 추가해 주세요.' });
       showResult();
       return;
     }
@@ -262,7 +263,7 @@ guest ? (
           ) : (
           <footer className={`pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'keyboard-hide typing-hide' : 'flex-wrap'}`}>
             <button type="button" className="btn-ghost touch-target" onClick={reset} aria-label="초기화" title="시작 코드로 되돌리기">
-              {narrow ? '↺' : '초기화'}
+              {narrow ? <Icon name="reset" /> : '초기화'}
             </button>
             <button
               type="button"
@@ -287,7 +288,7 @@ guest ? (
                       <Spinner size={13} /> 중지 중
                     </>
                   ) : (
-                    '■ 중지'
+                    '중지'
                   )}
                 </button>
               )}
@@ -331,8 +332,8 @@ guest ? (
         <div className={narrow ? 'no-scrollbar flex w-full min-w-0 basis-full items-center gap-2 overflow-x-auto whitespace-nowrap' : 'contents'}>
         {!guest && <SolveTimerBadge timer={solve.timer} onReset={solve.reset} onPause={solve.pause} onResume={solve.resume} />}
         {sub && (
-          <span className={`text-[12px] font-semibold ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={new Date(sub.at).toLocaleString('ko-KR')}>
-            {sub.score === 100 ? '✓' : `△ ${sub.score}점`}
+          <span className={`text-[12.5px] font-semibold whitespace-nowrap ${sub.score === 100 ? 'text-ok' : 'text-warn'}`} title={`최근 제출 ${new Date(sub.at).toLocaleString('ko-KR')}`}>
+            {sub.score === 100 ? '✓ 해결' : `${sub.score}점`}
           </span>
         )}
         {/* 폴더는 개인 정리: 로그인하면 언제든 내 폴더로 옮긴다. 컬렉션(공용)은 편집 권한자만 넣고 뺀다. */}
@@ -367,7 +368,6 @@ guest ? (
             type="button"
             className={editing ? 'btn-primary px-3' : 'btn-ghost px-3'}
             aria-pressed={editing}
-            title="문제 내용·채점 케이스·폴더를 바꿉니다. 바꾸면 모든 사용자에게 적용돼요."
             onClick={() => {
               const next = !editing;
               setEditing(next);
@@ -428,7 +428,8 @@ guest ? (
                 onClick={() => setTab(t)}
                 className={`h-full shrink-0 border-b-2 px-3 ${tab === t ? 'border-accent text-text' : 'border-transparent hover:text-text'}`}
               >
-                {t === 'desc' ? '문제 설명' : t === 'cases' ? `테스트 케이스 ${visibleCount}` : draft.memo.trim() ? '메모 •' : '메모'}
+                {t === 'desc' ? '문제 설명' : t === 'cases' ? `테스트 케이스 ${visibleCount}` : '메모'}
+                {t === 'memo' && draft.memo.trim() && <span className="ml-1 inline-block size-1.5 rounded-full bg-accent-text align-middle" aria-label="작성됨" />}
               </button>
             ))}
           </div>
@@ -437,7 +438,7 @@ guest ? (
               <textarea
                 value={draft.memo}
                 onChange={(e) => patch({ memo: e.target.value })}
-                placeholder="풀이 아이디어, 막힌 부분, 다시 볼 점을 적어 두세요. 나만 볼 수 있어요."
+                placeholder="나만 볼 수 있는 메모예요."
                 aria-label="내 메모"
                 className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
               />
@@ -446,7 +447,7 @@ guest ? (
                 <textarea
                   value={draft.description}
                   onChange={(e) => patch({ description: e.target.value })}
-                  placeholder="문제 설명을 Markdown으로 작성하세요. 제목, 목록, 표, 코드 블록, 링크를 쓸 수 있어요."
+                  placeholder="문제 설명 (Markdown)"
                   className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
                   autoFocus
                 />
@@ -457,7 +458,7 @@ guest ? (
                       {draft.description}
                     </ReactMarkdown>
                   ) : (
-                    <span className="text-faint">문제 설명이 없어요.</span>
+                    <span className="text-faint">문제 설명이 없어요</span>
                   )}
                 </div>
               )
@@ -533,7 +534,7 @@ guest ? (
 function FolderName({ id }: { id: string | null }) {
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const name = folders.data?.find((f) => f.id === id)?.name;
-  return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">▤ {name}</span> : null;
+  return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">{name}</span> : null;
 }
 
 function FolderSelect({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
@@ -546,10 +547,10 @@ function FolderSelect({ value, onChange }: { value: string | null; onChange: (id
       onChange={(e) => onChange(e.target.value || null)}
       className="h-[34px] max-w-40 rounded-md border border-line-strong bg-raised px-2 text-[13px] outline-none focus:border-accent"
     >
-      <option value="">▤ 내 폴더 없음</option>
+      <option value="">폴더 없음</option>
       {folders.data?.map((f) => (
         <option key={f.id} value={f.id}>
-          ▤ {f.name}
+          {f.name}
         </option>
       ))}
     </select>
@@ -569,7 +570,7 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
       try {
         return await api.setCollectionItems(collection.id, [problemId]);
       } catch {
-        throw new Error('컬렉션은 만들었지만 문제를 추가하지 못했어요. 목록에서 다시 선택해 주세요.');
+        throw new Error('컬렉션은 만들었지만 이 문제를 넣지 못했어요. 목록에서 다시 체크해 주세요.');
       }
     },
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.collections }),
@@ -598,7 +599,7 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
   return (
     <div ref={box} className="relative">
       <button type="button" className="btn-ghost px-2.5" aria-expanded={open} onClick={() => setOpen((v) => !v)} title="컬렉션">
-        <span className="text-sky">◆</span> 컬렉션{mine > 0 ? ` ${mine}` : ''}
+        컬렉션{mine > 0 ? ` ${mine}` : ''}
       </button>
       {open && (
         <div className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-2 shadow-2xl">
@@ -645,12 +646,12 @@ function SaveBadge({ state, onRetry }: { state: DraftState; onRetry: () => void 
   if (state === 'error' || state === 'storage-error')
     return (
       <button type="button" onClick={onRetry} className="text-[12px] font-semibold text-bad underline">
-        {state === 'storage-error' ? '로컬 저장 실패 · 서버 저장' : '기기에 보관 중 · 동기화 재시도'}
+        {state === 'storage-error' ? '임시 저장 실패 · 다시 저장' : '저장 안 됨 · 다시 시도'}
       </button>
     );
   return (
     <span className="inline-flex items-center gap-1 text-[12px] text-faint" aria-live="polite">
-      {state === 'saved' || state === 'local' ? '✓ 저장됨' : <><Spinner size={11} /> 동기화 중</>}
+      {state === 'saved' || state === 'local' ? '저장됨' : <><Spinner size={11} /> 저장 중</>}
     </span>
   );
 }
