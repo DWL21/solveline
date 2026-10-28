@@ -1,0 +1,40 @@
+name: D1 backup
+# 0007 4단계: 매일 D1을 내보내 age로 암호화하고 비공개 R2 버킷에 올린 뒤, 매일 정리 SQL을 실행한다.
+# GitHub-hosted runner만 쓴다(서버가 망가져도 백업이 남도록 pahidc를 거치지 않는다). 설정이 없으면 건너뛴다.
+on:
+  schedule:
+    # 매일 03:23 KST(18:23 UTC). 정각을 피한다.
+    - cron: "23 18 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: d1-backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    if: github.repository == 'DWL21/solveline'
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    # production 환경은 main에서만 쓸 수 있다(일정 실행은 기본 브랜치에서 돈다).
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: age 설치
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age >/dev/null
+      - name: 내보내기·암호화·업로드·정리
+        # 공개 저장소: 이름을 지정한 값만 넘긴다. 토큰은 D1 읽기·편집과 solveline-backup 버킷 쓰기만 허용한다.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_BACKUP_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE: ${{ vars.D1_DATABASE }}
+          # age 공개 키(age1…). 비공개 키는 저장소·GitHub에 두지 않는다.
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+        run: bash scripts/backup-d1.sh

@@ -34,6 +34,7 @@
 |---|---|---|
 | `ACCESS_PASSWORD` (관리자 모드 마스터 비밀번호), `GOOGLE_CLIENT_SECRET` | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
 | `JUDGE_SECRET` (api↔judge 서명) | 개발은 비워 두면 임의 값(judge에도 같은 값을 줘야 한다) | GitHub Environment `production` **secrets** → `api.env`·`judge.env` |
+| `CLOUDFLARE_BACKUP_TOKEN` (D1 백업, 4단계) | — | GitHub Environment `production` **secret**. age 비공개 키는 어디에도 올리지 않는다 |
 | `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 
