@@ -269,7 +269,11 @@ export function stripSourceMentions(db: Db) {
     if (description !== c.description) updCollection.run(description, c.id);
   }
 
-  // 같은 사용자에게 동일한 폴더가 있으면 합친다.
+  mergeSourceFolders(db);
+}
+
+/** 같은 사용자에게 동일한 폴더가 있으면 합친다. */
+function mergeSourceFolders(db: Db) {
   const folders = db.prepare("SELECT id, user_id, name FROM folders WHERE name LIKE '\ubc31\uc900%'").all() as { id: string; user_id: string | null; name: string }[];
   for (const f of folders) {
     const name = f.name.replace(/^\ubc31\uc900\s*·\s*/, '');

@@ -86,7 +86,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const solved = progress.solved;
   const siblings = node && node.depth > 0 ? siblingNodes(tree, node) : null;
   const parent = node && node.depth > 0 ? findNode(tree, node.path.split('/').slice(0, -1).join('/')) : null;
-  const levelLabel = node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션';
+  const levelLabel = levelLabelOf(node);
 
   const q = filter.trim().toLowerCase();
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
@@ -109,27 +109,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
           {effective.kind === 'all' && <button type="button" className="mb-2 text-[12.5px] text-dim hover:text-text" onClick={() => onScope({ kind: 'collections' })}>‹ 컬렉션</button>}
-          {inCollection && node && (
-            <nav className="mb-1 flex flex-wrap items-center gap-1 text-[12.5px] text-dim" aria-label="컬렉션 경로">
-              <span className="flex items-center gap-1">
-                <button type="button" className="text-sky hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
-                <span className="text-faint">/</span>
-              </span>
-              {ancestors(node.path)
-                .slice(0, -1)
-                .map((path) => {
-                  const n = findNode(tree, path);
-                  return (
-                    <span key={path} className="flex items-center gap-1">
-                      <button type="button" className="text-sky hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
-                        {n?.name ?? path}
-                      </button>
-                      <span className="text-faint">/</span>
-                    </span>
-                  );
-                })}
-            </nav>
-          )}
+          {inCollection && node && <CollectionPath node={node} tree={tree} onScope={onScope} />}
           <div className="mb-1 flex flex-wrap items-center gap-2">
             {inCollection && node && <button type="button" className="btn-ghost" aria-label="돌아가기" title="돌아가기" onClick={() => onScope(parent ? scopeOfNode(parent) : { kind: 'collections' })}>←</button>}
             <h1 className="text-[18px] font-bold">
@@ -144,32 +124,12 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
               </span>
             )}
             {inCollection && signedIn && progress.cleared && <span className="text-[12px] font-semibold text-ok">✓ {levelLabel} 클리어</span>}
-            {siblings && (
-              <div className="ml-auto flex items-center gap-1">
-                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`이전 ${levelLabel}`} title={`이전 ${levelLabel}`} disabled={!siblings.previous} onClick={() => siblings.previous && onScope(scopeOfNode(siblings.previous))}>‹</button>
-                <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`다음 ${levelLabel}`} title={`다음 ${levelLabel}`} disabled={!siblings.next} onClick={() => siblings.next && onScope(scopeOfNode(siblings.next))}>›</button>
-              </div>
-            )}
+            {siblings && <SiblingNav siblings={siblings} label={levelLabel} onScope={onScope} />}
             {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'collections' })} />}
           </div>
           {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
-          {cards.length > 0 && (
-            <section className="mt-3 mb-5" aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
-              <ul className={overview ? "grid grid-cols-1 gap-5" : "grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3"}>
-                {cards.map((n) => (
-                  <li key={n.path} className="min-w-0">
-                    <CollectionCard node={n} all={all} signedIn={signedIn} stretch={!overview || n.children.length === 0} onOpen={() => onScope(scopeOfNode(n))} />
-                    {overview && n.children.length > 0 && (
-                      <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                        {n.children.map((child) => <CollectionCard key={child.path} node={child} all={all} signedIn={signedIn} compact onOpen={() => onScope(scopeOfNode(child))} />)}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          {cards.length > 0 && <CollectionCards cards={cards} all={all} signedIn={signedIn} overview={overview} onScope={onScope} />}
           {overview && cards.length === 0 && <p className="py-12 text-center text-[13px] text-faint">아직 컬렉션이 없어요</p>}
           {!overview && <>
           <div className="mt-3 mb-4 flex flex-wrap items-center gap-2">
@@ -214,6 +174,65 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
         </div>
       </div>
     </div>
+  );
+}
+
+function levelLabelOf(node: CollectionNode | null): string {
+  if (node?.name.includes('단계')) return '단계';
+  if (node?.name.includes('세트')) return '세트';
+  return '컬렉션';
+}
+
+function CollectionPath({ node, tree, onScope }: { node: CollectionNode; tree: CollectionNode[]; onScope: (s: Scope) => void }) {
+  return (
+    <nav className="mb-1 flex flex-wrap items-center gap-1 text-[12.5px] text-dim" aria-label="컬렉션 경로">
+      <span className="flex items-center gap-1">
+        <button type="button" className="text-sky hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
+        <span className="text-faint">/</span>
+      </span>
+      {ancestors(node.path)
+        .slice(0, -1)
+        .map((path) => {
+          const n = findNode(tree, path);
+          return (
+            <span key={path} className="flex items-center gap-1">
+              <button type="button" className="text-sky hover:underline" onClick={() => n && onScope(scopeOfNode(n))}>
+                {n?.name ?? path}
+              </button>
+              <span className="text-faint">/</span>
+            </span>
+          );
+        })}
+    </nav>
+  );
+}
+
+function SiblingNav({ siblings, label, onScope }: { siblings: NonNullable<ReturnType<typeof siblingNodes>>; label: string; onScope: (s: Scope) => void }) {
+  const go = (n: CollectionNode | null | undefined) => n && onScope(scopeOfNode(n));
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`이전 ${label}`} title={`이전 ${label}`} disabled={!siblings.previous} onClick={() => go(siblings.previous)}>‹</button>
+      <button type="button" className="btn-ghost disabled:opacity-30" aria-label={`다음 ${label}`} title={`다음 ${label}`} disabled={!siblings.next} onClick={() => go(siblings.next)}>›</button>
+    </div>
+  );
+}
+
+function CollectionCards({ cards, all, signedIn, overview, onScope }: { cards: CollectionNode[]; all: ProblemSummary[]; signedIn: boolean; overview: boolean; onScope: (s: Scope) => void }) {
+  return (
+    <section className="mt-3 mb-5" aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
+      <ul className={overview ? "grid grid-cols-1 gap-5" : "grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3"}>
+        {cards.map((n) => (
+          <li key={n.path} className="min-w-0">
+            <CollectionCard node={n} all={all} signedIn={signedIn} stretch={!overview || n.children.length === 0} onOpen={() => onScope(scopeOfNode(n))} />
+            {overview && n.children.length > 0 && (
+              <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                {n.children.map((child) => <CollectionCard key={child.path} node={child} all={all} signedIn={signedIn} compact onOpen={() => onScope(scopeOfNode(child))} />)}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

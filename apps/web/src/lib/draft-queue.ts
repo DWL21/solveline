@@ -25,16 +25,22 @@ export function applyPatch(problem: Problem, patch: ProblemPatch = {}): Problem 
   return { ...problem, ...patch, code: { ...problem.code, ...patch.code }, starterCode: { ...problem.starterCode, ...patch.starterCode } };
 }
 
+/** 언어별 코드에서 보낸 값과 같은 언어만 지운다. 남은 언어가 없으면 undefined. */
+function remainingCode(current: Partial<Record<'java' | 'python', string>> | undefined, sent: Partial<Record<'java' | 'python', string>> | undefined) {
+  const code = { ...current };
+  for (const language of ['java', 'python'] as const) {
+    if (sent?.[language] !== undefined && equal(code[language], sent[language])) delete code[language];
+  }
+  return Object.keys(code).length ? code : undefined;
+}
+
 /** 보낸 값과 같은 필드만 지운다. 전송 중 생긴 편집은 다음 동기화에 남긴다. */
 function remainingPatch(current: ProblemPatch, sent: ProblemPatch): ProblemPatch {
   const result = { ...current };
   for (const key of Object.keys(sent) as (keyof ProblemPatch)[]) {
     if (key === 'code' || key === 'starterCode') {
-      const code = { ...current[key] };
-      for (const language of ['java', 'python'] as const) {
-        if (sent[key]?.[language] !== undefined && equal(code[language], sent[key]?.[language])) delete code[language];
-      }
-      if (Object.keys(code).length) result[key] = code;
+      const code = remainingCode(current[key], sent[key]);
+      if (code) result[key] = code;
       else delete result[key];
     } else if (equal(current[key], sent[key])) delete result[key];
   }
@@ -124,6 +130,15 @@ export class DraftQueue {
       if (due) void this.flush(id);
     }
   }
+  /** 저장이 끝난 뒤: 보낸 값은 지우고, 전송 중에 생긴 편집만 남긴다 */
+  private keepUnsent(id: string, sent: ProblemPatch) {
+    const current = this.read(id);
+    if (!current) return;
+    const remaining = remainingPatch(current.patch, sent);
+    if (!Object.keys(remaining).length) return this.discard(id);
+    const hasContent = Object.keys(remaining).some((key) => key !== 'timer');
+    this.write(id, { ...current, patch: remaining, firstAt: this.now(), editedAt: hasContent ? current.editedAt : null, firstEditAt: hasContent ? this.now() : null });
+  }
   async flushAll(keepalive = false) { return Promise.all(this.ids().map((id) => this.flush(id, keepalive))); }
   flush(id: string, keepalive = false): Promise<boolean> {
     const existing = this.inflight.get(id);
@@ -138,15 +153,7 @@ export class DraftQueue {
       this.controllers.add(controller);
       try {
         const saved = await this.send(id, sent.patch, { keepalive, signal: controller.signal });
-        const current = this.read(id);
-        if (current) {
-          const remaining = remainingPatch(current.patch, sent.patch);
-          if (!Object.keys(remaining).length) this.discard(id);
-          else {
-            const hasContent = Object.keys(remaining).some((key) => key !== 'timer');
-            this.write(id, { ...current, patch: remaining, firstAt: this.now(), editedAt: hasContent ? current.editedAt : null, firstEditAt: hasContent ? this.now() : null });
-          }
-        }
+        this.keepUnsent(id, sent.patch);
         this.errors.delete(id); this.retryAt.delete(id);
         if (this.active) this.onSaved?.(id, applyPatch(saved, this.read(id)?.patch));
         return true;
