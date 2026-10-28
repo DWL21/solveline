@@ -21,13 +21,18 @@ if (!config.ownerEmail) log.warn('[config] OWNER_EMAIL이 없어 예전 데이�
 
 const db = openDb(config.dataDir);
 const judge = new HttpJudge(config.judgeUrl, config.judgeSecret);
-const objectStore = config.r2 ? new R2ObjectStore(config.r2) : config.r2ProxySecret ? new WorkerR2Store(config.webOrigin, config.r2ProxySecret) : null;
+/** 카탈로그를 올릴 곳: R2 키가 있으면 직접, 없으면 Worker를 거친다 */
+function objectStoreOf() {
+  if (config.r2) return new R2ObjectStore(config.r2);
+  return config.r2ProxySecret ? new WorkerR2Store(config.webOrigin, config.r2ProxySecret) : null;
+}
+const objectStore = objectStoreOf();
 const { app, submissions, catalog } = createApp({ config, db, judge, objectStore });
 
 if (catalog) {
   // R2와 맞춘다: 바뀐 문제를 올린다(처음 켤 때 전체 이전). 히든 테스트셋은 judge가 올린다.
   // 배포 중에는 Worker(새 R2 경로)가 API보다 늦게 올라올 수 있으므로 성공할 때까지 1분마다 다시 시도한다(최대 1시간).
-  void (async () => {
+  const syncCatalog = async () => {
     for (let attempt = 1; attempt <= 60; attempt++) {
       try {
         const r = await catalog.sync();
@@ -38,7 +43,8 @@ if (catalog) {
         await new Promise((r) => setTimeout(r, 60_000).unref());
       }
     }
-  })();
+  };
+  void syncCatalog();
 } else log.info('[catalog] R2 설정이 없어 게시하지 않습니다(SQLite·로컬 테스트셋만 사용).');
 const backup = new BackupJob(db, config.dataDir, submissions);
 backup.start();

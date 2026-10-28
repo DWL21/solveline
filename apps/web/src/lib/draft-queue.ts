@@ -29,16 +29,22 @@ export function applyPatch(problem: Problem, patch: ProblemPatch = {}): Problem 
   return { ...problem, ...patch, code: { ...problem.code, ...patch.code }, starterCode: { ...problem.starterCode, ...patch.starterCode } };
 }
 
+/** 언어별 코드에서 보낸 값과 같은 언어만 지운다. 남은 언어가 없으면 undefined. */
+function remainingCode(current: Partial<Record<'java' | 'python', string>> | undefined, sent: Partial<Record<'java' | 'python', string>> | undefined) {
+  const code = { ...current };
+  for (const language of ['java', 'python'] as const) {
+    if (sent?.[language] !== undefined && equal(code[language], sent[language])) delete code[language];
+  }
+  return Object.keys(code).length ? code : undefined;
+}
+
 /** 보낸 값과 같은 필드만 지운다. 전송 중 생긴 편집은 다음 동기화에 남긴다. */
 function remainingPatch(current: ProblemPatch, sent: ProblemPatch): ProblemPatch {
   const result = { ...current };
   for (const key of Object.keys(sent) as (keyof ProblemPatch)[]) {
     if (key === 'code' || key === 'starterCode') {
-      const code = { ...current[key] };
-      for (const language of ['java', 'python'] as const) {
-        if (sent[key]?.[language] !== undefined && equal(code[language], sent[key]?.[language])) delete code[language];
-      }
-      if (Object.keys(code).length) result[key] = code;
+      const code = remainingCode(current[key], sent[key]);
+      if (code) result[key] = code;
       else delete result[key];
     } else if (equal(current[key], sent[key])) delete result[key];
   }
@@ -48,24 +54,24 @@ function remainingPatch(current: ProblemPatch, sent: ProblemPatch): ProblemPatch
 /** 계정별 영속 변경 큐. 서버 요청은 문제별로 하나만 실행한다. */
 export class DraftQueue {
   readonly prefix: string;
-  private memory = new Map<string, Entry>();
-  private unpersisted = new Set<string>();
-  private errors = new Set<string>();
-  private inflight = new Map<string, Promise<boolean>>();
-  private controllers = new Set<AbortController>();
-  private listeners = new Set<() => void>();
-  private retryAt = new Map<string, number>();
+  private readonly memory = new Map<string, Entry>();
+  private readonly unpersisted = new Set<string>();
+  private readonly errors = new Set<string>();
+  private readonly inflight = new Map<string, Promise<boolean>>();
+  private readonly controllers = new Set<AbortController>();
+  private readonly listeners = new Set<() => void>();
+  private readonly retryAt = new Map<string, number>();
   private active = false;
   version = 0;
   onSaved?: (id: string, problem: Problem) => void;
-  constructor(readonly owner: string, private storage: StorageLike, private send: Send, private now = Date.now,
-    private lock: (key: string, run: () => Promise<boolean>) => Promise<boolean> = (_key, run) => run()) {
+  constructor(readonly owner: string, private readonly storage: StorageLike, private readonly send: Send, private readonly now = Date.now,
+    private readonly lock: (key: string, run: () => Promise<boolean>) => Promise<boolean> = (_key, run) => run()) {
     this.prefix = `solveline:draft:v1:${encodeURIComponent(owner)}:`;
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  notify = () => { this.version++; this.listeners.forEach((listener) => listener()); };
+  notify = () => { this.version++; for (const listener of this.listeners) listener(); };
   start() { this.active = true; }
-  stop() { this.active = false; this.controllers.forEach((controller) => controller.abort()); }
+  stop() { this.active = false; for (const controller of this.controllers) controller.abort(); }
   private key(id: string) { return this.prefix + encodeURIComponent(id); }
   read(id: string): Entry | undefined {
     if (this.unpersisted.has(id)) return this.memory.get(id);
@@ -128,6 +134,15 @@ export class DraftQueue {
       if (due) void this.flush(id);
     }
   }
+  /** 저장이 끝난 뒤: 보낸 값은 지우고, 전송 중에 생긴 편집만 남긴다 */
+  private keepUnsent(id: string, sent: ProblemPatch) {
+    const current = this.read(id);
+    if (!current) return;
+    const remaining = remainingPatch(current.patch, sent);
+    if (!Object.keys(remaining).length) return this.discard(id);
+    const hasContent = Object.keys(remaining).some((key) => key !== 'timer');
+    this.write(id, { ...current, patch: remaining, firstAt: this.now(), editedAt: hasContent ? current.editedAt : null, firstEditAt: hasContent ? this.now() : null });
+  }
   async flushAll(keepalive = false) { return Promise.all(this.ids().map((id) => this.flush(id, keepalive))); }
   flush(id: string, keepalive = false): Promise<boolean> {
     const existing = this.inflight.get(id);
@@ -142,15 +157,7 @@ export class DraftQueue {
       this.controllers.add(controller);
       try {
         const saved = await this.send(id, sent.patch, { keepalive, signal: controller.signal });
-        const current = this.read(id);
-        if (current) {
-          const remaining = remainingPatch(current.patch, sent.patch);
-          if (!Object.keys(remaining).length) this.discard(id);
-          else {
-            const hasContent = Object.keys(remaining).some((key) => key !== 'timer');
-            this.write(id, { ...current, patch: remaining, firstAt: this.now(), editedAt: hasContent ? current.editedAt : null, firstEditAt: hasContent ? this.now() : null });
-          }
-        }
+        this.keepUnsent(id, sent.patch);
         this.errors.delete(id); this.retryAt.delete(id);
         if (this.active) this.onSaved?.(id, applyPatch(saved, this.read(id)?.patch));
         return true;

@@ -54,8 +54,8 @@ export function useRoute(): [Route, (r: Route) => void] {
   const [route, setRoute] = useState(() => parseRoute(location.hash));
   useEffect(() => {
     const h = () => setRoute(parseRoute(location.hash));
-    window.addEventListener('hashchange', h);
-    return () => window.removeEventListener('hashchange', h);
+    globalThis.addEventListener('hashchange', h);
+    return () => globalThis.removeEventListener('hashchange', h);
   }, []);
   return [route, (r) => (location.hash = hrefOf(r))];
 }

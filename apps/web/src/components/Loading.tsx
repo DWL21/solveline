@@ -1,19 +1,30 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+
+/** 이름(label)이 있으면 상태 알림(<output>), 없으면 꾸밈용 <span> */
+function SpinnerBox({ label, className, children }: Readonly<{ label?: string; className: string; children: ReactNode }>) {
+  if (label)
+    return (
+      <output aria-label={label} className={className}>
+        {children}
+      </output>
+    );
+  return <span className={className}>{children}</span>;
+}
 
 /** 원형 스피너. 색은 currentColor라 버튼 안에서도 글자색을 따른다. */
-export function Spinner({ size = 16, className = '', label }: { size?: number; className?: string; label?: string }) {
+export function Spinner({ size = 16, className = '', label }: Readonly<{ size?: number; className?: string; label?: string }>) {
   return (
-    <span role={label ? 'status' : undefined} aria-label={label} className={`inline-flex shrink-0 ${className}`}>
+    <SpinnerBox label={label} className={`inline-flex shrink-0 ${className}`}>
       <svg className="animate-spin motion-reduce:animate-[spin_2.4s_linear_infinite]" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.2" strokeWidth="3" />
         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
       </svg>
-    </span>
+    </SpinnerBox>
   );
 }
 
 /** 내용 자리를 미리 보여 주는 회색 블록(반짝임) */
-export function Skeleton({ className = '', style }: { className?: string; style?: CSSProperties }) {
+export function Skeleton({ className = '', style }: Readonly<{ className?: string; style?: CSSProperties }>) {
   return <span aria-hidden="true" className={`skeleton block rounded-md ${className}`} style={style} />;
 }
 
@@ -32,46 +43,46 @@ function useDelayed(ms: number) {
 export function BootScreen() {
   const show = useDelayed(300);
   return (
-    <div className="flex h-full items-center justify-center bg-ink" role="status" aria-label="Solveline을 여는 중">
+    <output className="flex h-full items-center justify-center bg-ink" aria-label="Solveline을 여는 중">
       {show && (
         <div className="flex animate-[fadein_200ms_ease-out] flex-col items-center gap-4">
           <img src="/icon.svg" alt="" className="size-10" />
           <Spinner size={22} className="text-accent-text" />
         </div>
       )}
-    </div>
+    </output>
   );
 }
 
 /** 문제 목록 스켈레톤 */
-export function ListSkeleton({ rows = 8 }: { rows?: number }) {
+export function ListSkeleton({ rows = 8 }: Readonly<{ rows?: number }>) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:flex-row" role="status" aria-label="목록을 불러오는 중">
-      <div className="hidden w-60 shrink-0 flex-col gap-2 border-r border-line bg-base px-3 py-4 md:flex">
+    <output className="flex min-h-0 flex-1 flex-col md:flex-row" aria-label="목록을 불러오는 중">
+      <div className="hidden w-60 shrink-0 flex-col gap-2 border-r border-line bg-base px-3 py-5 md:flex">
         {Array.from({ length: 7 }, (_, i) => (
           <Skeleton key={i} className="h-7" style={{ width: `${70 + ((i * 13) % 25)}%` }} />
         ))}
       </div>
-      <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
-        <Skeleton className="mb-4 h-7 w-40" />
-        <Skeleton className="mb-4 h-9 w-full sm:w-72" />
+      <div className="mx-auto w-full max-w-4xl px-4 pt-6 sm:px-8 sm:pt-8">
+        <Skeleton className="mb-6 h-8 w-40" />
+        <Skeleton className="mb-3 h-10 w-full sm:w-72" />
         <div className="overflow-hidden rounded-lg border border-line bg-panel">
           {Array.from({ length: rows }, (_, i) => (
-            <div key={i} className="flex items-center gap-3 border-b border-line px-4 py-3.5 last:border-b-0">
+            <div key={i} className="flex items-center gap-3 border-b border-line px-5 py-4 last:border-b-0">
               <Skeleton className="h-4" style={{ width: `${45 + ((i * 17) % 35)}%` }} />
               <Skeleton className="ml-auto h-4 w-14" />
             </div>
           ))}
         </div>
       </div>
-    </div>
+    </output>
   );
 }
 
 /** 문제 화면 스켈레톤: 왼쪽 설명, 오른쪽 에디터·결과 */
 export function WorkspaceSkeleton() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col" role="status" aria-label="문제를 불러오는 중">
+    <output className="flex min-h-0 flex-1 flex-col" aria-label="문제를 불러오는 중">
       <div className="flex items-center gap-3 border-b border-line bg-base px-4 py-2.5">
         <Skeleton className="h-5 w-56" />
         <Skeleton className="ml-auto h-7 w-24" />
@@ -90,17 +101,17 @@ export function WorkspaceSkeleton() {
           ))}
         </div>
       </div>
-    </div>
+    </output>
   );
 }
 
 /** 몇 줄짜리 작은 스켈레톤(패널 안) */
-export function LinesSkeleton({ lines = 3 }: { lines?: number }) {
+export function LinesSkeleton({ lines = 3 }: Readonly<{ lines?: number }>) {
   return (
-    <div className="flex flex-col gap-2 py-2" role="status" aria-label="불러오는 중">
+    <output className="flex flex-col gap-2 py-2" aria-label="불러오는 중">
       {Array.from({ length: lines }, (_, i) => (
         <Skeleton key={i} className="h-8" style={{ width: `${88 - i * 9}%` }} />
       ))}
-    </div>
+    </output>
   );
 }

@@ -21,8 +21,8 @@ test('첫 화면이 컬렉션을 보여 주고 전체 문제로 이동한다', {
 test('문제 화면이 열리고 비회원은 로그인하기를 본다', { tag: ['@R11', '@R1'] }, async ({ page }) => {
   await page.goto('/#/');
   await page.getByRole('region', { name: '컬렉션' }).getByRole('listitem').first().click();
-  // 문제 행의 버튼(제목 + 지원 언어)을 사용자가 보는 이름으로 찾는다
-  await page.getByRole('listitem').getByRole('button', { name: /지원 언어/ }).first().click();
+  // 문제 목록의 첫 행을 연다(비회원의 북마크 별은 링크라 행 안의 버튼은 제목 하나뿐이다)
+  await page.getByRole('list', { name: '문제 목록' }).getByRole('listitem').first().getByRole('button').click();
   await expect(page).toHaveURL(/#\/p\//);
   await expect(page.getByRole('textbox', { name: '코드 에디터' })).toBeVisible();
   await expect(page.getByRole('link', { name: '로그인하기' }).first()).toBeVisible();

@@ -96,6 +96,7 @@ def loads_literal(text):
 # 요청이 도착하기 전에 온 중지도 기억해 둔다(오래된 기록은 지운다).
 CANCEL_TTL_S = 60 * 60
 CANCELLED_MSG = "중지되어 실행하지 않았습니다."
+SOLUTION_FILE = "solution.py"
 
 
 class Job:
@@ -197,9 +198,8 @@ def _read_capped(stream, sink):
         sink.append("\n... (출력이 너무 길어 잘렸습니다)".encode("utf-8"))
 
 
-def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
-    timeout = RUN_TIMEOUT_S if timeout is None else timeout
-    env = {
+def _sandbox_env(cwd):
+    return {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "HOME": cwd,
         "LANG": "C.UTF-8",
@@ -208,35 +208,67 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
         "PYTHONDONTWRITEBYTECODE": "1",
         "JAVA_HOME": os.environ.get("JAVA_HOME", ""),
     }
-    start = time.monotonic()
-    p = subprocess.Popen(
-        cmd, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        preexec_fn=_preexec(as_limit), close_fds=True,
-    )
-    if job:
-        with job.lock:
-            job.pgid = p.pid
-        if job.cancelled.is_set():
-            job.kill()
-    out, err = [], []
-    readers = [threading.Thread(target=_read_capped, args=(p.stdout, out)),
-               threading.Thread(target=_read_capped, args=(p.stderr, err))]
-    for t in readers:
-        t.start()
+
+
+def _kill_group(pid, ignore=(ProcessLookupError,)):
+    """이 서버가 만든 자식의 프로세스 그룹에만 보낸다."""
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ignore:
+        pass
+
+
+def _set_job_pgid(job, pgid):
+    if not job:
+        return
+    with job.lock:
+        job.pgid = pgid
+    if pgid is not None and job.cancelled.is_set():
+        job.kill()
+
+
+def _exit_code(wstatus):
+    if hasattr(os, "waitstatus_to_exitcode"):
+        return os.waitstatus_to_exitcode(wstatus)
+    return -os.WTERMSIG(wstatus) if os.WIFSIGNALED(wstatus) else os.WEXITSTATUS(wstatus)
+
+
+def _proc_status(job, timed_out, returncode):
+    if job and job.cancelled.is_set():
+        return "cancelled"
+    if timed_out:
+        return "timeout"
+    return "ok" if returncode == 0 else "error"
+
+
+def _write_stdin(p, stdin_data):
     try:
         p.stdin.write(stdin_data)
         p.stdin.close()
     except BrokenPipeError:
         pass
 
+
+def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
+    timeout = RUN_TIMEOUT_S if timeout is None else timeout
+    start = time.monotonic()
+    p = subprocess.Popen(
+        cmd, cwd=cwd, env=_sandbox_env(cwd), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        preexec_fn=_preexec(as_limit), close_fds=True,
+    )
+    _set_job_pgid(job, p.pid)
+    out, err = [], []
+    readers = [threading.Thread(target=_read_capped, args=(p.stdout, out)),
+               threading.Thread(target=_read_capped, args=(p.stderr, err))]
+    for t in readers:
+        t.start()
+    _write_stdin(p, stdin_data)
+
     timed_out = threading.Event()
 
     def kill():
         timed_out.set()
-        try:
-            os.killpg(p.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        _kill_group(p.pid)
 
     timer = threading.Timer(timeout, kill)
     timer.start()
@@ -244,24 +276,14 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
     _, wstatus, usage = os.wait4(p.pid, 0)
     elapsed = (time.monotonic() - start) * 1000
     timer.cancel()
-    if job:
-        with job.lock:
-            job.pgid = None
-    try:  # 남은 자손 프로세스 정리
-        os.killpg(p.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    p.returncode = os.waitstatus_to_exitcode(wstatus) if hasattr(os, "waitstatus_to_exitcode") else (
-        -os.WTERMSIG(wstatus) if os.WIFSIGNALED(wstatus) else os.WEXITSTATUS(wstatus))
+    _set_job_pgid(job, None)
+    _kill_group(p.pid, (ProcessLookupError, PermissionError))  # 남은 자손 프로세스 정리
+    p.returncode = _exit_code(wstatus)
     for t in readers:
         t.join(2)
     if p.returncode == -signal.SIGXCPU:  # CPU 시간 제한
         timed_out.set()
-    if job and job.cancelled.is_set():
-        status = "cancelled"
-    else:
-        status = "timeout" if timed_out.is_set() else ("ok" if p.returncode == 0 else "error")
-    return Proc(status, p.returncode, b"".join(out).decode("utf-8", "replace"),
+    return Proc(_proc_status(job, timed_out.is_set(), p.returncode), p.returncode, b"".join(out).decode("utf-8", "replace"),
                 b"".join(err).decode("utf-8", "replace"), round(elapsed, 2),
                 usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss)
 
@@ -305,9 +327,9 @@ def _java_main_class(code):
 def prepare(lang, code, work, job=None):
     """컴파일한다. 실패 시 (False, 메시지)."""
     if lang == "python":
-        with open(os.path.join(work, "solution.py"), "w", encoding="utf-8") as f:
+        with open(os.path.join(work, SOLUTION_FILE), "w", encoding="utf-8") as f:
             f.write(code)
-        p = run_proc([sys.executable, "-m", "py_compile", "solution.py"], work, timeout=COMPILE_TIMEOUT_S, job=job)
+        p = run_proc([sys.executable, "-m", "py_compile", SOLUTION_FILE], work, timeout=COMPILE_TIMEOUT_S, job=job)
         if p.status != "ok":
             return False, (p.stderr or p.stdout).replace(work + "/", "")
         return True, ""
@@ -332,35 +354,34 @@ def java_cmd(*rest):
             "-Dstdout.encoding=UTF-8", "-cp", "out" + os.pathsep + JAVA_HARNESS_CP] + list(rest)
 
 
-def run_function_case(lang, work, args, expected, limit_s, job=None):
-    case_path = os.path.join(work, "case.json")
-    result_path = os.path.join(work, "result.json")
-    for path in (result_path,):
-        if os.path.exists(path):
-            os.remove(path)
-    with open(case_path, "w", encoding="utf-8") as f:
-        json.dump({"args": args}, f, ensure_ascii=False)
-    if lang == "python":
-        p = run_proc([sys.executable, "-I", os.path.join(HARNESS_DIR, "py_harness.py"), work], work, as_limit=PY_AS_LIMIT,
-                     timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
-    else:
-        p = run_proc(java_cmd("SolvelineHarness", work), work, timeout=limit_s + STARTUP_SLACK_S[lang], job=job)
+def _base_result(p, actual):
+    return {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
+            "memoryMb": round(p.memory_kb / 1024, 1), "actual": actual}
 
-    res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
-           "memoryMb": round(p.memory_kb / 1024, 1), "actual": None}
-    if p.status == "timeout":
-        res["status"] = "timeout"
-        return res
+
+def _explain_kill(p, res):
+    if p.exit_code in (-9, 137) and not res["stderr"]:
+        res["stderr"] = "프로세스가 강제 종료되었습니다 (메모리 초과 가능)."
+
+
+def _read_json(path):
     try:
-        with open(result_path, encoding="utf-8") as f:
-            r = json.load(f)
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
     except (OSError, ValueError):
-        r = None
-    if not r or p.status != "ok":
-        if p.exit_code in (-9, 137) and not res["stderr"]:
-            res["stderr"] = "프로세스가 강제 종료되었습니다 (메모리 초과 가능)."
-        res["status"] = "error"
-        return res
+        return None
+
+
+def _function_proc(lang, work, limit_s, job):
+    timeout = limit_s + STARTUP_SLACK_S[lang]
+    if lang == "python":
+        return run_proc([sys.executable, "-I", os.path.join(HARNESS_DIR, "py_harness.py"), work], work, as_limit=PY_AS_LIMIT,
+                        timeout=timeout, job=job)
+    return run_proc(java_cmd("SolvelineHarness", work), work, timeout=timeout, job=job)
+
+
+def _judge_value(res, r, expected, limit_s):
+    """하네스가 돌려준 값으로 판정한다."""
     if not r.get("ok"):
         res["stderr"] = (res["stderr"] + "\n" + r.get("error", "")).strip()
         return res
@@ -368,26 +389,44 @@ def run_function_case(lang, work, args, expected, limit_s, job=None):
     res["actual"] = json.dumps(r["value"], ensure_ascii=False)
     if res["timeMs"] > limit_s * 1000:
         res["status"] = "timeout"
-        return res
-    res["status"] = "pass" if expected is None or _same(r["value"], expected) else "fail"
-    if expected is None:
+    elif expected is None:
         res["status"] = "done"
+    else:
+        res["status"] = "pass" if _same(r["value"], expected) else "fail"
     return res
+
+
+def run_function_case(lang, work, args, expected, limit_s, job=None):
+    case_path = os.path.join(work, "case.json")
+    result_path = os.path.join(work, "result.json")
+    if os.path.exists(result_path):
+        os.remove(result_path)
+    with open(case_path, "w", encoding="utf-8") as f:
+        json.dump({"args": args}, f, ensure_ascii=False)
+    p = _function_proc(lang, work, limit_s, job)
+
+    res = _base_result(p, None)
+    if p.status == "timeout":
+        res["status"] = "timeout"
+        return res
+    r = _read_json(result_path)
+    if not r or p.status != "ok":
+        _explain_kill(p, res)
+        return res
+    return _judge_value(res, r, expected, limit_s)
 
 
 def run_stdin_case(lang, code, work, stdin, expected, limit_s, job=None):
     timeout = limit_s + STARTUP_SLACK_S[lang]
     if lang == "python":
-        p = run_proc([sys.executable, "solution.py"], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout, job=job)
+        p = run_proc([sys.executable, SOLUTION_FILE], work, stdin.encode("utf-8"), as_limit=PY_AS_LIMIT, timeout=timeout, job=job)
     else:
         p = run_proc(java_cmd(_java_main_class(code)), work, stdin.encode("utf-8"), timeout=timeout, job=job)
-    res = {"status": "error", "stdout": p.stdout, "stderr": p.stderr, "timeMs": p.time_ms,
-           "memoryMb": round(p.memory_kb / 1024, 1), "actual": p.stdout}
+    res = _base_result(p, p.stdout)
     if p.status == "timeout":
         res["status"] = "timeout"
     elif p.status != "ok":
-        if p.exit_code in (-9, 137) and not res["stderr"]:
-            res["stderr"] = "프로세스가 강제 종료되었습니다 (메모리 초과 가능)."
+        _explain_kill(p, res)
     elif expected is None:
         res["status"] = "done"
     else:
@@ -399,75 +438,101 @@ class TestsetMissing(Exception):
     pass
 
 
-def execute(req):
-    lang = req.get("language")
-    mode = req.get("mode")
-    code = req.get("code", "")
-    if req.get("testset"):
-        cases = load_testset(req["testset"])
-        if cases is None:
-            raise TestsetMissing()
-    else:
-        cases = req.get("cases") or []
+def _time_limit_s(req):
     try:
         limit_s = min(float(req.get("timeLimitMs") or RUN_TIMEOUT_S * 1000), RUN_TIMEOUT_S * 1000) / 1000
     except (TypeError, ValueError):
         raise ValueError("timeLimitMs 값이 올바르지 않습니다.")
     if limit_s < 0.1:
         raise ValueError("timeLimitMs는 100 이상이어야 합니다.")
+    return limit_s
+
+
+def _request_cases(req):
+    if not req.get("testset"):
+        return req.get("cases") or []
+    cases = load_testset(req["testset"])
+    if cases is None:
+        raise TestsetMissing()
+    return cases
+
+
+def _validate(req):
+    """요청을 검사해 (언어, 모드, 코드, 케이스, 케이스당 제한 초)를 돌려준다."""
+    lang = req.get("language")
+    mode = req.get("mode")
+    code = req.get("code", "")
+    cases = _request_cases(req)
+    limit_s = _time_limit_s(req)
     if lang not in ("java", "python") or mode not in ("function", "stdin"):
         raise ValueError("language/mode 값이 올바르지 않습니다.")
     if not isinstance(code, str) or len(code) > MAX_CODE:
         raise ValueError("코드가 너무 깁니다.")
     if not isinstance(cases, list) or not 1 <= len(cases) <= MAX_CASES:
         raise ValueError("테스트 케이스는 1~%d개여야 합니다." % MAX_CASES)
+    return lang, mode, code, cases, limit_s
 
+
+def _skipped(msg):
+    return {"status": "skipped", "stdout": "", "stderr": msg, "timeMs": 0, "memoryMb": 0, "actual": None}
+
+
+def _cancelled_result(results, total):
+    results = results + [_skipped(CANCELLED_MSG)] * (total - len(results))
+    return {"compile": {"ok": True, "output": ""}, "results": results, "cancelled": True}
+
+
+def _run_case(c, lang, mode, code, work, limit_s, job):
+    # 케이스는 화면과 같은 형식: args = 리터럴 텍스트 목록, expected = 텍스트('' 이면 비교 안 함)
+    exp_text = c.get("expected") or ""
+    if mode == "function":
+        args = [loads_literal(a) for a in c.get("args", [])]
+        expected = loads_literal(exp_text) if exp_text.strip() else None
+        return run_function_case(lang, work, args, expected, limit_s, job)
+    return run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None, limit_s, job)
+
+
+def _run_cases(cases, lang, mode, code, work, limit_s, job):
+    results = []
+    deadline = time.monotonic() + TOTAL_BUDGET_S
+    for c in cases:
+        if job.cancelled.is_set():
+            return _cancelled_result(results, len(cases))
+        if time.monotonic() > deadline:
+            results.append(_skipped("전체 실행 시간 제한으로 건너뛰었습니다."))
+            continue
+        r = _run_case(c, lang, mode, code, work, limit_s, job)
+        if job.cancelled.is_set():  # 실행 중에 중지된 케이스는 결과를 버린다
+            return _cancelled_result(results, len(cases))
+        results.append(r)
+    return {"compile": {"ok": True, "output": ""}, "results": results}
+
+
+def _compile_and_run(lang, mode, code, cases, limit_s, job):
+    if job.cancelled.is_set():
+        return _cancelled_result([], len(cases))
+    work = tempfile.mkdtemp(prefix="run-", dir=WORK_ROOT)
+    try:
+        os.chmod(work, 0o700)
+        if SANDBOX_UID >= 0:
+            os.chown(work, SANDBOX_UID, SANDBOX_UID)
+        ok, msg = prepare(lang, code, work, job)
+        if job.cancelled.is_set():
+            return _cancelled_result([], len(cases))
+        if not ok:
+            return {"compile": {"ok": False, "output": msg}, "results": []}
+        return _run_cases(cases, lang, mode, code, work, limit_s, job)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def execute(req):
+    lang, mode, code, cases, limit_s = _validate(req)
     job_id = req.get("jobId")
     job = _job(job_id) if job_id else Job()
-
-    def skipped(msg):
-        return {"status": "skipped", "stdout": "", "stderr": msg, "timeMs": 0, "memoryMb": 0, "actual": None}
-
-    def cancelled_result(results):
-        results = results + [skipped(CANCELLED_MSG)] * (len(cases) - len(results))
-        return {"compile": {"ok": True, "output": ""}, "results": results, "cancelled": True}
-
     try:
         with _slots:
-            if job.cancelled.is_set():
-                return cancelled_result([])
-            work = tempfile.mkdtemp(prefix="run-", dir=WORK_ROOT)
-            try:
-                os.chmod(work, 0o700)
-                if SANDBOX_UID >= 0:
-                    os.chown(work, SANDBOX_UID, SANDBOX_UID)
-                ok, msg = prepare(lang, code, work, job)
-                if job.cancelled.is_set():
-                    return cancelled_result([])
-                if not ok:
-                    return {"compile": {"ok": False, "output": msg}, "results": []}
-                results = []
-                deadline = time.monotonic() + TOTAL_BUDGET_S
-                for c in cases:
-                    if job.cancelled.is_set():
-                        return cancelled_result(results)
-                    if time.monotonic() > deadline:
-                        results.append(skipped("전체 실행 시간 제한으로 건너뛰었습니다."))
-                        continue
-                    # 케이스는 화면과 같은 형식: args = 리터럴 텍스트 목록, expected = 텍스트('' 이면 비교 안 함)
-                    exp_text = c.get("expected") or ""
-                    if mode == "function":
-                        args = [loads_literal(a) for a in c.get("args", [])]
-                        expected = loads_literal(exp_text) if exp_text.strip() else None
-                        r = run_function_case(lang, work, args, expected, limit_s, job)
-                    else:
-                        r = run_stdin_case(lang, code, work, c.get("stdin", ""), exp_text if exp_text.strip() else None, limit_s, job)
-                    if job.cancelled.is_set():  # 실행 중에 중지된 케이스는 결과를 버린다
-                        return cancelled_result(results)
-                    results.append(r)
-                return {"compile": {"ok": True, "output": ""}, "results": results}
-            finally:
-                shutil.rmtree(work, ignore_errors=True)
+            return _compile_and_run(lang, mode, code, cases, limit_s, job)
     finally:
         if job_id:
             with _jobs_lock:

@@ -13,8 +13,8 @@ export class ObjectStoreError extends Error {}
 
 /** Cloudflare R2(S3 호환 API). 키·비밀은 로그에 남기지 않는다. */
 export class R2ObjectStore implements ObjectStore {
-  private client: AwsClient;
-  private base: string;
+  private readonly client: AwsClient;
+  private readonly base: string;
 
   constructor(opts: { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string }) {
     this.client = new AwsClient({ accessKeyId: opts.accessKeyId, secretAccessKey: opts.secretAccessKey, service: 's3', region: 'auto' });
@@ -49,7 +49,7 @@ export class R2ObjectStore implements ObjectStore {
       if (!res.ok) throw new ObjectStoreError(`R2 목록을 읽지 못했습니다 (${res.status})`);
       const xml = await res.text();
       for (const m of xml.matchAll(/<Key>([^<]+)<\/Key>/g)) keys.push(unescapeXml(m[1]!));
-      token = /<IsTruncated>true<\/IsTruncated>/.test(xml) ? (xml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/)?.[1] ?? null) : null;
+      token = /<IsTruncated>true<\/IsTruncated>/.test(xml) ? (/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1] ?? null) : null;
     } while (token);
     return keys;
   }
@@ -61,9 +61,9 @@ export class R2ObjectStore implements ObjectStore {
  */
 export class WorkerR2Store implements ObjectStore {
   constructor(
-    private baseUrl: string,
-    private secret: string,
-    private fetchImpl: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+    private readonly baseUrl: string,
+    private readonly secret: string,
+    private readonly fetchImpl: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
   ) {}
 
   private send(path: string, init: RequestInit = {}) {
@@ -93,7 +93,7 @@ export class WorkerR2Store implements ObjectStore {
   }
 }
 
-const unescapeXml = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+const unescapeXml = (s: string) => s.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&apos;', "'").replaceAll('&amp;', '&');
 
 /** 테스트용 */
 export class MemoryObjectStore implements ObjectStore {

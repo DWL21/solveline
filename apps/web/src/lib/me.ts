@@ -7,4 +7,7 @@ export function useMe() {
 }
 
 /** 로그인 화면 주소. 로그인한 뒤 지금 보던 화면으로 돌아온다. */
-export const loginHref = () => `/login?next=${encodeURIComponent(location.hash ? `/${location.hash}` : '/')}`;
+export const loginHref = () => {
+  const next = location.hash ? '/' + location.hash : '/';
+  return `/login?next=${encodeURIComponent(next)}`;
+};

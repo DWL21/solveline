@@ -5,7 +5,7 @@ import { z } from 'zod';
 const optionalString = z
   .string()
   .optional()
-  .transform((v) => (v && v.trim() ? v.trim() : undefined));
+  .transform((v) => v?.trim() || undefined);
 
 const positiveNumber = (fallback: number) =>
   z
@@ -87,24 +87,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const production = e.NODE_ENV === 'production';
   const webOrigin = (e.WEB_ORIGIN ?? 'http://localhost:5173').replace(/\/$/, '');
 
-  if (production && !e.SESSION_SECRET) throw new ConfigError('운영 환경에는 SESSION_SECRET이 필요합니다.');
-  if (production && e.TEST_AUTH_TOKEN) throw new ConfigError('운영 환경에서는 TEST_AUTH_TOKEN을 쓸 수 없습니다.');
-  if (e.TEST_AUTH_TOKEN && e.TEST_AUTH_TOKEN.length < 24) throw new ConfigError('TEST_AUTH_TOKEN은 24자 이상이어야 합니다.');
-  if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
-  if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
-  if (production && !e.JUDGE_SECRET) throw new ConfigError('운영 환경에는 JUDGE_SECRET이 필요합니다.');
-  if (e.JUDGE_SECRET && e.JUDGE_SECRET.length < 32) throw new ConfigError('JUDGE_SECRET은 32자 이상이어야 합니다.');
-
-  const r2Values = [e.R2_ACCOUNT_ID, e.R2_ACCESS_KEY_ID, e.R2_SECRET_ACCESS_KEY, e.R2_BUCKET];
-  if (e.R2_PROXY_SECRET && e.R2_PROXY_SECRET.length < 32) throw new ConfigError('R2_PROXY_SECRET은 32자 이상이어야 합니다.');
-  if (r2Values.some(Boolean) && !r2Values.every(Boolean)) throw new ConfigError('R2_ACCOUNT_ID·R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_BUCKET은 함께 설정해야 합니다.');
-
-  let host = '';
-  try {
-    host = new URL(webOrigin).hostname;
-  } catch {
-    throw new ConfigError('WEB_ORIGIN 형식이 올바르지 않습니다.');
-  }
+  checkSecrets(e, production);
+  const host = hostOf(webOrigin);
   const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost');
 
   return {
@@ -119,7 +103,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     contactEmail: e.CONTACT_EMAIL ?? e.OWNER_EMAIL ?? null,
     // 개발 편의: 비밀이 없으면 프로세스마다 임의 값 (재시작하면 세션이 무효화된다)
     sessionSecret: e.SESSION_SECRET ?? cryptoRandom(),
-    sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3600_000,
+    sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3_600_000,
     webOrigin,
     secureCookie: !isLocal,
     testAuthToken: production ? null : (e.TEST_AUTH_TOKEN ?? null),
@@ -129,6 +113,29 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         : null,
     r2ProxySecret: e.R2_PROXY_SECRET ?? null,
   };
+}
+
+/** 비밀 값의 길이와 운영 환경 제약을 확인한다(값은 출력하지 않는다) */
+function checkSecrets(e: z.infer<typeof EnvSchema>, production: boolean) {
+  if (production && !e.SESSION_SECRET) throw new ConfigError('운영 환경에는 SESSION_SECRET이 필요합니다.');
+  if (production && e.TEST_AUTH_TOKEN) throw new ConfigError('운영 환경에서는 TEST_AUTH_TOKEN을 쓸 수 없습니다.');
+  if (e.TEST_AUTH_TOKEN && e.TEST_AUTH_TOKEN.length < 24) throw new ConfigError('TEST_AUTH_TOKEN은 24자 이상이어야 합니다.');
+  if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
+  if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
+  if (production && !e.JUDGE_SECRET) throw new ConfigError('운영 환경에는 JUDGE_SECRET이 필요합니다.');
+  if (e.JUDGE_SECRET && e.JUDGE_SECRET.length < 32) throw new ConfigError('JUDGE_SECRET은 32자 이상이어야 합니다.');
+
+  const r2Values = [e.R2_ACCOUNT_ID, e.R2_ACCESS_KEY_ID, e.R2_SECRET_ACCESS_KEY, e.R2_BUCKET];
+  if (e.R2_PROXY_SECRET && e.R2_PROXY_SECRET.length < 32) throw new ConfigError('R2_PROXY_SECRET은 32자 이상이어야 합니다.');
+  if (r2Values.some(Boolean) && !r2Values.every(Boolean)) throw new ConfigError('R2_ACCOUNT_ID·R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_BUCKET은 함께 설정해야 합니다.');
+}
+
+function hostOf(webOrigin: string) {
+  try {
+    return new URL(webOrigin).hostname;
+  } catch {
+    throw new ConfigError('WEB_ORIGIN 형식이 올바르지 않습니다.');
+  }
 }
 
 function cryptoRandom() {

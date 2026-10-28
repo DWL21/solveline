@@ -4,8 +4,8 @@ import { stmt, type Sql } from '../sql.ts';
 /** 서버 측 세션 저장소. 쿠키에는 서명된 세션 ID만 담고, 로그아웃·탈퇴 시 행을 지워 무효화한다. */
 export class SessionStore {
   constructor(
-    private sql: Sql,
-    private ttlMs: number,
+    private readonly sql: Sql,
+    private readonly ttlMs: number,
   ) {}
 
   async create(userId: string, now = Date.now()) {
