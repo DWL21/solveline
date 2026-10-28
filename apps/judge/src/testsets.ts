@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestCase, TestsetRef } from '@solveline/shared';
 
@@ -59,20 +59,10 @@ export class TestsetStore {
     return raw === null ? null : (JSON.parse(raw) as TestCase[]);
   }
 
-  /** 어디서도 쓰지 않고 minAgeMs보다 오래된 파일을 지운다. 지운 개수를 돌려준다. */
-  gc(inUse: Set<string>, minAgeMs = 24 * 3600_000, now = Date.now()): number {
-    if (this.dir === ':memory:') return 0;
-    let removed = 0;
-    for (const name of readdirSync(this.dir)) {
-      const hash = name.replace(/\.json$/, '');
-      if (!HASH.test(hash) || inUse.has(hash)) continue;
-      const path = join(this.dir, name);
-      if (now - statSync(path).mtimeMs > minAgeMs) {
-        unlinkSync(path);
-        removed++;
-      }
-    }
-    return removed;
+  /** 저장된 테스트셋 해시 전부 */
+  hashes(): string[] {
+    if (this.dir === ':memory:') return [...this.mem.keys()];
+    return readdirSync(this.dir).map((n) => n.replace(/\.json$/, '')).filter((h) => HASH.test(h));
   }
 
   get directory() {

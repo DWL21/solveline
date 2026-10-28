@@ -7,16 +7,21 @@ import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { openDb, stripSourceMentions, UserStore, SignupSettingsStore } from '../src/db.ts';
 import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
-import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
-import { SubmissionStore } from '../src/dispatcher.ts';
-import { CATALOG_INDEX_KEY, catalogProblemKey, testsetKey } from '../src/catalog.ts';
-import { MemoryObjectStore, type ObjectStore } from '../src/r2.ts';
+import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '@solveline/judge/runner';
+import { createJudge } from '@solveline/judge/app';
+import { openJobsDb } from '@solveline/judge/jobs';
+import { TestsetStore } from '@solveline/judge/testsets';
+import { TestsetMirror, testsetKey } from '@solveline/judge/mirror';
+import { gunzipSync } from 'node:zlib';
+import { SubmissionStore } from '../src/submissions.ts';
+import { CATALOG_INDEX_KEY, catalogProblemKey } from '../src/catalog.ts';
+import { MemoryObjectStore, type ObjectStore } from '@solveline/judge/r2';
+import { HttpJudge } from '../src/judge.ts';
 import { d1Sql, sqliteSql } from '../src/sql.ts';
 import { fakeD1 } from './fake-d1.ts';
-import { TestsetStore } from '../src/testsets.ts';
-import { gunzipSync } from 'node:zlib';
 
 const OWNER = 'owner@example.com';
+const JUDGE_SECRET = 'judge-secret-0123456789abcdef0123456789';
 const MASTER = 'master-password-0123456789abcdef';
 
 /** 가짜 Google: code가 곧 이메일이다. sub는 이메일에서 만든다. */
@@ -33,7 +38,7 @@ const fakeGoogle: GoogleClient = {
  * 코드가 'hold'면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
  */
 function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null = null, opts: { d1?: boolean } = {}) {
-  const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:', OWNER_EMAIL: OWNER, ...env });
+  const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40), JUDGE_SECRET: JUDGE_SECRET, DATA_DIR: ':memory:', OWNER_EMAIL: OWNER, ...env });
   const calls: RunJob[] = [];
   const uploads: string[] = [];
   const held = new Map<string, () => void>();
@@ -64,8 +69,25 @@ function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null
   const db = openDb(':memory:');
   // d1: 저장소를 D1 어댑터(가짜 D1)로 돌린다. Worker에서와 같은 경로를 검증한다.
   const sql = opts.d1 ? d1Sql(fakeD1(db)) : undefined;
-  const { app, dispatcher, catalog, testsets } = createApp({ config, db, sql, runners: [runner], google: fakeGoogle, objectStore });
-  return { app, db, dispatcher, calls, uploads, held, catalog, testsets };
+  // judge도 실제 앱을 프로세스 안에서 띄우고, 서명한 HTTP 요청(app.request)으로 오간다. 결과 콜백은 API 앱으로 바로 보낸다.
+  const testsets = new TestsetStore(':memory:');
+  let apiApp: ReturnType<typeof createApp>['app'] | null = null;
+  const judgeSvc = createJudge({
+    db: openJobsDb(':memory:'), runners: [runner], slotsPerRunner: 2, testsets, secret: JUDGE_SECRET, resultsUrl: 'http://api',
+    mirror: objectStore ? new TestsetMirror(objectStore, testsets) : null,
+    fetch: async (url, init) => apiApp!.request(url.replace('http://api', ''), init),
+  });
+  const judge = new HttpJudge('http://judge', JUDGE_SECRET, async (url, init) => judgeSvc.app.request(url.replace('http://judge', ''), init));
+  const created = createApp({ config, db, sql, judge, google: fakeGoogle, objectStore });
+  apiApp = created.app;
+  const { app, catalog } = created;
+  /** 제출이 끝나고 API 기록에 반영될 때까지 기다린다 */
+  const wait = async (id: string) => {
+    await judgeSvc.dispatcher.wait(id);
+    await judgeSvc.deliver();
+    return (await created.submissions.get(id))!;
+  };
+  return { app, db, dispatcher: { wait }, judge: judgeSvc, calls, uploads, held, catalog, testsets };
 }
 
 const cookieOf = (res: Response, name: string) =>
@@ -536,7 +558,7 @@ describe('설정', () => {
 
   it('Google 설정이 없으면 로그인을 시작하지 않는다', async () => {
     const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40) });
-    const { app } = createApp({ config, db: openDb(':memory:'), runners: [] });
+    const { app } = createApp({ config, db: openDb(':memory:'), judge: new HttpJudge('http://judge', JUDGE_SECRET) });
     expect((await app.request('/api/auth/google/start')).status).toBe(503);
     expect(((await (await app.request('/api/public/config')).json()) as { data: { googleEnabled: boolean } }).data.googleEnabled).toBe(false);
   });
@@ -628,17 +650,18 @@ describe('풀이 시간', () => {
 describe('제출 큐', () => {
   it('채점 제출만 최신순으로 20개씩 조회한다', async () => {
     const db = openDb(':memory:');
-    const store = new SubmissionStore(db);
+    const store = new SubmissionStore(sqliteSql(db));
     const user = await new UserStore(sqliteSql(db)).create({ sub: 'history', email: 'history@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
-    const base = { userId: user.id, problemId: null, language: 'python' as const, mode: 'function' as const, code: 'submitted code', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
-    const ids = Array.from({ length: 21 }, (_, i) => store.insert({ ...base, kind: 'submit' }, new Date(2026, 0, 1, 0, 0, i)));
-    store.insert({ ...base, kind: 'run' }, new Date(2026, 0, 1, 0, 1));
-    const first = store.history(user.id, 0);
+    const base = { userId: user.id, problemId: null, language: 'python' as const, mode: 'function' as const, code: 'submitted code', cases: [], testsetHash: null, timeLimitMs: 10_000 };
+    const ids = Array.from({ length: 21 }, (_, i) => `s${i}`);
+    for (const [i, id] of ids.entries()) await store.insert({ ...base, id, kind: 'submit' }, new Date(2026, 0, 1, 0, 0, i));
+    await store.insert({ ...base, id: 'run', kind: 'run' }, new Date(2026, 0, 1, 0, 1));
+    const first = await store.history(user.id, 0);
     expect(first.items).toHaveLength(20);
     expect(first.items[0]?.id).toBe(ids[20]);
     expect(first.nextOffset).toBe(20);
-    expect(store.history(user.id, 20).items.map((item) => item.id)).toEqual([ids[0]]);
-    expect(store.history(user.id, 20).nextOffset).toBeNull();
+    expect((await store.history(user.id, 20)).items.map((item) => item.id)).toEqual([ids[0]]);
+    expect((await store.history(user.id, 20)).nextOffset).toBeNull();
   });
 
   it('코드 실행은 보이는 케이스만, 결과는 제출 id로 조회한다', async () => {
@@ -726,20 +749,6 @@ describe('제출 큐', () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.error?.code).toBe('invalid_case');
-  });
-
-  it('코드 실행이 제출 채점보다 먼저 꺼내진다', async () => {
-    const db = openDb(':memory:');
-    const store = new SubmissionStore(db);
-    const user = await new UserStore(sqliteSql(db)).create({ sub: 's', email: 'u@example.com', name: 'u', picture: '' }, { terms: 'v', privacy: 'v' });
-    const base = { userId: user.id, problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
-    const sub = store.insert({ ...base, kind: 'submit' }, new Date('2026-01-01T00:00:00Z'));
-    const run = store.insert({ ...base, kind: 'run' }, new Date('2026-01-01T00:00:01Z'));
-    expect(store.get(sub)!.ahead).toBe(1);
-    expect(store.claim()?.id).toBe(run);
-    expect(store.claim()?.id).toBe(sub);
-    expect(store.claim()).toBeNull();
-    expect(store.requeueStale()).toBe(2);
   });
 
   it('실행 중인 제출을 중지하면 cancelled로 끝나고 점수를 기록하지 않는다', async () => {
@@ -988,7 +997,7 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
     expect(index.problems.find((p) => p.id === a)!.version).toBe(va);
     expect(index.problems.map((p) => p.title)).toContain('새 제목');
 
-    // 히든 테스트셋은 gzip으로 올리고, 지운 로컬 파일은 R2에서 되살린다
+    // 히든 테스트셋은 judge가 gzip으로 올리고, 지운 로컬 파일은 R2에서 되살린다
     await E('PUT', `/api/problems/${a}/hidden`, { cases: [{ id: 'h', args: ['[2, 2]'], stdin: '', expected: '4', hidden: true }] });
     const hash: string = (await E('GET', `/api/catalog/problems/${a}`)).body.data.hiddenTestset.hash;
     const gz = r2.objects.get(testsetKey(hash))!;
@@ -996,8 +1005,7 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
     expect(JSON.parse(gunzipSync(gz.body).toString())[0].id).toBe('h');
     const fresh = new TestsetStore(':memory:');
     expect(fresh.putRaw(hash, 'tampered')).toBe(false);
-    const restarted = createApp({ config: loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' }), db: s.db, runners: [], testsets: fresh, objectStore: r2 });
-    expect(await restarted.catalog!.hydrate()).toBe(1);
+    expect(await new TestsetMirror(r2, fresh).load(hash)).toBe(true);
     expect(fresh.get(hash)![0]!.id).toBe('h');
 
     // 컬렉션 변경도 목록에 반영된다
@@ -1011,7 +1019,7 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
 
     // 다시 맞춰도 바뀐 것이 없으면 아무것도 올리지 않는다
     const n = r2.puts;
-    expect(await s.catalog!.sync()).toEqual({ problems: 0, testsets: 0, index: false });
+    expect(await s.catalog!.sync()).toEqual({ problems: 0, index: false });
     expect(r2.puts).toBe(n);
   });
 
@@ -1021,9 +1029,9 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
     const E = as(s, await login(s));
     await E('POST', '/api/problems', problem);
     // 같은 저장소를 쓰는 새 프로세스: R2 목록을 읽어 바뀐 것이 없음을 안다
-    const { catalog } = createApp({ config: loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' }), db: s.db, runners: [], objectStore: r2 });
+    const { catalog } = createApp({ config: loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' }), db: s.db, judge: new HttpJudge('http://judge', JUDGE_SECRET), objectStore: r2 });
     const n = r2.puts;
-    expect(await catalog!.sync()).toEqual({ problems: 0, testsets: 0, index: false });
+    expect(await catalog!.sync()).toEqual({ problems: 0, index: false });
     expect(r2.puts).toBe(n);
   });
 
