@@ -1,14 +1,15 @@
 name: QA report
-# CI가 끝나면 QA 테스트 완료 보고서(ISO/IEC/IEEE 29119-3 구성)를 PR 댓글로 남긴다.
-#   PR 실행    머지 전 보고서. 같은 댓글을 갱신해 리뷰어가 머지 전에 판정과 근거를 본다.
-#   main 실행  배포가 끝나기를 기다려 운영 스모크까지 돌린 최종 보고서를 머지된 PR에 남긴다.
+# CI가 끝나면 QA 테스트 완료 보고서(ISO/IEC/IEEE 29119-3 구성)를 PR 댓글 하나로 남긴다.
+#   PR 실행    PR 단계 보고서 v0.x(커밋마다 올림). 필수 체크가 아니라서 CI만 통과하면 이 작업을 기다리지 않고 머지할 수 있다.
+#   main 실행  배포가 끝나기를 기다려 운영 스모크를 돌리고, 같은 보고서를 v1.0으로 갱신한다.
+# PDF와 표지 이미지는 main과 히스토리를 공유하지 않는 qa-reports 브랜치(pr-<번호>/)에 보관하고 댓글에서 연결한다.
 # 보고서 코드는 기본 브랜치의 것만 실행하고, PR이 만든 결과 파일(아티팩트)은 읽기만 한다.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
 permissions:
-  contents: read
+  contents: write # qa-reports 브랜치에 PDF 보관
   actions: read
   issues: read
   pull-requests: write
@@ -108,6 +109,34 @@ jobs:
             '{kind: $kind, repo: $repo, sha: $sha, generatedAt: $now, pr: $pr, deploy: $deploy, openBugs: $bugs, reportRunUrl: $reportRunUrl,
               run: {id: $runId, url: $runUrl, attempt: $attempt, jobs: $jobs}}' > "$INPUT/context.json"
 
+      - name: 보관 위치·판 번호(qa-reports 브랜치)
+        if: env.PR_NUMBER != ''
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch -q origin qa-reports 2>/dev/null; then
+            git worktree add -q -B qa-reports qa-store FETCH_HEAD
+          else
+            git worktree add -q --orphan -b qa-reports qa-store
+            printf '# QA reports\n\nQA 보고서 워크플로가 PR마다 만든 테스트 완료 보고서(PDF)와 표지 이미지를 보관한다. main과 히스토리를 공유하지 않으며 머지하지 않는다.\n\n- pr-<번호>/QA-TCR-PR<번호>-v<판>.pdf\n- pr-<번호>/history.json (개정 이력)\n' > qa-store/README.md
+          fi
+          dir="qa-store/pr-$PR_NUMBER"
+          mkdir -p "$dir"
+          history=$(cat "$dir/history.json" 2>/dev/null || echo '[]')
+          # 같은 CI 실행을 다시 돌리면 판 번호를 유지하고, 새 커밋이면 0.x를 올린다
+          version=$(jq -r --argjson id "$RUN_ID" '[.[] | select(.runId == $id)][0].version // empty' <<< "$history")
+          if [ -z "$version" ]; then
+            if [ "$KIND" = final ]; then version=1.0
+            else version="0.$(( $(jq '[.[] | select(.version | startswith("0."))] | length' <<< "$history") + 1 ))"; fi
+          fi
+          name="QA-TCR-PR$PR_NUMBER-v$version"
+          base="$GITHUB_SERVER_URL/$REPO/blob/qa-reports/pr-$PR_NUMBER"
+          jq --arg v "$version" --argjson h "$history" \
+            --arg pdf "$base/$name.pdf" --arg cover "https://raw.githubusercontent.com/$REPO/qa-reports/pr-$PR_NUMBER/$name-cover.png" \
+            '. + {version: $v, history: $h, links: {pdf: $pdf, cover: $cover}}' "$INPUT/context.json" > "$INPUT/context.next" && mv "$INPUT/context.next" "$INPUT/context.json"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "판: $name"
+
       - name: 보고서 만들기(댓글·HTML·PDF)
         working-directory: e2e
         run: node report/build.mjs --input "$INPUT" --repo .. --out "$OUT"
@@ -117,6 +146,26 @@ jobs:
           name: qa-report
           path: qa-out/
           retention-days: 90
+
+      - name: 보고서 보관(qa-reports 브랜치)
+        if: env.PR_NUMBER != ''
+        run: |
+          dir="qa-store/pr-$PR_NUMBER"
+          name=$(jq -r .name "$OUT/verdict.json")
+          cp "$OUT/$name.pdf" "$OUT/$name-cover.png" "$dir/"
+          if [ "$KIND" = final ]; then note="Post-merge: deployment and production smoke (CI #$RUN_ID)"; else note="PR stage report (CI #$RUN_ID)"; fi
+          jq --arg v "$VERSION" --arg d "$(date -u +%FT%TZ)" --argjson id "$RUN_ID" --arg note "$note" \
+            'map(select(.version != $v)) + [{version: $v, date: $d, runId: $id, note: $note}]' \
+            <(cat "$dir/history.json" 2>/dev/null || echo '[]') > "$dir/history.next" && mv "$dir/history.next" "$dir/history.json"
+          cd qa-store
+          git add -A
+          git commit -q -m "qa: PR #$PR_NUMBER $name"
+          # PR 보고서와 main 보고서가 동시에 올릴 수 있어 다시 받아 붙인 뒤 재시도한다
+          for _ in 1 2 3 4 5; do
+            if git push -q origin qa-reports; then exit 0; fi
+            git pull -q --rebase origin qa-reports
+          done
+          exit 1
 
       - name: PR 댓글 남기기
         if: env.PR_NUMBER != ''

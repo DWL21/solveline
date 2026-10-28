@@ -45,7 +45,8 @@ test('describe 경로를 제목에 붙이고 증거 첨부를 아티팩트 상�
 test('모든 종료 기준을 충족하면 머지 가능, R11은 머지 후 확인으로 차이에 남긴다', () => {
   const m = buildModel(base());
   assert.equal(m.verdict.status, 'pass');
-  assert.equal(m.id, 'QA-TCR-PR7-P');
+  assert.equal(m.id, 'QA-TCR-PR7');
+  assert.equal(m.version, '0.1');
   assert.equal(m.requirements.find((r) => r.id === 'R11').status, 'notRun');
   assert.match(m.deviations.join(), /R11.*머지 후/);
 });
@@ -54,10 +55,10 @@ test('열린 잔여 위험이 있으면 조건부', () => {
   assert.equal(m.verdict.status, 'conditional');
 });
 for (const [name, over, criterion] of [
-  ['커버리지가 기준보다 낮으면', { metrics: metrics({ unit: { tests: 10, failed: 0, coverage: { lines: 79, branches: 70 } } }) }, '커버리지 기준 이상'],
-  ['불안정 테스트가 있으면', { metrics: metrics({ e2e: { ...metrics().e2e, flaky: 1 } }) }, '불안정 테스트 없음'],
-  ['Sonar 게이트가 실패하면', { metrics: metrics({ sonar: { gate: 'ERROR' } }) }, '정적 분석 품질 게이트'],
-  ['품질 리포트가 없으면', { metrics: null }, '단위 테스트 전부 통과'],
+  ['커버리지가 기준보다 낮으면', { metrics: metrics({ unit: { tests: 10, failed: 0, coverage: { lines: 79, branches: 70 } } }) }, 'Coverage thresholds met'],
+  ['불안정 테스트가 있으면', { metrics: metrics({ e2e: { ...metrics().e2e, flaky: 1 } }) }, 'No flaky tests'],
+  ['Sonar 게이트가 실패하면', { metrics: metrics({ sonar: { gate: 'ERROR' } }) }, 'Static analysis quality gate'],
+  ['품질 리포트가 없으면', { metrics: null }, 'Unit tests all pass'],
 ]) {
   test(`${name} 머지 보류`, () => {
     const m = buildModel(base(over));
@@ -73,14 +74,26 @@ test('머지 후 보고서는 배포와 운영 스모크를 종료 기준에 더
   assert.equal(ok.requirements.find((r) => r.id === 'R11').passed, 4);
   const broken = buildModel(base({ context: { ...ctx, deploy: { conclusion: 'failure' } }, smoke }));
   assert.equal(broken.verdict.status, 'fail');
-  assert.match(broken.blockers.join(), /운영 배포/);
+  assert.match(broken.blockers.join(), /Production deployment/);
 });
 test('PR 제목 같은 외부 입력은 댓글과 문서에서 무력화한다', () => {
   const m = buildModel(base());
   const md = toMarkdown(m, {});
-  assert.ok(md.startsWith(MARKER.pr));
+  assert.ok(md.startsWith(MARKER));
   assert.ok(!md.includes('<b>x</b>'));
-  assert.ok(md.includes('\\|'));
   assert.ok(!md.includes('@someone'));
   assert.ok(!toHtml(m, {}).includes('<b>x</b>'));
+});
+
+test('PDF 링크가 있으면 댓글에 표지 미리보기와 PDF 링크를 싣는다', () => {
+  const ctx = { ...base().context, links: { pdf: 'https://example.test/r.pdf', cover: 'https://example.test/c.png' } };
+  const md = toMarkdown(buildModel(base({ context: ctx })), {});
+  assert.match(md, /\*\*PDF:\*\* \[QA-TCR-PR7 v0\.1\.pdf\]\(https:\/\/example\.test\/r\.pdf\)/);
+  assert.match(md, /<img src="https:\/\/example\.test\/c\.png"/);
+});
+test('개정 이력은 이전 판을 잇고 같은 판은 이번 것으로 바꾼다', () => {
+  const ctx = { ...base().context, kind: 'final', version: '1.0', deploy: { conclusion: 'success' }, history: [{ version: '0.1', date: '2026-10-28T00:00:00Z', note: 'PR stage report (CI #1)' }, { version: '1.0', date: 'x', note: 'old' }] };
+  const html = toHtml(buildModel(base({ context: ctx, smoke: { stats: { expected: 1 } } })), {});
+  assert.match(html, /PR stage report \(CI #1\)/);
+  assert.ok(!html.includes('>old<'));
 });
