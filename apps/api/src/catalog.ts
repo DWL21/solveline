@@ -84,7 +84,7 @@ export class CatalogPublisher {
   private async run(): Promise<SyncResult> {
     const cat = buildCatalog(this.source());
     this.published ??= await this.loadPublished();
-    this.remoteTestsets ??= new Set((await this.store.list('testsets/')).map((k) => k.replace(/^testsets\/|\.json\.gz$/g, '')));
+    this.remoteTestsets ??= new Set((await this.store.list('testsets/')).map((k) => k.slice('testsets/'.length).replace(/\.json\.gz$/, '')));
     const published = this.published;
     const remote = this.remoteTestsets;
 
