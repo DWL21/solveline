@@ -1,9 +1,13 @@
 import { z } from 'zod';
 import { ProblemPatch, type Problem } from '@solveline/shared';
 
-export const IDLE_SAVE_MS = 5_000;
-export const MAX_SAVE_MS = 30_000;
-export const TIMER_SAVE_MS = 60_000;
+// 요청 수를 줄이기 위한 간격. 변경은 localStorage에 먼저 남고, 실행·채점 전과 탭을 숨기거나 떠날 때는 바로 보낸다.
+/** 입력을 멈추고 이만큼 지나면 보낸다 */
+export const IDLE_SAVE_MS = 10_000;
+/** 계속 입력해도 이만큼마다는 보낸다 */
+export const MAX_SAVE_MS = 60_000;
+/** 풀이 시간만 바뀌었으면 이만큼마다 보낸다 */
+export const TIMER_SAVE_MS = 300_000;
 const KEEPALIVE_BYTES = 60_000;
 // 서버 검증에 실패하는 작성 중 문자열도 로컬에서는 잃지 않는다.
 const localCode = z.object({ java: z.string().optional(), python: z.string().optional() });

@@ -660,6 +660,9 @@ export function createApp(deps: AppDeps) {
     }
   };
 
+  /** 긴 조회 대기 시간(?wait=초, 최대 25초: 프록시 응답 제한보다 충분히 짧게) */
+  const waitMs = (c: Context) => Math.min(25, Math.max(0, Number(c.req.query('wait')) || 0)) * 1000;
+
   const limited = (c: Context<Env>) => {
     const retry = runLimit.hit(c.get('userId'), now());
     if (!retry) return null;
@@ -675,8 +678,10 @@ export function createApp(deps: AppDeps) {
     const id = enqueue(c.get('userId'), body);
     if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
     dispatcher.kick();
-    c.status(202);
-    return ok(c, Submission, submissions.get(id)!);
+    // ?wait=초: 짧은 실행은 이 요청 하나로 결과까지 받는다
+    const s = (await dispatcher.poll(id, waitMs(c))) ?? submissions.get(id)!;
+    if (s.status === 'queued' || s.status === 'running') c.status(202);
+    return ok(c, Submission, s);
   });
 
   app.get('/api/submissions', (c) => {
@@ -690,9 +695,9 @@ export function createApp(deps: AppDeps) {
     return detail ? ok(c, SubmissionDetail, detail) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
-  app.get('/api/submissions/:id', (c) => {
+  app.get('/api/submissions/:id', async (c) => {
     const id = c.req.param('id');
-    const s = submissions.ownedBy(id, c.get('userId')) ? submissions.get(id) : null;
+    const s = submissions.ownedBy(id, c.get('userId')) ? await dispatcher.poll(id, waitMs(c)) : null;
     return s ? ok(c, Submission, s) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 

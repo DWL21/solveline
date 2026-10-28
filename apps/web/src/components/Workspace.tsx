@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type Language, type Problem, type ProblemInput, type ProblemMode, type Submission, type TestCase } from '@solveline/shared';
+import { lastSubmissionOf, type Language, type Problem, type ProblemInput, type ProblemMode, type ProblemSummary, type Submission, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
@@ -141,11 +141,11 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   const lang = draft.language;
   const code = draft.code[lang];
 
-  /** 진행 중인 제출: 중지 버튼이 쓰는 id와, 조회 대기를 바로 깨우는 함수 */
-  const current = useRef<{ id: string | null; wake: () => void; stopping: boolean }>({ id: null, wake: () => {}, stopping: false });
+  /** 진행 중인 제출: 중지 버튼이 쓰는 id */
+  const current = useRef<{ id: string | null; stopping: boolean }>({ id: null, stopping: false });
   const [stopping, setStopping] = useState(false);
 
-  /** 제출 큐에 넣고 끝날 때까지 조회한다(처음엔 빠르게, 점점 느리게). */
+  /** 제출 큐에 넣고 끝날 때까지 조회한다. 서버가 상태가 바뀔 때까지 기다렸다 답하므로(긴 조회) 짧은 간격으로 묻지 않는다. */
   const runMut = useMutation({
     mutationFn: async ({ cases, submit }: { cases: TestCase[]; submit: boolean }) => {
       // 채점은 서버의 공용 케이스를 사용하므로 편집한 내용부터 반영한다.
@@ -157,23 +157,14 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
       current.current.id = s.id;
       // 제출 응답이 오기 전에 중지를 눌렀으면 지금 보낸다
       if (current.current.stopping) s = await api.cancelSubmission(s.id);
-      let delay = 250;
       while (s.status === 'queued' || s.status === 'running') {
         setRun({ kind: 'running', submit, ahead: s.status === 'queued' ? s.ahead : null });
-        await new Promise<void>((r) => {
-          const t = setTimeout(r, delay);
-          current.current.wake = () => {
-            clearTimeout(t);
-            r();
-          };
-        });
-        delay = Math.min(1500, Math.round(delay * 1.5));
         s = await api.submission(s.id);
       }
       return s;
     },
     onSettled: () => {
-      current.current = { id: null, wake: () => {}, stopping: false };
+      current.current = { id: null, stopping: false };
       setStopping(false);
       markUnseenIfHidden();
     },
@@ -189,14 +180,15 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
         solve.markSolved();
         setSolvedOpen(true);
       }
-      // 점수는 서버가 기록한다 → 문제·목록을 다시 읽는다
-      void qc.invalidateQueries({ queryKey: qk.problem(problem.id) });
-      void qc.invalidateQueries({ queryKey: qk.problems });
+      // 점수는 서버가 기록했다. 같은 값을 화면에 바로 반영하고 다시 읽지 않는다(목록은 다음에 열 때 새로 읽는다).
+      const last = lastSubmissionOf(s.result, s.caseIds.length, s.language, s.finishedAt ?? new Date().toISOString());
+      qc.setQueryData<Problem>(qk.problem(problem.id), (p) => (p ? { ...p, lastSubmission: last } : p));
+      qc.setQueryData<ProblemSummary[]>(qk.problems, (all) => all?.map((p) => (p.id === problem.id ? { ...p, lastSubmission: last } : p)));
     },
     onError: (e) => setRun({ kind: 'error', message: errMsg(e) }),
   });
 
-  /** 실행·채점 중지: 서버에 알리고, 결과 조회를 바로 다시 한다 */
+  /** 실행·채점 중지: 서버에 알린다. 기다리던 조회는 상태가 바뀌면 바로 돌아온다. */
   const doStop = useCallback(async () => {
     const cur = current.current;
     if (cur.stopping) return;
@@ -208,7 +200,6 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
     } catch {
       /* 다음 조회에서 상태를 다시 본다 */
     }
-    cur.wake();
   }, []);
 
   /** 코드 실행: 보이는 케이스만 */
