@@ -9,6 +9,10 @@ compatibility_date = "2026-10-23"
 binding = "CATALOG"
 bucket_name = "solveline-catalog"
 
+# 카탈로그를 R2에서 읽는다. 지우고 배포하면 다시 pahidc(API)에서 읽는다(0006 롤백).
+[vars]
+CATALOG_SOURCE = "r2"
+
 # ─── API를 Worker에서 실행(0007 5단계 전환 때 켠다, 운영자 승인 필요) ───
 # 1) npx wrangler d1 create solveline 로 만든 database_id를 아래에 넣고 주석을 푼다.
 # 2) npx wrangler d1 migrations apply solveline --remote (스키마: apps/api/migrations)
