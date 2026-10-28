@@ -44,14 +44,14 @@ export function Splitter({
   defaultValue,
   label,
   onChange,
-}: {
+}: Readonly<{
   direction: 'vertical' | 'horizontal';
   container: RefObject<HTMLElement | null>;
   value: number;
   defaultValue: number;
   label: string;
   onChange: (pct: number) => void;
-}) {
+}>) {
   const [dragging, setDragging] = useState(false);
   const vertical = direction === 'vertical';
 
@@ -97,7 +97,7 @@ export function Splitter({
       aria-label={label}
       aria-valuenow={Math.round(value)}
       tabIndex={0}
-      title={`${label} — 끌어서 크기 조절, 더블클릭하면 기본값`}
+      title="끌어서 크기 조절 · 더블클릭하면 원래대로"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={stop}

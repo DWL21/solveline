@@ -243,21 +243,25 @@ export function stripSourceMentions(db: Db) {
       .split('\n')
       .filter((l) => !sourceLine.test(l) && !originLine.test(l))
       .join('\n')
-      .replace(figure, '[그림]')
+      .replaceAll(figure, '[그림]')
       // 지문 속 괄호 링크 "(https://www.기존.net/problem/…)"와 남은 원문 주소
-      .replace(/\s*\(https?:\/\/[^)\s]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^)\s]*\)/g, '')
-      .replace(/https?:\/\/[^\s)\]]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^\s)\]]*/g, '')
+      .replaceAll(/\s*\(https?:\/\/[^)\s]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^)\s]*\)/g, '')
+      .replaceAll(/https?:\/\/[^\s)\]]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^\s)\]]*/g, '')
       .replace(/^\n+/, '');
     if (title !== p.title || description !== (body.description ?? '')) updProblem.run(title, JSON.stringify({ ...body, description }), p.id);
   }
 
   const updCollection = db.prepare('UPDATE collections SET description = ? WHERE id = ?');
   for (const c of db.prepare('SELECT id, description FROM collections').all() as { id: string; description: string }[]) {
-    const description = c.description.replace(/\s*\(\ubc31\uc900 [^)]*\)/g, '').replace(/\(\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '(').replace(/\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '');
+    const description = c.description.replaceAll(/\s*\(\ubc31\uc900 [^)]*\)/g, '').replaceAll(/\(\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '(').replaceAll(/\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '');
     if (description !== c.description) updCollection.run(description, c.id);
   }
 
-  // 같은 사용자에게 동일한 폴더가 있으면 합친다.
+  mergeSourceFolders(db);
+}
+
+/** 같은 사용자에게 동일한 폴더가 있으면 합친다. */
+function mergeSourceFolders(db: Db) {
   const folders = db.prepare("SELECT id, user_id, name FROM folders WHERE name LIKE '\ubc31\uc900%'").all() as { id: string; user_id: string | null; name: string }[];
   for (const f of folders) {
     const name = f.name.replace(/^\ubc31\uc900\s*·\s*/, '');
@@ -288,6 +292,32 @@ export function copyTemplateFolders(db: Db, userId: string, now = new Date()) {
   }
 }
 
+/** 마이그레이션 하나를 적용하고 _migrations에 기록한다 */
+function applyMigration(db: Db, m: Migration, i: number) {
+  if (typeof m === 'function') {
+    db.transaction(() => {
+      m(db);
+      db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
+    })();
+    return;
+  }
+  const sql = typeof m === 'string' ? m : m.sql;
+  const fkOff = typeof m !== 'string';
+  if (fkOff) db.pragma('foreign_keys = OFF'); // 트랜잭션 안에서는 바꿀 수 없으므로 밖에서 끈다
+  try {
+    db.transaction(() => {
+      db.exec(sql);
+      db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
+      if (fkOff) {
+        const broken = db.pragma('foreign_key_check') as unknown[];
+        if (broken.length) throw new Error(`마이그레이션 ${i} 뒤 외래 키 위반 ${broken.length}건`);
+      }
+    })();
+  } finally {
+    if (fkOff) db.pragma('foreign_keys = ON');
+  }
+}
+
 /** dataDir가 ':memory:'면 메모리 DB (테스트용) */
 export function openDb(dataDir: string): Db {
   let db: Db;
@@ -306,30 +336,6 @@ export function openDb(dataDir: string): Db {
   db.pragma('busy_timeout = 5000');
   db.exec('CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY)');
   const applied = new Set(db.prepare('SELECT id FROM _migrations').pluck().all() as number[]);
-  migrations.forEach((m, i) => {
-    if (applied.has(i)) return;
-    if (typeof m === 'function') {
-      db.transaction(() => {
-        m(db);
-        db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
-      })();
-      return;
-    }
-    const sql = typeof m === 'string' ? m : m.sql;
-    const fkOff = typeof m !== 'string';
-    if (fkOff) db.pragma('foreign_keys = OFF'); // 트랜잭션 안에서는 바꿀 수 없으므로 밖에서 끈다
-    try {
-      db.transaction(() => {
-        db.exec(sql);
-        db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
-        if (fkOff) {
-          const broken = db.pragma('foreign_key_check') as unknown[];
-          if (broken.length) throw new Error(`마이그레이션 ${i} 뒤 외래 키 위반 ${broken.length}건`);
-        }
-      })();
-    } finally {
-      if (fkOff) db.pragma('foreign_keys = ON');
-    }
-  });
+  for (const [i, m] of migrations.entries()) if (!applied.has(i)) applyMigration(db, m, i);
   return db;
 }

@@ -11,9 +11,9 @@ const HASH = /^[0-9a-f]{64}$/;
  * dir이 ':memory:'면 메모리에만 둔다(테스트용).
  */
 export class TestsetStore {
-  private mem = new Map<string, string>();
+  private readonly mem = new Map<string, string>();
 
-  constructor(private dir: string) {
+  constructor(private readonly dir: string) {
     if (dir !== ':memory:') mkdirSync(dir, { recursive: true });
   }
 

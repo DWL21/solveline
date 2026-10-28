@@ -5,7 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
 
 /** 테스트 전용 로그인 요청 */
-const TestSessionRequest = z.object({ email: z.string().trim().toLowerCase().email().max(254), name: z.string().max(100).optional(), editor: z.boolean().optional() });
+const TestSessionRequest = z.object({ email: z.string().trim().toLowerCase().max(254).pipe(z.email()), name: z.string().max(100).optional(), editor: z.boolean().optional() });
 import {
   Bookmark,
   CatalogIndex,
@@ -92,12 +92,12 @@ const OAUTH_COOKIE = 'solveline_oauth';
 const SIGNUP_COOKIE = 'solveline_signup';
 const ADMIN_COOKIE = 'solveline_admin';
 /** 관리자 모드(마스터) 세션 길이 */
-const ADMIN_TTL_MS = 12 * 3600_000;
+const ADMIN_TTL_MS = 12 * 3_600_000;
 /** Google 로그인 왕복·약관 동의에 주는 시간 */
 const FLOW_TTL_S = 600;
 
 /** 로그인 뒤 돌아갈 경로. 같은 사이트 안의 경로만 허용한다(열린 리디렉션 방지). */
-const safeNext = (v: string | undefined) => (v && /^\/(?![\/\\])/.test(v) && v.length < 300 ? v : '/');
+const safeNext = (v: string | undefined) => (v && /^\/(?![/\\])/.test(v) && v.length < 300 ? v : '/');
 
 const encode = encodeJson;
 const decode = decodeJson;
@@ -108,7 +108,8 @@ const fail = (c: Context, status: Status, code: string, message: string) => c.js
 function ok<T extends z.ZodType>(c: Context, schema: T, data: z.input<T>) {
   const parsed = schema.safeParse(data);
   if (!parsed.success) {
-    log.error(`[contract] ${c.req.path} 응답이 계약과 다릅니다: ${parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; ')}`);
+    const issues = parsed.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; ');
+    log.error(`[contract] ${c.req.path} 응답이 계약과 다릅니다: ${issues}`);
     return fail(c, 500, 'contract_violation', '응답 형식 오류가 발생했습니다.');
   }
   return c.json({ data: parsed.data });
@@ -132,7 +133,7 @@ export function createApp(deps: AppDeps) {
   if (!sql) throw new Error('db 또는 sql이 필요합니다.');
   const now = deps.now ?? Date.now;
   const sessions = new SessionStore(sql, config.sessionTtlMs);
-  const temporaryTtlMs = Math.min(config.sessionTtlMs, 24 * 3600_000);
+  const temporaryTtlMs = Math.min(config.sessionTtlMs, 24 * 3_600_000);
   const temporarySessions = new SessionStore(sql, temporaryTtlMs);
   const problems = new ProblemStore(sql);
   const submissions = new SubmissionStore(sql);
@@ -144,14 +145,15 @@ export function createApp(deps: AppDeps) {
   const catalog = deps.objectStore
     ? new CatalogPublisher(deps.objectStore, catalogSource)
     : null;
-  const google = deps.google !== undefined ? deps.google : config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null;
+  const configuredGoogle = () => (config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null);
+  const google = deps.google === undefined ? configuredGoogle() : deps.google;
   const redirectUri = `${config.webOrigin}/api/auth/google/callback`;
   // 로그인 왕복 남용 방지: IP별 분당 20회
   const limiter = deps.limiters ?? memoryLimiters;
   const authLimit = limiter('auth', 20, 60_000);
   // 마스터 비밀번호 대입 방지: IP별 분당 5회, 전체 시간당 60회
   const adminLimit = limiter('admin', 5, 60_000);
-  const adminGlobalLimit = limiter('admin-all', 60, 3600_000);
+  const adminGlobalLimit = limiter('admin-all', 60, 3_600_000);
   // 실행·채점: 사용자별 분당 30회
   const runLimit = limiter('run', 30, 60_000);
 

@@ -106,7 +106,11 @@ const catalogChanged = () => {
   freshUntil = Date.now() + FRESH_MS;
   indexMemo = null;
 };
-const changesCatalog = <T>(p: Promise<T>) => p.then((v) => (catalogChanged(), v));
+const changesCatalog = <T>(p: Promise<T>) =>
+  p.then((v) => {
+    catalogChanged();
+    return v;
+  });
 
 /** 목록·폴더·컬렉션 쿼리가 한꺼번에 불러도 한 번만 받는다 */
 function catalogIndex(): Promise<CatalogIndex> {
@@ -122,7 +126,8 @@ function catalogIndex(): Promise<CatalogIndex> {
 async function catalogProblem(id: string): Promise<CatalogProblem> {
   const version = (await catalogIndex()).problems.find((p) => p.id === id)?.version;
   try {
-    return await request(CatalogProblem, `/api/catalog/problems/${enc(id)}${version ? `?v=${version}` : ''}`);
+    const query = version ? `?v=${version}` : '';
+    return await request(CatalogProblem, `/api/catalog/problems/${enc(id)}${query}`);
   } catch (e) {
     if (!(e instanceof ApiError && e.code === 'stale_version')) throw e;
     catalogChanged();

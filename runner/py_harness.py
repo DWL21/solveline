@@ -8,6 +8,8 @@ import sys
 import time
 import traceback
 
+SOLUTION_FILE = "solution.py"
+
 
 def to_json(v):
     if isinstance(v, (tuple, list, set, frozenset)):
@@ -24,7 +26,7 @@ def main():
     work = sys.argv[1]
     os.chdir(work)
     sys.path.insert(0, work)
-    sys.argv = ["solution.py"]
+    sys.argv = [SOLUTION_FILE]
     with open("case.json", encoding="utf-8") as f:
         args = json.load(f)["args"]
 
@@ -34,9 +36,9 @@ def main():
             json.dump(obj, f, ensure_ascii=False)
 
     try:
-        ns = {"__name__": "solution", "__file__": os.path.join(work, "solution.py")}
-        with open("solution.py", encoding="utf-8") as f:
-            code = compile(f.read(), "solution.py", "exec")
+        ns = {"__name__": "solution", "__file__": os.path.join(work, SOLUTION_FILE)}
+        with open(SOLUTION_FILE, encoding="utf-8") as f:
+            code = compile(f.read(), SOLUTION_FILE, "exec")
         exec(code, ns)
         fn = ns.get("solution")
         if not callable(fn):
