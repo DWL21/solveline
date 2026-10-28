@@ -69,7 +69,7 @@ function Shell() {
   const [creating, setCreating] = useState(false);
   useEffect(prefetchWorkspace, []);
   // 홈에서 마지막으로 보던 범위. 문제를 닫으면 그 범위로 돌아간다.
-  const [lastScope, setLastScope] = useState<Scope>(route.kind === 'home' ? route.scope : { kind: 'all' });
+  const [lastScope, setLastScope] = useState<Scope>(route.kind === 'home' ? route.scope : { kind: 'collections' });
   useEffect(() => {
     if (route.kind === 'home') setLastScope(route.scope);
   }, [route]);
@@ -103,7 +103,7 @@ function Shell() {
           onClick={(e) => {
             e.preventDefault();
             setHomeKey((k) => k + 1);
-            go({ kind: 'home', scope: { kind: 'all' } });
+            go({ kind: 'home', scope: { kind: 'collections' } });
           }}
         >
           <img src="/icon.svg" alt="" className="size-6" />

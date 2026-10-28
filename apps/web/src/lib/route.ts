@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 
 /**
  * 해시 라우터.
- *   #/            전체 문제
+ *   #/            컬렉션 선택
+ *   #/all         전체 문제
  *   #/bookmarks   북마크한 문제
  *   #/f/<id>      폴더 (id가 'none'이면 폴더 없음)
  *   #/c/<id>      컬렉션
@@ -15,9 +16,10 @@ export type Route =
   | { kind: 'submissions' }
   | { kind: 'problem'; id: string };
 
-export type Scope = { kind: 'all' } | { kind: 'bookmarks' } | { kind: 'folder'; id: string | null } | { kind: 'collection'; id: string } | { kind: 'group'; path: string };
+export type Scope = { kind: 'collections' } | { kind: 'all' } | { kind: 'bookmarks' } | { kind: 'folder'; id: string | null } | { kind: 'collection'; id: string } | { kind: 'group'; path: string };
 
 export function parseRoute(hash: string): Route {
+  if (hash === '#/all') return { kind: 'home', scope: { kind: 'all' } };
   if (hash === '#/bookmarks') return { kind: 'home', scope: { kind: 'bookmarks' } };
   if (hash === '#/submissions') return { kind: 'submissions' };
   const g = /^#\/cg\/(.+)$/.exec(hash);
@@ -25,11 +27,11 @@ export function parseRoute(hash: string): Route {
     try {
       return { kind: 'home', scope: { kind: 'group', path: decodeURIComponent(g[1]!) } };
     } catch {
-      return { kind: 'home', scope: { kind: 'all' } };
+      return { kind: 'home', scope: { kind: 'collections' } };
     }
   }
   const m = /^#\/([pfc])\/([\w-]+)$/.exec(hash);
-  if (!m) return { kind: 'home', scope: { kind: 'all' } };
+  if (!m) return { kind: 'home', scope: { kind: 'collections' } };
   const [, k, id] = m as unknown as [string, 'p' | 'f' | 'c', string];
   if (k === 'p') return { kind: 'problem', id };
   if (k === 'f') return { kind: 'home', scope: { kind: 'folder', id: id === 'none' ? null : id } };
@@ -40,6 +42,7 @@ export function hrefOf(r: Route): string {
   if (r.kind === 'submissions') return '#/submissions';
   if (r.kind === 'problem') return `#/p/${r.id}`;
   const s = r.scope;
+  if (s.kind === 'all') return '#/all';
   if (s.kind === 'bookmarks') return '#/bookmarks';
   if (s.kind === 'folder') return `#/f/${s.id ?? 'none'}`;
   if (s.kind === 'collection') return `#/c/${s.id}`;

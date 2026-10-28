@@ -24,6 +24,8 @@ test.describe('문제 풀기', { tag: '@R3' }, () => {
     await evidence(page, '제출하면 히든 테스트로 채점하고 정답 대화상자를 보여 준다');
     await dialog.getByRole('button', { name: /닫기/ }).click();
     await page.getByTitle('문제 선택 화면으로').click();
+    await expect(home.heading).toContainText('컬렉션');
+    await home.showAll();
     await home.search.fill(p.title);
     await expect(home.row(p.title).getByLabel('맞춤')).toBeVisible();
     await evidence(page, '문제 목록에 맞춤(✓) 표시가 남는다');
