@@ -469,6 +469,20 @@ export async function judgeHeaders(secret: string, method: string, path: string,
   return { [JUDGE_TIMESTAMP_HEADER]: ts, [JUDGE_SIGNATURE_HEADER]: await judgeSignature(secret, ts, method, path, body) };
 }
 
+/**
+ * 본문을 서명에 넣지 않는 요청(큰 히든 테스트셋). Worker는 CPU 한도(10ms) 때문에 수 MB 본문을 해시하지 않고 흘려보낸다.
+ * 본문은 TLS가 지키고, 서명은 시각·메서드·경로를 묶는다. judge는 PUT /testsets에서만 받는다.
+ */
+export const JUDGE_PAYLOAD_HEADER = 'x-judge-payload';
+const UNSIGNED_BODY = 'UNSIGNED-BODY';
+export async function judgeStreamHeaders(secret: string, method: string, path: string, now = Date.now()): Promise<Record<string, string>> {
+  return { ...(await judgeHeaders(secret, method, path, UNSIGNED_BODY, now)), [JUDGE_PAYLOAD_HEADER]: 'unsigned' };
+}
+/** 본문 없이 서명한 요청인지 검사한다 */
+export function verifyJudgeUnsigned(secret: string, header: (name: string) => string | undefined, method: string, path: string, now = Date.now()): Promise<boolean> {
+  return verifyJudge(secret, header, method, path, UNSIGNED_BODY, now);
+}
+
 /** 서명·시각 검사. 길이가 같은 문자열을 끝까지 비교한다(시간 차로 서명을 알아내지 못하게). */
 export async function verifyJudge(secret: string, header: (name: string) => string | undefined, method: string, path: string, body: string, now = Date.now()): Promise<boolean> {
   const ts = header(JUDGE_TIMESTAMP_HEADER);

@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { Hono, type Context } from 'hono';
-import { HiddenCases, JudgeJob, judgeHeaders, verifyJudge, type JudgeStatus, type Runtime, type TestCase } from '@solveline/shared';
+import { HiddenCases, JudgeJob, JUDGE_PAYLOAD_HEADER, judgeHeaders, verifyJudge, verifyJudgeUnsigned, type JudgeStatus, type Runtime, type TestCase } from '@solveline/shared';
 import { Dispatcher, isTerminal, JobStore } from './jobs.ts';
 import type { TestsetMirror } from './mirror.ts';
 import { CaseInputError, validateCases, type RunnerClient } from './runner.ts';
@@ -47,9 +47,16 @@ export function createJudge(deps: JudgeDeps) {
   app.get('/health', (c) => c.json({ data: { status: 'up' } }));
 
   app.use('*', async (c, next) => {
+    const url = new URL(c.req.url);
+    const path = url.pathname + url.search;
+    const header = (n: string) => c.req.header(n);
+    // 큰 히든 테스트셋은 본문 없이 서명해 보낸다(Worker가 해시하지 않도록). 그 경로에서만 받는다.
+    if (c.req.header(JUDGE_PAYLOAD_HEADER) === 'unsigned') {
+      if (c.req.method === 'PUT' && url.pathname === '/testsets' && (await verifyJudgeUnsigned(deps.secret, header, c.req.method, path))) return next();
+      return fail(c, 401, 'bad_signature', '서명이 올바르지 않습니다.');
+    }
     const body = c.req.method === 'GET' ? '' : await c.req.raw.clone().text();
-    const path = new URL(c.req.url).pathname + new URL(c.req.url).search;
-    if (!(await verifyJudge(deps.secret, (n) => c.req.header(n), c.req.method, path, body))) return fail(c, 401, 'bad_signature', '서명이 올바르지 않습니다.');
+    if (!(await verifyJudge(deps.secret, header, c.req.method, path, body))) return fail(c, 401, 'bad_signature', '서명이 올바르지 않습니다.');
     return next();
   });
 
@@ -107,11 +114,13 @@ export function createJudge(deps: JudgeDeps) {
     const parsed = HiddenCases.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return fail(c, 400, 'invalid_request', '히든 케이스 형식이 올바르지 않습니다.');
     const cases = parsed.data.cases.map((x) => ({ ...x, hidden: true }));
-    if (!cases.length) return c.json({ data: null });
-    const ref = deps.testsets.put(cases);
+    const ref = cases.length ? deps.testsets.put(cases) : null;
     // R2에 올린 뒤 답한다(내구성). 실패하면 API가 다시 시도할 수 있도록 오류로 돌려준다.
-    if (deps.mirror) await deps.mirror.upload(ref.hash);
-    return c.json({ data: ref });
+    if (ref && deps.mirror) await deps.mirror.upload(ref.hash);
+    // 참조는 헤더로도 준다. ?echo=1이면 본문은 저장한 케이스({data:{cases}})라 Worker가 해석하지 않고 그대로 넘길 수 있다.
+    c.header('x-testset-hash', ref?.hash ?? 'none');
+    c.header('x-testset-count', String(ref?.count ?? 0));
+    return c.req.query('echo') ? c.json({ data: { cases } }) : c.json({ data: ref });
   });
 
   app.get('/testsets/:hash', async (c) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { judgeHeaders, type JudgeJob, type JudgeStatus, type TestCase } from '@solveline/shared';
+import { judgeHeaders, judgeStreamHeaders, type JudgeJob, type JudgeStatus, type TestCase } from '@solveline/shared';
 import { createJudge } from '../src/app.ts';
 import { JobStore, openJobsDb } from '../src/jobs.ts';
 import { TestsetMirror, testsetKey } from '../src/mirror.ts';
@@ -64,6 +64,22 @@ describe('judge', () => {
     const signed = await judgeHeaders(SECRET, 'POST', '/jobs', JSON.stringify(job('a')));
     expect((await judge.app.request('/jobs', { method: 'POST', body: JSON.stringify(job('b')), headers: { 'content-type': 'application/json', ...signed } })).status).toBe(401);
     expect((await call('GET', '/runtime')).body.data.runner).toBe('up');
+  });
+
+  it('본문 없이 서명한 요청은 히든 테스트셋 저장(PUT /testsets)에서만 받고, 참조는 헤더로·케이스는 본문으로 돌려준다', async () => {
+    const { judge } = setup();
+    const body = JSON.stringify({ cases: [{ id: 'h', args: ['1'], stdin: '', expected: '1' }] });
+    const put = await judge.app.request('/testsets?echo=1', { method: 'PUT', body, headers: { 'content-type': 'application/json', ...(await judgeStreamHeaders(SECRET, 'PUT', '/testsets?echo=1')) } });
+    expect(put.status).toBe(200);
+    expect(put.headers.get('x-testset-hash')).toMatch(/^[0-9a-f]{64}$/);
+    expect(put.headers.get('x-testset-count')).toBe('1');
+    expect(((await put.json()) as { data: { cases: { hidden: boolean }[] } }).data.cases[0]!.hidden).toBe(true);
+    // 다른 경로·다른 비밀에서는 받지 않는다
+    const job = JSON.stringify({ id: 'x' });
+    expect((await judge.app.request('/jobs', { method: 'POST', body: job, headers: { 'content-type': 'application/json', ...(await judgeStreamHeaders(SECRET, 'POST', '/jobs')) } })).status).toBe(401);
+    expect((await judge.app.request('/testsets?echo=1', { method: 'PUT', body, headers: { 'content-type': 'application/json', ...(await judgeStreamHeaders('x'.repeat(40), 'PUT', '/testsets?echo=1')) } })).status).toBe(401);
+    const empty = await judge.app.request('/testsets?echo=1', { method: 'PUT', body: '{"cases":[]}', headers: { 'content-type': 'application/json', ...(await judgeStreamHeaders(SECRET, 'PUT', '/testsets?echo=1')) } });
+    expect(empty.headers.get('x-testset-hash')).toBe('none');
   });
 
   it('작업을 실행하고 결과를 API에 보낸다. 실패하면 남겨 두었다가 다시 보낸다', async () => {
