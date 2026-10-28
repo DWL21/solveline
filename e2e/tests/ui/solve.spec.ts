@@ -2,7 +2,7 @@ import { test, expect } from '../../src/fixtures.ts';
 import { sumSolutions } from '../../src/builders.ts';
 
 /** 핵심 사용자 여정: 문제를 열고, 코드를 쓰고, 실행하고, 제출해 맞힌다 */
-test.describe('문제 풀기', () => {
+test.describe('문제 풀기', { tag: '@R3' }, () => {
   test.beforeEach(async ({ pageSignIn }) => {
     await pageSignIn();
   });
@@ -44,7 +44,7 @@ test.describe('문제 풀기', () => {
     await expect(page.getByText('컴파일 에러')).toBeVisible();
   });
 
-  test('작성한 코드는 서버에 자동 저장되어 새로고침해도 남는다', async ({ page, pageApi, workspace, seedProblem }) => {
+  test('작성한 코드는 서버에 자동 저장되어 새로고침해도 남는다', { tag: '@R7' }, async ({ page, pageApi, workspace, seedProblem }) => {
     const p = await seedProblem({ language: 'python' });
     await workspace.open(p.id);
     const marker = `# 자동 저장 ${Date.now()}`;

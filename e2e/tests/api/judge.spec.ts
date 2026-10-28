@@ -1,4 +1,5 @@
 import type { Language, SubmissionStatus } from '@solveline/shared';
+import type { Api } from '../../src/api.ts';
 import { test, expect } from '../../src/fixtures.ts';
 import { aCase, sumSolutions } from '../../src/builders.ts';
 
@@ -19,11 +20,11 @@ function expectValidTransitions(seen: SubmissionStatus[]) {
 }
 
 for (const language of ['java', 'python'] as Language[]) {
-  test.describe(`채점: ${language}`, () => {
+  test.describe(`채점: ${language}`, { tag: '@R3' }, () => {
     test.beforeEach(async ({ signIn }) => {
       await signIn();
     });
-    const run = (api: import('../../src/api.ts').Api, code: string, timeLimit = false) =>
+    const run = (api: Api, code: string, timeLimit = false) =>
       api.judge({ problemId: null, kind: 'run', language, mode: 'function', code, cases: [aCase(['[1, 2]'], '3'), aCase(['[5, 5, 5]'], '15')] }, timeLimit ? 90_000 : 60_000);
 
     test('정답 → 모든 케이스 통과, 상태 전이가 올바르다', async ({ api }) => {
@@ -82,7 +83,7 @@ for (const language of ['java', 'python'] as Language[]) {
   });
 }
 
-test.describe('제출 채점(히든 테스트셋)', () => {
+test.describe('제출 채점(히든 테스트셋)', { tag: '@R3' }, () => {
   test('히든 케이스로 점수를 매기고, 내 마지막 제출로 기록한다', async ({ api, signIn, seedProblem, editorApi }) => {
     const p = await seedProblem({ language: 'python' });
     await editorApi.setHidden(p.id, [aCase(['[100, 200]'], '300', { hidden: true }), aCase(['[7]'], '7', { hidden: true })]);

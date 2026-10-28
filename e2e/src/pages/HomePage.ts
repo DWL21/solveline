@@ -5,13 +5,11 @@ export class HomePage {
   readonly heading: Locator;
   readonly search: Locator;
   readonly collectionCards: Locator;
-  readonly problemRows: Locator;
 
   constructor(readonly page: Page) {
     this.heading = page.getByRole('heading', { level: 1 });
     this.search = page.getByRole('textbox', { name: '문제 검색' });
     this.collectionCards = page.getByRole('region', { name: '컬렉션' }).getByRole('listitem');
-    this.problemRows = page.getByRole('list').filter({ has: page.getByRole('button') }).last().getByRole('listitem');
   }
 
   async open() {

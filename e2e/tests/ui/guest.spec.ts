@@ -1,7 +1,7 @@
 import { test, expect } from '../../src/fixtures.ts';
 
 /** 비회원: 둘러보기는 되고, 코드 작성·실행은 로그인 뒤 */
-test.describe('비회원 둘러보기 @cross', () => {
+test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
   test('첫 화면의 컬렉션 카드에서 문제를 열면 읽기 전용이고, 로그인하기가 보인다', async ({ page, home, seedProblem, editorApi }) => {
     const p = await seedProblem();
     const col = await editorApi.createCollection({ name: `E2E 둘러보기/${p.id.slice(0, 6)}`, description: '첫 줄 설명\n둘째 줄은 카드에 안 보인다' });

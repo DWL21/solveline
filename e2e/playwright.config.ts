@@ -9,6 +9,9 @@ import { env } from './src/env.ts';
  *   mobile-iphone / mobile-pixel / tablet-ipad   반응형·터치 시나리오(@mobile, @tablet)
  *   smoke            운영 사이트 읽기 전용 확인(정기 실행)
  *
+ * 요구사항 태그(@R1…@R11)로 기능별 실행: --grep @R3. 추적표는 docs/quality/test-cases.md
+ * 시연 모드(E2E_DEMO=1)는 통과한 테스트도 영상·trace·스크린샷을 남긴다.
+ *
  * 비결정적 실패를 숨기지 않도록 CI에서만 재시도 2회. 재시도로 통과한 테스트는 "불안정(flaky)"으로 집계해 리포트에 드러낸다.
  */
 export default defineConfig({
@@ -31,9 +34,9 @@ export default defineConfig({
     baseURL: env.baseURL,
     locale: 'ko-KR',
     timezoneId: 'Asia/Seoul',
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    trace: env.demo ? 'on' : 'retain-on-failure',
+    screenshot: env.demo ? 'on' : 'only-on-failure',
+    video: env.demo ? 'on' : 'retain-on-failure',
   },
   projects: [
     { name: 'api', testDir: './tests/api' },

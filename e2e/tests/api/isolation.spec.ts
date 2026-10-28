@@ -4,7 +4,7 @@ import { Api } from '../../src/api.ts';
 import { aCase, aProblem, sumSolutions, uid } from '../../src/builders.ts';
 
 /** 사용자별 데이터 분리와 공용 데이터의 규칙(폴더는 개인, 컬렉션은 공용·경로형) */
-test.describe('데이터 분리', () => {
+test.describe('데이터 분리', { tag: '@R4' }, () => {
   test('작성 코드·메모·폴더는 사용자마다 따로다', async ({ playwright, baseURL, seedProblem }) => {
     const p = await seedProblem();
     const [a, b] = await Promise.all([0, 1].map(async () => new Api(await playwright.request.newContext({ baseURL }))));
@@ -24,7 +24,7 @@ test.describe('데이터 분리', () => {
     await Promise.all([a!.request.dispose(), b!.request.dispose()]);
   });
 
-  test('컬렉션은 공용이고 이름의 /는 계층으로 정리된다', async ({ editorApi, api, seedProblem }) => {
+  test('컬렉션은 공용이고 이름의 /는 계층으로 정리된다', { tag: '@R5' }, async ({ editorApi, api, seedProblem }) => {
     const p = await seedProblem();
     const name = `E2E ${uid()}`;
     const col = await editorApi.createCollection({ name: ` ${name} /  1회 `, description: '' });
@@ -35,7 +35,7 @@ test.describe('데이터 분리', () => {
   });
 });
 
-test('북마크는 사용자별로 저장되고 비회원과 다른 사용자에게 보이지 않는다', async ({ api, signIn, editorApi, seedProblem }) => {
+test('북마크는 사용자별로 저장되고 비회원과 다른 사용자에게 보이지 않는다', { tag: '@R4' }, async ({ api, signIn, editorApi, seedProblem }) => {
   const p = await seedProblem();
   const bookmark = (value: boolean) => editorApi.bookmark(p.id, value);
   await bookmark(true);
@@ -48,7 +48,7 @@ test('북마크는 사용자별로 저장되고 비회원과 다른 사용자에
 });
 
 for (const access of ['상태 조회', '코드 상세 조회', '실행 취소'] as const) {
-  test(`다른 사용자(편집 권한 포함)는 남의 제출 ${access}를 할 수 없다`, async ({ api, signIn, editorApi, seedProblem }) => {
+  test(`다른 사용자(편집 권한 포함)는 남의 제출 ${access}를 할 수 없다`, { tag: ['@R4', '@R2'] }, async ({ api, signIn, editorApi, seedProblem }) => {
     const p = await seedProblem();
     await signIn();
     const code = sumSolutions.python.correct;

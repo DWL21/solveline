@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      demo:
+        description: "시연 모드: 통과한 테스트도 영상·trace·스크린샷을 e2e 아티팩트에 남긴다"
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -116,6 +121,7 @@ jobs:
         run: pnpm --filter @solveline/e2e e2e:ci
         env:
           CI: "true"
+          E2E_DEMO: ${{ inputs.demo && '1' || '0' }}
       - name: 실패 분석용 서버 로그
         if: failure()
         run: |

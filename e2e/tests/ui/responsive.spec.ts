@@ -2,7 +2,7 @@ import { test, expect } from '../../src/fixtures.ts';
 import { sumSolutions } from '../../src/builders.ts';
 
 /** 휴대폰(@mobile)·태블릿(@tablet) 배치. 프로젝트(기기)별로 같은 시나리오가 돈다. */
-test.describe('휴대폰 문제 화면 @mobile', () => {
+test.describe('휴대폰 문제 화면 @mobile', { tag: '@R8' }, () => {
   test('코드 탭은 상단 메뉴를 숨기고, 실행하면 결과 탭으로 넘어간다', async ({ page, pageSignIn, seedProblem, workspace }) => {
     const p = await seedProblem({ language: 'python' });
     await pageSignIn();
@@ -33,7 +33,7 @@ test.describe('휴대폰 문제 화면 @mobile', () => {
   });
 });
 
-test.describe('태블릿 @tablet', () => {
+test.describe('태블릿 @tablet', { tag: '@R8' }, () => {
   test('문제와 에디터를 좌우로 나눠 보여 준다(탭 없음)', async ({ page, seedProblem, workspace }) => {
     const p = await seedProblem();
     await workspace.open(p.id);
