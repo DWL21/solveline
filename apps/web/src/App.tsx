@@ -95,15 +95,11 @@ function Shell() {
   }
 
   const ide = route.kind === 'problem';
-  // 휴대폰 브라우저 상단 막대 색을 화면 톤(밝은 목록 / 어두운 풀이 화면)에 맞춘다
-  useEffect(() => {
-    document.querySelector('meta[name=theme-color]')?.setAttribute('content', ide ? '#0f1922' : '#ffffff');
-  }, [ide]);
   const navLink = (active: boolean) =>
     `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
 
   return (
-    <div className={`flex h-full flex-col bg-ink ${ide ? 'theme-ide' : ''}`}>
+    <div className="flex h-full flex-col bg-ink">
       <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
         <a
           href="#/"
@@ -212,7 +208,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
         <span className="hidden max-w-44 truncate text-[13px] font-semibold text-dim sm:inline">{label}</span>
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-1.5 w-60 rounded-lg border border-line bg-panel p-1.5 shadow-lg shadow-black/10">
+        <div className="absolute right-0 z-40 mt-1.5 w-60 rounded-lg border border-line bg-panel p-1.5 shadow-2xl">
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
             <p className="truncate text-[13px] font-semibold">{me.name || me.email}</p>
             <p className="truncate text-[12px] text-dim">{temporary ? '임시 계정' : me.email}</p>
@@ -251,9 +247,9 @@ function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose
     },
   });
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="새 문제">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="새 문제">
       <form
-        className="w-full max-w-md rounded-xl bg-panel p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-2xl"
         onSubmit={(e) => {
           e.preventDefault();
           create.mutate();

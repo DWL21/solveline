@@ -56,7 +56,7 @@ export function SignupScreen() {
       </header>
       <div className="flex flex-1 items-center justify-center px-4 pt-6 pb-16">
         <main className="w-full max-w-[440px]">
-          <div className="rounded-xl border border-line bg-panel px-6 py-8 shadow-sm sm:px-8">
+          <div className="rounded-xl border border-line bg-panel px-6 py-8 shadow-2xl shadow-black/30 sm:px-8">
             <h1 className="text-[22px] font-bold tracking-tight">회원가입</h1>
             {!pending.isError && <p className="mt-1.5 text-[14px] text-dim">아래 계정으로 가입해요. 약관을 확인하고 동의해 주세요.</p>}
             {pending.isError ? (

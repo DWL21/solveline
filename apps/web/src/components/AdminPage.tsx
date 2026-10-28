@@ -40,7 +40,7 @@ function AdminLogin() {
           <img src="/icon.svg" alt="" className="size-8" />
           <span className="text-[20px] font-extrabold tracking-tight">Solveline</span>
         </a>
-        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-sm">
+        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-2xl shadow-black/30">
           <h1 className="text-[20px] font-bold">관리자 모드</h1>
           <input type="text" name="username" autoComplete="username" value="solveline-admin" readOnly hidden />
           <label className="mt-5 flex flex-col gap-1.5">

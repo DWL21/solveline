@@ -59,18 +59,18 @@ export function LoginScreen() {
         </a>
       </header>
       <div className="flex flex-1 items-center justify-center px-4 pt-6 pb-16">
-        <main className="w-full max-w-[400px] rounded-xl border border-line bg-panel px-6 py-8 shadow-sm sm:px-8">
+        <main className="w-full max-w-[400px] rounded-xl border border-line bg-panel px-6 py-8 shadow-2xl shadow-black/30 sm:px-8">
           <h1 className="text-[22px] font-bold tracking-tight">로그인</h1>
           <p className="mt-1.5 text-[14px] text-dim">로그인하면 작성한 코드와 풀이 기록이 저장돼요.</p>
           {error && (
-            <p role="alert" className="mt-5 rounded-md bg-bad/8 px-3 py-2.5 text-[13px] font-semibold text-bad">
+            <p role="alert" className="mt-5 rounded-md bg-bad/10 px-3 py-2.5 text-[13px] font-semibold text-bad">
               {AUTH_ERRORS[error] ?? '로그인하지 못했어요'}
             </p>
           )}
           <button
             type="button"
             onClick={startGoogleLogin}
-            className="mt-6 flex min-h-12 w-full items-center justify-center gap-2.5 rounded-md border border-line-strong bg-white text-[15px] font-semibold text-[#1f1f1f] hover:bg-[#f6f8fa]"
+            className="mt-6 flex min-h-12 w-full items-center justify-center gap-2.5 rounded-md bg-white text-[15px] font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2]"
           >
             <GoogleMark /> Google 계정으로 계속하기
           </button>

@@ -345,10 +345,10 @@ function Sidebar({
         onClick={() => onScope(s.scope)}
         aria-current={current === s.key ? 'page' : undefined}
         style={s.depth ? { paddingLeft: `${12 + s.depth * 14}px` } : undefined}
-        className={`flex w-full items-center gap-2 rounded-md px-3 py-[7px] text-left text-[14px] ${current === s.key ? 'bg-accent/8 font-semibold text-accent-text' : 'text-dim hover:bg-raised hover:text-text'}`}
+        className={`flex w-full items-center gap-2 rounded-md px-3 py-[7px] text-left text-[14px] ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised hover:text-text'}`}
       >
         <span className="min-w-0 flex-1 truncate">{s.label}</span>
-        <span className={`text-[12px] tabular-nums ${current === s.key ? 'text-accent-text' : 'text-faint'}`}>{s.count}</span>
+        <span className={`text-[12px] tabular-nums text-faint`}>{s.count}</span>
       </button>
     </li>
   );
@@ -576,7 +576,7 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
     <button
       type="button"
       onClick={onOpen}
-      className={`group flex w-full flex-col rounded-lg border border-line bg-panel text-left transition hover:border-line-strong hover:shadow-md hover:shadow-black/5 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
+      className={`group flex w-full flex-col rounded-lg border border-line bg-panel text-left transition hover:border-line-strong hover:bg-raised/40 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
     >
       <span className="flex items-start gap-3">
         <span className="min-w-0 flex-1">
