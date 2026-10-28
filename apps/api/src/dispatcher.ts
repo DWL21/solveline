@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Submission, SubmissionDetail, SubmissionHistory, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
+import { lastSubmissionOf, Submission, SubmissionDetail, SubmissionHistory, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
 import type { Db, ProblemStore } from './db.ts';
 import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
@@ -189,6 +189,8 @@ export class SubmissionStore {
 export class Dispatcher {
   private readonly active = new Map<RunnerClient, number>();
   private readonly waiters = new Map<string, ((s: Submission) => void)[]>();
+  /** 상태 변화(대기 순번·실행 시작·끝남)를 기다리는 조회 요청 */
+  private readonly watchers = new Set<() => void>();
   /** 실행 중인 제출 → 맡은 runner, 중지 요청을 받은 제출 */
   private readonly running = new Map<string, RunnerClient>();
   private readonly cancelling = new Set<string>();
@@ -216,12 +218,39 @@ export class Dispatcher {
       if (!runner) return;
       const job = this.store.claim();
       if (!job) return;
+      // 실행이 시작되면 그 제출과 뒤에 기다리는 제출의 대기 순번이 바뀐다
+      this.changed();
       this.active.set(runner, (this.active.get(runner) ?? 0) + 1);
       void this.execute(job, runner).finally(() => {
         this.active.set(runner, (this.active.get(runner) ?? 1) - 1);
         this.kick();
       });
     }
+  }
+
+  /**
+   * 긴 조회(long polling): 끝났으면 바로, 아니면 상태가 바뀌거나 ms가 지날 때 현재 상태를 돌려준다.
+   * 브라우저가 짧은 간격으로 계속 묻지 않게 해 요청 수를 줄인다. 없는 제출이면 null.
+   */
+  async poll(id: string, ms: number): Promise<Submission | null> {
+    const cur = this.store.get(id);
+    if (!cur || (cur.status !== 'queued' && cur.status !== 'running') || ms <= 0) return cur;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.watchers.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      this.watchers.add(done);
+    });
+    return this.store.get(id);
+  }
+
+  private changed() {
+    const all = [...this.watchers];
+    this.watchers.clear();
+    for (const w of all) w();
   }
 
   /** 제출이 끝날 때까지 기다린다(동기 API·테스트용) */
@@ -252,6 +281,7 @@ export class Dispatcher {
     const done = this.store.get(id);
     if (done) for (const w of this.waiters.get(id) ?? []) w(done);
     this.waiters.delete(id);
+    this.changed();
   }
 
   private freeRunner(): RunnerClient | null {
@@ -269,11 +299,10 @@ export class Dispatcher {
   }
 
   /** 제출 점수를 계산하고 문제의 마지막 제출로 기록한다 */
-  private recordScore(job: ClaimedJob, result: RunResult, total: number): number {
-    const passed = result.compile.ok ? result.results.filter((r) => r.status === 'pass').length : 0;
-    const score = total ? Math.round((passed / total) * 100) : 0;
-    if (job.problem_id && job.user_id) this.problems.setLastSubmission(job.problem_id, job.user_id, { score, passed, total, language: job.language, at: new Date().toISOString() });
-    return score;
+  private async recordScore(job: ClaimedJob, result: RunResult, total: number): Promise<number> {
+    const last = lastSubmissionOf(result, total, job.language, new Date().toISOString());
+    if (job.problem_id && job.user_id) await this.problems.setLastSubmission(job.problem_id, job.user_id, last);
+    return last.score;
   }
 
   private fail(id: string, e: unknown) {
@@ -294,7 +323,7 @@ export class Dispatcher {
         this.store.finish(job.id, { cancelled: job.kind === 'run' ? result : null });
         return;
       }
-      const score = job.kind === 'submit' ? this.recordScore(job, result, ids.length) : null;
+      const score = job.kind === 'submit' ? await this.recordScore(job, result, ids.length) : null;
       this.store.finish(job.id, { result, score });
     } catch (e) {
       this.fail(job.id, e);

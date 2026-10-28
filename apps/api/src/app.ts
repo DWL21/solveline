@@ -9,6 +9,9 @@ import { z } from 'zod';
 const TestSessionRequest = z.object({ email: z.string().trim().toLowerCase().max(254).pipe(z.email()), name: z.string().max(100).optional(), editor: z.boolean().optional() });
 import {
   Bookmark,
+  CatalogIndex,
+  MyProblemState,
+  MyProblemSummary,
   Collection,
   CollectionInput,
   CollectionItemsInput,
@@ -52,6 +55,9 @@ import { SessionStore } from './auth/sessions.ts';
 import { CaseInputError, validateCases, type RunnerClient } from './runner.ts';
 import { Dispatcher, SubmissionStore } from './dispatcher.ts';
 import { TestsetStore } from './testsets.ts';
+import { buildCatalog, CatalogPublisher } from './catalog.ts';
+import { sqliteSql, type Sql } from './sql.ts';
+import type { ObjectStore } from './r2.ts';
 import { log } from './redact.ts';
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 502 | 503;
@@ -61,9 +67,13 @@ type Runner = Pick<RunnerClient, 'run' | 'runtime' | 'cancel'>;
 export type AppDeps = {
   config: Config;
   db: Db;
+  /** 저장소가 쓰는 SQL. 없으면 db(better-sqlite3)를 쓴다. Worker에서는 D1 */
+  sql?: Sql;
   /** runner 여러 대. 디스패처가 빈 슬롯에 나눠 보낸다. */
   runners: Runner[];
   testsets?: TestsetStore;
+  /** 공용 문제 데이터·테스트셋을 게시할 R2. 없으면 게시하지 않는다(데이터는 SQLite·로컬 파일에만) */
+  objectStore?: ObjectStore | null;
   /** 테스트에서 Google 대신 끼워 넣는다. 없으면 config.google로 만든다. */
   google?: GoogleClient | null;
   now?: () => number;
@@ -121,18 +131,23 @@ const clientIp = (c: Context) =>
 
 export function createApp(deps: AppDeps) {
   const { config, db, runners } = deps;
+  const sql = deps.sql ?? sqliteSql(db);
   const testsets = deps.testsets ?? new TestsetStore(':memory:');
   const now = deps.now ?? Date.now;
-  const sessions = new SessionStore(db, config.sessionTtlMs);
+  const sessions = new SessionStore(sql, config.sessionTtlMs);
   const temporaryTtlMs = Math.min(config.sessionTtlMs, 24 * 3_600_000);
-  const temporarySessions = new SessionStore(db, temporaryTtlMs);
-  const problems = new ProblemStore(db, testsets);
+  const temporarySessions = new SessionStore(sql, temporaryTtlMs);
+  const problems = new ProblemStore(sql, testsets);
   const submissions = new SubmissionStore(db);
   const dispatcher = new Dispatcher(submissions, problems, testsets, runners as RunnerClient[], config.runnerSlots);
-  const folders = new FolderStore(db);
-  const collections = new CollectionStore(db);
-  const users = new UserStore(db);
-  const signupSettings = new SignupSettingsStore(db);
+  const folders = new FolderStore(sql);
+  const collections = new CollectionStore(sql);
+  const users = new UserStore(sql);
+  const signupSettings = new SignupSettingsStore(sql);
+  const catalogSource = async () => ({ problems: await problems.catalogProblems(), folders: await folders.list(null), collections: await collections.list() });
+  const catalog = deps.objectStore
+    ? new CatalogPublisher(deps.objectStore, catalogSource, testsets, async () => new Set([...(await problems.testsetHashes()), ...submissions.activeTestsets()]))
+    : null;
   const configuredGoogle = () => (config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null);
   const google = deps.google === undefined ? configuredGoogle() : deps.google;
   const redirectUri = `${config.webOrigin}/api/auth/google/callback`;
@@ -155,13 +170,31 @@ export function createApp(deps: AppDeps) {
   });
   app.notFound((c) => fail(c, 404, 'not_found', '없는 경로입니다.'));
 
+  // 공용 문제 데이터를 바꾸는 요청(편집 권한·관리자 모드)이 성공하면 메모리의 목록을 버리고, R2가 있으면 게시한 뒤 응답한다.
+  // 그래야 편집한 사람이 바로 새로 읽을 때(?fresh=1) 새 내용을 받는다.
+  const CATALOG_WRITE = /^\/api\/(problems|collections|admin\/collections|admin\/problems)(\/|$)/;
+  let built: { at: number; cat: Promise<ReturnType<typeof buildCatalog>> } | null = null;
+  app.use('/api/*', async (c, next) => {
+    await next();
+    if (c.req.method === 'GET' || c.res.status >= 400 || !CATALOG_WRITE.test(c.req.path)) return;
+    if (!c.req.path.startsWith('/api/admin/') && !c.get('editor')) return;
+    built = null;
+    if (!catalog) return;
+    try {
+      await catalog.sync();
+    } catch (e) {
+      // 게시에 실패해도 SQLite에는 저장됐다. 다음 변경이나 재시작 때 다시 맞춘다.
+      log.error('[catalog] R2 게시 실패', e);
+    }
+  });
+
   // ─── 공개 ───
-  app.get('/api/health', (c) => c.json({ data: { status: 'up' } }));
+  app.get('/api/health', async (c) => c.json({ data: { status: 'up' } }));
 
   const readSession = async (c: Context) => {
     const id = (await getSignedCookie(c, config.sessionSecret, SESSION_COOKIE)) || (await getSignedCookie(c, config.sessionSecret, LEGACY_SESSION_COOKIE));
     if (!id) return null;
-    const s = sessions.validate(id, now());
+    const s = await sessions.validate(id, now());
     return s ? { id, ...s } : null;
   };
 
@@ -169,7 +202,7 @@ export function createApp(deps: AppDeps) {
   const sessionCookie = { path: '/', httpOnly: true, secure: config.secureCookie, sameSite: 'Lax' as const };
 
   const startSession = async (c: Context, userId: string, temporary = false) => {
-    const s = (temporary ? temporarySessions : sessions).create(userId, now());
+    const s = await (temporary ? temporarySessions : sessions).create(userId, now());
     // Google에서 돌아오는 첫 이동에도 실리도록 Lax (변경 요청은 CORS·JSON 본문으로 막는다)
     await setSignedCookie(c, SESSION_COOKIE, s.id, config.sessionSecret, {
       ...sessionCookie,
@@ -182,23 +215,23 @@ export function createApp(deps: AppDeps) {
   const isOwner = (email: string) => !!config.ownerEmail && email === config.ownerEmail;
 
   /** 운영자 계정이면 비밀번호 로그인 시절의 작성 코드·풀이 기록을 넘겨받는다 */
-  const claimIfOwner = (userId: string, email: string) => {
+  const claimIfOwner = async (userId: string, email: string) => {
     if (!isOwner(email)) return;
-    const n = users.claimLegacy(userId);
+    const n = await users.claimLegacy(userId);
     if (n) log.info(`[auth] 예전 데이터 ${n}건을 운영자 계정으로 옮겼습니다.`);
   };
 
-  const sessionBody = (s: { expiresAt: number; userId: string } | null) => {
-    const u = s ? users.byId(s.userId) : null;
+  const sessionBody = async (s: { expiresAt: number; userId: string } | null) => {
+    const u = s ? await users.byId(s.userId) : null;
     return u && s
       ? { authenticated: true, expiresAt: new Date(s.expiresAt).toISOString(), user: { email: u.email, name: u.name, picture: u.picture, editor: u.editor, owner: isOwner(u.email) } }
       : { authenticated: false, expiresAt: null, user: null };
   };
 
-  app.get('/api/public/config', (c) =>
+  app.get('/api/public/config', async (c) =>
     ok(c, PublicConfig, {
       googleEnabled: !!google,
-      signupEnabled: signupSettings.enabled(),
+      signupEnabled: await signupSettings.enabled(),
       contactEmail: config.contactEmail,
       termsVersion: TERMS_VERSION,
       privacyVersion: PRIVACY_VERSION,
@@ -241,15 +274,15 @@ export function createApp(deps: AppDeps) {
       log.warn(`[auth] Google 인증 실패: ${e instanceof GoogleAuthError ? e.message : String(e)}`);
       return back('google_error');
     }
-    const user = users.byGoogleSub(profile.sub);
+    const user = await users.byGoogleSub(profile.sub);
     if (user) {
-      users.touch(user.id, profile);
-      claimIfOwner(user.id, profile.email);
+      await users.touch(user.id, profile);
+      await claimIfOwner(user.id, profile.email);
       await startSession(c, user.id);
       log.info(`[auth] 로그인 user=${user.id}`);
       return c.redirect(flow.next, 302);
     }
-    if (!signupSettings.enabled()) return back('signup_closed');
+    if (!await signupSettings.enabled()) return back('signup_closed');
     // 새 사용자: 약관 동의 화면으로. Google 프로필은 서명한 쿠키에 잠시 둔다.
     await setSignedCookie(c, SIGNUP_COOKIE, encode({ profile, next: flow.next, exp: now() + FLOW_TTL_S * 1000 }), config.sessionSecret, flowCookie);
     return c.redirect('/signup', 302);
@@ -261,7 +294,7 @@ export function createApp(deps: AppDeps) {
   };
 
   app.get('/api/auth/signup', async (c) => {
-    if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
+    if (!await signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
     const p = await readPending(c);
     if (!p) return fail(c, 404, 'no_pending_signup', '가입 대기 중인 Google 계정이 없습니다. 다시 시도하세요.');
     return ok(c, SignupPending, { email: p.profile.email, name: p.profile.name, picture: p.profile.picture });
@@ -273,17 +306,17 @@ export function createApp(deps: AppDeps) {
     const body = await readJson(c, SignupRequest);
     if (!body) return fail(c, 400, 'consent_required', '필수 항목에 모두 동의해야 가입할 수 있습니다.');
     // 본문을 읽는 동안 설정이 바뀔 수 있으므로 계정 생성 직전에 다시 검사한다.
-    if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
+    if (!await signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
     // 운영자는 처음부터 편집 권한을 갖는다(공용 문제를 만들어 온 계정)
-    const user = users.create(p.profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: isOwner(p.profile.email) });
-    claimIfOwner(user.id, p.profile.email);
+    const user = await users.create(p.profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: isOwner(p.profile.email) });
+    await claimIfOwner(user.id, p.profile.email);
     deleteCookie(c, SIGNUP_COOKIE, flowCookie);
     const s = await startSession(c, user.id);
     log.info(`[auth] 가입 user=${user.id}`);
-    return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
+    return ok(c, Session, await sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
   });
 
-  app.post('/api/auth/signup/cancel', (c) => {
+  app.post('/api/auth/signup/cancel', async (c) => {
     deleteCookie(c, SIGNUP_COOKIE, flowCookie);
     return c.json({ data: { cancelled: true } });
   });
@@ -294,15 +327,15 @@ export function createApp(deps: AppDeps) {
     if (blocked) return blocked;
     if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json') || !(await readJson(c, z.object({}))))
       return fail(c, 400, 'invalid_request', '요청을 확인해 주세요.');
-    if (!signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다.');
+    if (!await signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다.');
     const id = randomUUID();
     const adjectives = ['말랑한', '포근한', '반짝이는', '따뜻한', '씩씩한', '수줍은', '발랄한', '졸린', '행복한', '상냥한'];
     const nouns = ['구름', '토끼', '다람쥐', '고양이', '햄스터', '펭귄', '오리', '곰', '별', '병아리'];
     const name = `${adjectives[randomInt(adjectives.length)]} ${nouns[randomInt(nouns.length)]}`;
-    const user = users.create({ sub: `temporary:${id}`, email: `${id}@temporary.invalid`, name, picture: '' },
+    const user = await users.create({ sub: `temporary:${id}`, email: `${id}@temporary.invalid`, name, picture: '' },
       { terms: 'temporary', privacy: 'temporary' }, {}, new Date(now()));
     const s = await startSession(c, user.id, true);
-    return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
+    return ok(c, Session, await sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
   });
 
   // ─── 자동화 테스트 전용 로그인(테스트 환경만, 운영에서는 경로가 없다) ───
@@ -315,21 +348,21 @@ export function createApp(deps: AppDeps) {
       const body = await readJson(c, TestSessionRequest);
       if (!body) return fail(c, 400, 'invalid_request', 'email이 필요합니다.');
       const profile: GoogleProfile = { sub: `test:${body.email}`, email: body.email, name: body.name ?? body.email.split('@')[0]!, picture: '' };
-      const user = users.byGoogleSub(profile.sub) ?? users.create(profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: body.editor });
-      if (body.editor !== undefined && user.editor !== body.editor) users.setEditor(user.id, body.editor);
+      const user = await users.byGoogleSub(profile.sub) ?? await users.create(profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: body.editor });
+      if (body.editor !== undefined && user.editor !== body.editor) await users.setEditor(user.id, body.editor);
       const s = await startSession(c, user.id);
-      return ok(c, Session, sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
+      return ok(c, Session, await sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
     });
   }
 
-  app.get('/api/auth/session', async (c) => ok(c, Session, sessionBody(await readSession(c))));
+  app.get('/api/auth/session', async (c) => ok(c, Session, await sessionBody(await readSession(c))));
 
   app.post('/api/auth/logout', async (c) => {
     const s = await readSession(c);
-    if (s) sessions.revoke(s.id);
+    if (s) await sessions.revoke(s.id);
     deleteCookie(c, SESSION_COOKIE, sessionCookie);
     deleteCookie(c, LEGACY_SESSION_COOKIE, sessionCookie);
-    return ok(c, Session, sessionBody(null));
+    return ok(c, Session, await sessionBody(null));
   });
 
   // ─── 관리자 모드(마스터 비밀번호) ───
@@ -366,7 +399,7 @@ export function createApp(deps: AppDeps) {
     return ok(c, AdminSession, { authenticated: !!exp, expiresAt: exp ? new Date(exp).toISOString() : null });
   });
 
-  app.post('/api/admin/logout', (c) => {
+  app.post('/api/admin/logout', async (c) => {
     deleteCookie(c, ADMIN_COOKIE, adminCookie);
     return ok(c, AdminSession, { authenticated: false, expiresAt: null });
   });
@@ -378,10 +411,10 @@ export function createApp(deps: AppDeps) {
     return next();
   });
 
-  app.get('/api/admin/users', (c) => ok(c, z.array(AdminUser), users.list()));
+  app.get('/api/admin/users', async (c) => ok(c, z.array(AdminUser), await users.list()));
 
-  app.get('/api/admin/users/:id', (c) => {
-    const d = users.detail(c.req.param('id'));
+  app.get('/api/admin/users/:id', async (c) => {
+    const d = await users.detail(c.req.param('id'));
     return d ? ok(c, AdminUserDetail, d) : fail(c, 404, 'not_found', '없는 사용자입니다.');
   });
 
@@ -389,33 +422,33 @@ export function createApp(deps: AppDeps) {
   app.put('/api/admin/users/:id/role', async (c) => {
     const body = await readJson(c, RoleInput);
     if (!body) return fail(c, 400, 'invalid_request', 'editor 값이 필요합니다.');
-    if (!users.setEditor(c.req.param('id'), body.editor)) return fail(c, 404, 'not_found', '없는 사용자입니다.');
+    if (!await users.setEditor(c.req.param('id'), body.editor)) return fail(c, 404, 'not_found', '없는 사용자입니다.');
     log.info(`[admin] 편집 권한 ${body.editor ? '부여' : '회수'} user=${c.req.param('id')}`);
-    return ok(c, AdminUserDetail, users.detail(c.req.param('id'))!);
+    return ok(c, AdminUserDetail, (await users.detail(c.req.param('id')))!);
   });
 
   /** 사용자 삭제: 계정과 작성 코드·컬렉션·제출 기록·세션을 모두 지운다(공용 문제는 남는다) */
-  app.delete('/api/admin/users/:id', (c) => {
-    if (!users.delete(c.req.param('id'))) return fail(c, 404, 'not_found', '없는 사용자입니다.');
+  app.delete('/api/admin/users/:id', async (c) => {
+    if (!await users.delete(c.req.param('id'))) return fail(c, 404, 'not_found', '없는 사용자입니다.');
     log.info(`[admin] 사용자 삭제 user=${c.req.param('id')}`);
     return c.json({ data: { deleted: true } });
   });
 
-  app.get('/api/admin/signup-settings', (c) => ok(c, SignupSettings, { signupEnabled: signupSettings.enabled() }));
+  app.get('/api/admin/signup-settings', async (c) => ok(c, SignupSettings, { signupEnabled: await signupSettings.enabled() }));
 
   app.put('/api/admin/signup-settings', async (c) => {
     const body = await readJson(c, SignupSettings);
     if (!body) return fail(c, 400, 'invalid_request', 'signupEnabled 값이 필요합니다.');
-    signupSettings.setEnabled(body.signupEnabled);
+    await signupSettings.setEnabled(body.signupEnabled);
     log.info(`[admin] 신규 가입 ${body.signupEnabled ? '허용' : '중지'}`);
-    return ok(c, SignupSettings, { signupEnabled: signupSettings.enabled() });
+    return ok(c, SignupSettings, { signupEnabled: await signupSettings.enabled() });
   });
 
   /** 컬렉션 이름·설명 바꾸기(마스터, 스크립트용). 이름의 '/'는 계층 */
   app.put('/api/admin/collections/:id', async (c) => {
     const body = await readJson(c, CollectionInput);
     if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
-    const col = collections.update(c.req.param('id'), body);
+    const col = await collections.update(c.req.param('id'), body);
     if (!col) return fail(c, 404, 'not_found', '없는 컬렉션입니다.');
     log.info(`[admin] 컬렉션 이름 변경 ${col.id}`);
     return ok(c, Collection, col);
@@ -425,7 +458,27 @@ export function createApp(deps: AppDeps) {
   app.put('/api/admin/problems/:id/starter', async (c) => {
     const body = await readJson(c, CodeSet);
     if (!body) return fail(c, 400, 'invalid_request', 'java·python 시작 코드가 필요합니다.');
-    return problems.setStarter(c.req.param('id'), body) ? c.json({ data: { updated: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.');
+    return await problems.setStarter(c.req.param('id'), body) ? c.json({ data: { updated: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.');
+  });
+
+  // ─── 카탈로그(공용 문제 데이터, 로그인과 무관): Worker가 R2가 없을 때 여기서 읽어 엣지에 캐시한다 ───
+  /** 같은 순간의 요청이 몰려도 한 번만 만든다(1초, 공용 데이터를 바꾸면 바로 버린다) */
+  const currentCatalog = () => {
+    if (!built || now() - built.at > 1000) built = { at: now(), cat: catalogSource().then(buildCatalog) };
+    return built.cat;
+  };
+  app.get('/api/catalog/index', async (c) => {
+    const cat = await currentCatalog();
+    c.header('ETag', `"${cat.indexVersion}"`);
+    return ok(c, CatalogIndex, cat.index);
+  });
+  /** 목록의 version을 만든 그 바이트를 그대로 준다(다시 직렬화하면 키 순서가 달라져 Worker의 해시 검사에 걸린다) */
+  app.get('/api/catalog/problems/:id', async (c) => {
+    const d = (await currentCatalog()).details.find((x) => x.id === c.req.param('id'));
+    if (!d) return fail(c, 404, 'not_found', '없는 문제입니다.');
+    c.header('ETag', `"${d.version}"`);
+    c.header('Content-Type', 'application/json; charset=utf-8');
+    return c.body(d.json);
   });
 
   // ─── 이하 Google 로그인 필요. 단 문제·폴더·실행 환경 조회(GET)는 비회원도 된다(작성 코드 등은 비어 있다). ───
@@ -434,9 +487,9 @@ export function createApp(deps: AppDeps) {
 
   app.use('/api/*', async (c, next) => {
     const p = c.req.path;
-    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
+    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/catalog/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
     const s = await readSession(c);
-    const u = s ? users.byId(s.userId) : null;
+    const u = s ? await users.byId(s.userId) : null;
     if (!s || !u) {
       if (!guestReadable(c.req.method, p)) return fail(c, 401, 'unauthorized', '로그인이 필요합니다.');
       (c as unknown as Context<GuestEnv>).set('userId', null);
@@ -463,27 +516,34 @@ export function createApp(deps: AppDeps) {
     return ok(c, Runtime, all.find((r) => r.runner === 'up') ?? all[0] ?? { runner: 'down', versions: { java: null, python: null } });
   });
 
-  // ─── 문제(공용) + 내 풀이 상태 ───
-  app.get('/api/problems', (c) => ok(c, z.array(ProblemSummary), problems.list(viewer(c))));
+  // ─── 내 풀이 상태(사용자 데이터, pahidc SQLite). 웹이 카탈로그와 합친다 ───
+  app.get('/api/me/problems', async (c) => ok(c, z.array(MyProblemSummary), await problems.mySummaries(c.get('userId'))));
+  app.get('/api/me/problems/:id', async (c) => {
+    const st = await problems.myState(c.req.param('id'), c.get('userId'));
+    return st ? ok(c, MyProblemState, st) : fail(c, 404, 'not_found', '없는 문제입니다.');
+  });
+
+  // ─── 문제(공용) + 내 풀이 상태 (예전 웹 호환: 합친 결과를 한 번에) ───
+  app.get('/api/problems', async (c) => ok(c, z.array(ProblemSummary), await problems.list(viewer(c))));
 
   app.put('/api/problems/:id/bookmark', async (c) => {
-    const user = users.byId(c.get('userId'));
+    const user = await users.byId(c.get('userId'));
     if (!user || c.req.header('x-draft-owner') !== user.email)
       return fail(c, 409, 'draft_owner_mismatch', '계정이 변경되어 저장하지 못했어요. 다시 로그인해 주세요.');
     const body = await readJson(c, Bookmark);
     if (!body) return fail(c, 400, 'invalid_request', '북마크 상태가 올바르지 않습니다.');
-    if (!problems.setBookmark(c.req.param('id'), c.get('userId'), body.bookmarked)) return fail(c, 404, 'not_found', '없는 문제입니다.');
+    if (!await problems.setBookmark(c.req.param('id'), c.get('userId'), body.bookmarked)) return fail(c, 404, 'not_found', '없는 문제입니다.');
     return ok(c, Bookmark, body);
   });
 
   app.post('/api/problems', editorOnly, async (c) => {
     const body = await readJson(c, ProblemInput);
     if (!body) return fail(c, 400, 'invalid_request', '문제 형식이 올바르지 않습니다.');
-    return ok(c, Problem, problems.create(body, c.get('userId')));
+    return ok(c, Problem, await problems.create(body, c.get('userId')));
   });
 
-  app.get('/api/problems/:id', (c) => {
-    const p = problems.get(c.req.param('id'), viewer(c));
+  app.get('/api/problems/:id', async (c) => {
+    const p = await problems.get(c.req.param('id'), viewer(c));
     return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
@@ -491,98 +551,98 @@ export function createApp(deps: AppDeps) {
   app.put('/api/problems/:id', async (c) => {
     const body = await readJson(c, ProblemInput);
     if (!body) return fail(c, 400, 'invalid_request', '문제 형식이 올바르지 않습니다.');
-    const p = problems.update(c.req.param('id'), body, c.get('userId'), c.get('editor'));
+    const p = await problems.update(c.req.param('id'), body, c.get('userId'), c.get('editor'));
     return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
   app.patch('/api/problems/:id', async (c) => {
     // 다른 탭에서 계정이 바뀌어도 이전 계정의 초안을 저장하지 않는다.
-    const user = users.byId(c.get('userId'));
+    const user = await users.byId(c.get('userId'));
     if (!user || c.req.header('x-draft-owner') !== user.email)
       return fail(c, 409, 'draft_owner_mismatch', '계정이 변경되어 동기화를 중지했어요. 다시 로그인해 주세요.');
     const body = await readJson(c, ProblemPatch);
     if (!body) return fail(c, 400, 'invalid_request', '변경 내용의 형식이 올바르지 않습니다.');
-    const p = problems.patch(c.req.param('id'), body, c.get('userId'), c.get('editor'));
+    const p = await problems.patch(c.req.param('id'), body, c.get('userId'), c.get('editor'));
     return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
-  app.delete('/api/problems/:id', editorOnly, (c) =>
-    problems.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.'),
+  app.delete('/api/problems/:id', editorOnly, async (c) =>
+    await problems.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.'),
   );
 
   // ─── 폴더(사용자별 개인 정리, 비회원은 기본 폴더를 본다) ───
-  app.get('/api/folders', (c) => ok(c, z.array(Folder), folders.list(viewer(c))));
+  app.get('/api/folders', async (c) => ok(c, z.array(Folder), await folders.list(viewer(c))));
 
   app.post('/api/folders', async (c) => {
     const body = await readJson(c, FolderInput);
     if (!body) return fail(c, 400, 'invalid_request', '폴더 이름이 필요합니다.');
-    return ok(c, Folder, folders.create(body.name, c.get('userId')));
+    return ok(c, Folder, await folders.create(body.name, c.get('userId')));
   });
 
   app.put('/api/folders/:id', async (c) => {
     const body = await readJson(c, FolderInput);
     if (!body) return fail(c, 400, 'invalid_request', '폴더 이름이 필요합니다.');
-    const f = folders.rename(c.req.param('id'), body.name, c.get('userId'));
+    const f = await folders.rename(c.req.param('id'), body.name, c.get('userId'));
     return f ? ok(c, Folder, f) : fail(c, 404, 'not_found', '없는 폴더입니다.');
   });
 
-  app.delete('/api/folders/:id', (c) =>
-    folders.delete(c.req.param('id'), c.get('userId')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 폴더입니다.'),
+  app.delete('/api/folders/:id', async (c) =>
+    await folders.delete(c.req.param('id'), c.get('userId')) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 폴더입니다.'),
   );
 
   // ─── 컬렉션(공용, 편집 권한자만 바꾼다. 이름의 '/'는 계층) ───
-  app.get('/api/collections', (c) => ok(c, z.array(Collection), collections.list()));
+  app.get('/api/collections', async (c) => ok(c, z.array(Collection), await collections.list()));
 
   app.post('/api/collections', editorOnly, async (c) => {
     const body = await readJson(c, CollectionInput);
     if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
-    return ok(c, Collection, collections.create(body));
+    return ok(c, Collection, await collections.create(body));
   });
 
   app.put('/api/collections/:id', editorOnly, async (c) => {
     const body = await readJson(c, CollectionInput);
     if (!body) return fail(c, 400, 'invalid_request', '컬렉션 이름이 필요합니다.');
-    const col = collections.update(c.req.param('id')!, body);
+    const col = await collections.update(c.req.param('id')!, body);
     return col ? ok(c, Collection, col) : fail(c, 404, 'not_found', '없는 컬렉션입니다.');
   });
 
   app.put('/api/collections/:id/items', editorOnly, async (c) => {
     const body = await readJson(c, CollectionItemsInput);
     if (!body) return fail(c, 400, 'invalid_request', 'problemIds 배열이 필요합니다.');
-    const col = collections.setItems(c.req.param('id')!, body.problemIds);
+    const col = await collections.setItems(c.req.param('id')!, body.problemIds);
     return col ? ok(c, Collection, col) : fail(c, 404, 'not_found', '없는 컬렉션입니다.');
   });
 
-  app.delete('/api/collections/:id', editorOnly, (c) =>
-    collections.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 컬렉션입니다.'),
+  app.delete('/api/collections/:id', editorOnly, async (c) =>
+    await collections.delete(c.req.param('id')!) ? c.json({ data: { deleted: true } }) : fail(c, 404, 'not_found', '없는 컬렉션입니다.'),
   );
 
   // ─── 풀이 시간(사용자별) ───
   app.put('/api/problems/:id/timer', async (c) => {
     const body = await readJson(c, ProblemTimer);
     if (!body) return fail(c, 400, 'invalid_request', '풀이 시간 형식이 올바르지 않습니다.');
-    const t = problems.setTimer(c.req.param('id'), body, c.get('userId'));
+    const t = await problems.setTimer(c.req.param('id'), body, c.get('userId'));
     return t ? ok(c, ProblemTimer, t) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
   // ─── 히든 테스트셋(공용 채점 케이스): 편집 권한자만 보고 고친다 ───
-  app.get('/api/problems/:id/hidden', editorOnly, (c) => {
-    const cases = problems.hidden(c.req.param('id')!);
+  app.get('/api/problems/:id/hidden', editorOnly, async (c) => {
+    const cases = await problems.hidden(c.req.param('id')!);
     return cases ? ok(c, HiddenCases, { cases }) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
   app.put('/api/problems/:id/hidden', editorOnly, async (c) => {
     const body = await readJson(c, HiddenCases);
     if (!body) return fail(c, 400, 'invalid_request', '히든 케이스 형식이 올바르지 않습니다.');
-    const ref = problems.setHidden(c.req.param('id')!, body.cases.map((x) => ({ ...x, hidden: true })));
+    const ref = await problems.setHidden(c.req.param('id')!, body.cases.map((x) => ({ ...x, hidden: true })));
     if (ref === false) return fail(c, 404, 'not_found', '없는 문제입니다.');
-    return ok(c, HiddenCases, { cases: problems.hidden(c.req.param('id')!) ?? [] });
+    return ok(c, HiddenCases, { cases: await problems.hidden(c.req.param('id')!) ?? [] });
   });
 
   // ─── 제출 큐 ───
   /** 요청을 검사해 대기열에 넣는다. 오류면 [status, code, message]를 돌려준다. */
-  const enqueue = (userId: string, req: SubmissionRequest, timeLimitOverride?: number): string | [Status, string, string] => {
-    const problem = req.problemId ? problems.get(req.problemId, userId) : null;
+  const enqueue = async (userId: string, req: SubmissionRequest, timeLimitOverride?: number): Promise<string | [Status, string, string]> => {
+    const problem = req.problemId ? await problems.get(req.problemId, userId) : null;
     if (req.problemId && !problem) return [404, 'not_found', '없는 문제입니다.'];
     const timeLimitMs = problem?.timeLimitMs ?? timeLimitOverride ?? 10_000;
     try {
@@ -609,6 +669,9 @@ export function createApp(deps: AppDeps) {
     }
   };
 
+  /** 긴 조회 대기 시간(?wait=초, 최대 25초: 프록시 응답 제한보다 충분히 짧게) */
+  const waitMs = (c: Context) => Math.min(25, Math.max(0, Number(c.req.query('wait')) || 0)) * 1000;
+
   const limited = (c: Context<Env>) => {
     const retry = runLimit.hit(c.get('userId'), now());
     if (!retry) return null;
@@ -621,27 +684,29 @@ export function createApp(deps: AppDeps) {
     if (blocked) return blocked;
     const body = await readJson(c, SubmissionRequest);
     if (!body) return fail(c, 400, 'invalid_request', '제출 형식이 올바르지 않습니다.');
-    const id = enqueue(c.get('userId'), body);
+    const id = await enqueue(c.get('userId'), body);
     if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
     dispatcher.kick();
-    c.status(202);
-    return ok(c, Submission, submissions.get(id)!);
+    // ?wait=초: 짧은 실행은 이 요청 하나로 결과까지 받는다
+    const s = (await dispatcher.poll(id, waitMs(c))) ?? submissions.get(id)!;
+    if (s.status === 'queued' || s.status === 'running') c.status(202);
+    return ok(c, Submission, s);
   });
 
-  app.get('/api/submissions', (c) => {
+  app.get('/api/submissions', async (c) => {
     const raw = c.req.query('offset') ?? '0';
     if (!/^(0|[1-9]\d*)$/.test(raw) || Number(raw) > 100_000) return fail(c, 400, 'invalid_offset', '조회 위치가 올바르지 않습니다.');
     return ok(c, SubmissionHistory, submissions.history(c.get('userId'), Number(raw)));
   });
 
-  app.get('/api/submissions/:id/detail', (c) => {
+  app.get('/api/submissions/:id/detail', async (c) => {
     const detail = submissions.detail(c.req.param('id'), c.get('userId'));
     return detail ? ok(c, SubmissionDetail, detail) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
-  app.get('/api/submissions/:id', (c) => {
+  app.get('/api/submissions/:id', async (c) => {
     const id = c.req.param('id');
-    const s = submissions.ownedBy(id, c.get('userId')) ? submissions.get(id) : null;
+    const s = submissions.ownedBy(id, c.get('userId')) ? await dispatcher.poll(id, waitMs(c)) : null;
     return s ? ok(c, Submission, s) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
@@ -659,7 +724,7 @@ export function createApp(deps: AppDeps) {
     const body = await readJson(c, RunRequest);
     if (!body) return fail(c, 400, 'invalid_request', '실행 요청 형식이 올바르지 않습니다.');
     const { timeLimitMs, ...rest } = body;
-    const id = enqueue(c.get('userId'), { problemId: null, kind: 'run', ...rest, cases: body.cases.map((x) => ({ ...x, hidden: false })) }, timeLimitMs);
+    const id = await enqueue(c.get('userId'), { problemId: null, kind: 'run', ...rest, cases: body.cases.map((x) => ({ ...x, hidden: false })) }, timeLimitMs);
     if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
     dispatcher.kick();
     const done = await dispatcher.wait(id);
@@ -668,5 +733,5 @@ export function createApp(deps: AppDeps) {
     return ok(c, RunResult, done.result);
   });
 
-  return { app, dispatcher, problems, submissions, testsets };
+  return { app, dispatcher, problems, submissions, testsets, catalog };
 }

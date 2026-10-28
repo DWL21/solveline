@@ -42,6 +42,13 @@ const EnvSchema = z.object({
   WEB_ORIGIN: optionalString,
   /** 자동화 테스트 전용 로그인 토큰(테스트 환경만). 운영(NODE_ENV=production)에서 설정하면 시작하지 않는다 */
   TEST_AUTH_TOKEN: optionalString,
+  /** 공용 문제 데이터·히든 테스트셋을 게시할 Cloudflare R2. 넷 다 있어야 켜진다(없으면 SQLite·로컬 파일만 쓴다) */
+  R2_ACCOUNT_ID: optionalString,
+  R2_ACCESS_KEY_ID: optionalString,
+  R2_SECRET_ACCESS_KEY: optionalString,
+  R2_BUCKET: optionalString,
+  /** R2 키 대신 Pages Worker의 R2 바인딩으로 게시할 때 Worker와 나눠 가진 비밀(32자 이상) */
+  R2_PROXY_SECRET: optionalString,
 });
 
 export type Config = {
@@ -62,6 +69,10 @@ export type Config = {
   secureCookie: boolean;
   /** 자동화 테스트 전용 로그인(POST /api/test/session). null이면 경로 자체가 없다 */
   testAuthToken: string | null;
+  /** 카탈로그 게시 대상. null이면 게시하지 않는다 */
+  r2: { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string } | null;
+  /** Worker를 거쳐 R2에 게시할 때의 공유 비밀. r2가 있으면 그쪽을 쓴다 */
+  r2ProxySecret: string | null;
 };
 
 export class ConfigError extends Error {}
@@ -82,6 +93,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (e.TEST_AUTH_TOKEN && e.TEST_AUTH_TOKEN.length < 24) throw new ConfigError('TEST_AUTH_TOKEN은 24자 이상이어야 합니다.');
   if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
   if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
+
+  const r2Values = [e.R2_ACCOUNT_ID, e.R2_ACCESS_KEY_ID, e.R2_SECRET_ACCESS_KEY, e.R2_BUCKET];
+  if (e.R2_PROXY_SECRET && e.R2_PROXY_SECRET.length < 32) throw new ConfigError('R2_PROXY_SECRET은 32자 이상이어야 합니다.');
+  if (r2Values.some(Boolean) && !r2Values.every(Boolean)) throw new ConfigError('R2_ACCOUNT_ID·R2_ACCESS_KEY_ID·R2_SECRET_ACCESS_KEY·R2_BUCKET은 함께 설정해야 합니다.');
 
   let host = '';
   try {
@@ -110,6 +125,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     webOrigin,
     secureCookie: !isLocal,
     testAuthToken: production ? null : (e.TEST_AUTH_TOKEN ?? null),
+    r2:
+      e.R2_ACCOUNT_ID && e.R2_ACCESS_KEY_ID && e.R2_SECRET_ACCESS_KEY && e.R2_BUCKET
+        ? { accountId: e.R2_ACCOUNT_ID, accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY, bucket: e.R2_BUCKET }
+        : null,
+    r2ProxySecret: e.R2_PROXY_SECRET ?? null,
   };
 }
 

@@ -185,6 +185,77 @@ export const Bookmark = z.object({ bookmarked: z.boolean() });
 export const ProblemSummary = Problem.pick({ id: true, title: true, folderId: true, mode: true, language: true, lastSubmission: true, timer: true, updatedAt: true }).extend({ bookmarked: z.boolean() });
 export type ProblemSummary = z.infer<typeof ProblemSummary>;
 
+// ─── 카탈로그(공용 문제 데이터): Worker가 R2·엣지 캐시에서 읽는다 ───
+
+/** 문제의 공용 부분. folderId·language는 기본 폴더(틀)·기본 언어다. */
+export const CatalogProblem = Problem.omit({ code: true, myCases: true, memo: true, timer: true, lastSubmission: true });
+export type CatalogProblem = z.infer<typeof CatalogProblem>;
+
+/** version은 CatalogProblem 내용의 해시다. 같은 version의 상세는 바뀌지 않으므로 오래 캐시한다. */
+export const CatalogProblemSummary = CatalogProblem.pick({ id: true, title: true, folderId: true, mode: true, language: true, updatedAt: true }).extend({ version: z.string() });
+export type CatalogProblemSummary = z.infer<typeof CatalogProblemSummary>;
+
+/** 목록 한 장: 문제 요약·기본 폴더·컬렉션. 비회원 화면은 이것만으로 그린다. */
+export const CatalogIndex = z.object({
+  problems: z.array(CatalogProblemSummary),
+  folders: z.array(Folder),
+  collections: z.array(Collection),
+});
+export type CatalogIndex = z.infer<typeof CatalogIndex>;
+
+/** 내 풀이 상태(목록용). 상태가 있는 문제만 온다. folderId는 개인 폴더, language는 내가 고른 언어. */
+export const MyProblemSummary = z.object({
+  id: z.string(),
+  bookmarked: z.boolean(),
+  folderId: z.string().nullable(),
+  language: Language.nullable(),
+  lastSubmission: LastSubmission.nullable(),
+  timer: ProblemTimer,
+});
+export type MyProblemSummary = z.infer<typeof MyProblemSummary>;
+
+/** 내 풀이 상태(문제 하나). code가 null이면 아직 작성하지 않아 시작 코드를 쓴다. */
+export const MyProblemState = z.object({
+  folderId: z.string().nullable(),
+  language: Language.nullable(),
+  code: CodeSet.nullable(),
+  myCases: z.array(TestCase),
+  memo: z.string(),
+  timer: ProblemTimer,
+  lastSubmission: LastSubmission.nullable(),
+});
+export type MyProblemState = z.infer<typeof MyProblemState>;
+
+/** 공용 문제와 내 상태를 합친다. mine이 null이면 비회원(기본 폴더·시작 코드). */
+export function mergeProblem(p: CatalogProblem, mine: MyProblemState | null): Problem {
+  return {
+    ...p,
+    folderId: mine ? mine.folderId : p.folderId,
+    language: mine?.language ?? p.language,
+    code: mine?.code ?? p.starterCode,
+    myCases: mine?.myCases ?? [],
+    memo: mine?.memo ?? '',
+    timer: mine?.timer ?? EMPTY_TIMER,
+    lastSubmission: mine?.lastSubmission ?? null,
+  };
+}
+
+/** 목록용 합치기. mine이 null이면 비회원, 회원이면 상태가 없는 문제도 개인 폴더 없음으로 둔다. */
+export function mergeSummaries(index: CatalogProblemSummary[], mine: MyProblemSummary[] | null): ProblemSummary[] {
+  const byId = new Map((mine ?? []).map((m) => [m.id, m]));
+  return index.map(({ version: _version, ...p }) => {
+    const m = byId.get(p.id);
+    return {
+      ...p,
+      folderId: mine ? (m?.folderId ?? null) : p.folderId,
+      language: m?.language ?? p.language,
+      lastSubmission: m?.lastSubmission ?? null,
+      timer: m?.timer ?? EMPTY_TIMER,
+      bookmarked: m?.bookmarked ?? false,
+    };
+  });
+}
+
 // ─── 실행 ───
 
 /** 히든 케이스는 효율성 테스트용 큰 데이터를 담으므로 필드 한도가 크다(문제 본문에는 들어가지 않는다). */
@@ -274,6 +345,12 @@ export const RunResult = z.object({
   results: z.array(CaseResult),
 });
 export type RunResult = z.infer<typeof RunResult>;
+
+/** 채점 결과로 마지막 제출 기록을 만든다. 서버가 저장하는 값과 화면에 바로 반영하는 값이 같다. total은 채점한 케이스 수. */
+export function lastSubmissionOf(result: RunResult, total: number, language: Language, at: string): LastSubmission {
+  const passed = result.compile.ok ? result.results.filter((r) => r.status === 'pass').length : 0;
+  return { score: total ? Math.round((passed / total) * 100) : 0, passed, total, language, at };
+}
 
 
 // ─── 기본 템플릿 (기존 형식) ───

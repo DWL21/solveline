@@ -8,7 +8,7 @@ const MAX_TICK_MS = 5000;
 
 /**
  * 풀이 시간 자동 측정. 문제 화면이 열려 있고 탭이 보일 때만 늘어난다.
- * 100점을 받으면 멈추고(solvedMs), 초기화하면 0부터 다시. 로컬에 보관하고 공통 동기화 큐가 60초마다 전송한다.
+ * 100점을 받으면 멈추고(solvedMs), 초기화하면 0부터 다시. 로컬에 보관하고 공통 동기화 큐가 5분마다(탭을 숨기거나 떠날 때는 바로) 전송한다.
  */
 /** 큐가 없으면(비회원) 재지도 저장하지도 않는다 */
 export function useSolveTimer(problem: Problem, queue: DraftQueue | null) {

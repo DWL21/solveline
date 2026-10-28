@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type Language, type Problem, type ProblemInput, type Submission, type TestCase } from '@solveline/shared';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { lastSubmissionOf, type Language, type Problem, type ProblemInput, type ProblemSummary, type Submission, type TestCase } from '@solveline/shared';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import { CasesEditor, MAX_CASES } from './CasesEditor.tsx';
@@ -121,26 +121,24 @@ async function flushEdits(queue: Queue, id: string) {
   }
 }
 
-type RunHandle = { id: string | null; wake: () => void; stopping: boolean };
-const idleHandle = (): RunHandle => ({ id: null, wake: () => {}, stopping: false });
+type RunHandle = { id: string | null; stopping: boolean };
+const idleHandle = (): RunHandle => ({ id: null, stopping: false });
 const isActive = (s: Submission) => s.status === 'queued' || s.status === 'running';
 
-/** 끝날 때까지 조회한다(처음엔 빠르게, 점점 느리게). 중지를 누르면 handle.wake로 바로 다시 조회한다. */
-async function pollUntilDone(s: Submission, handle: RunHandle, onProgress: (s: Submission) => void) {
-  let delay = 250;
+/** 끝날 때까지 조회한다. 서버가 상태가 바뀔 때까지 기다렸다 답하므로(긴 조회) 바로 다시 묻는다. */
+async function waitUntilDone(s: Submission, onProgress: (s: Submission) => void) {
   while (isActive(s)) {
     onProgress(s);
-    await new Promise<void>((r) => {
-      const t = setTimeout(r, delay);
-      handle.wake = () => {
-        clearTimeout(t);
-        r();
-      };
-    });
-    delay = Math.min(1500, Math.round(delay * 1.5));
     s = await api.submission(s.id);
   }
   return s;
+}
+
+/** 점수는 서버가 기록했다. 같은 값을 화면에 바로 반영하고 다시 읽지 않는다(목록은 다음에 열 때 새로 읽는다). */
+function showLastSubmission(qc: QueryClient, problemId: string, s: Submission, result: NonNullable<Submission['result']>) {
+  const last = lastSubmissionOf(result, s.caseIds.length, s.language, s.finishedAt ?? new Date().toISOString());
+  qc.setQueryData<Problem>(qk.problem(problemId), (p) => (p ? { ...p, lastSubmission: last } : p));
+  qc.setQueryData<ProblemSummary[]>(qk.problems, (all) => all?.map((p) => (p.id === problemId ? { ...p, lastSubmission: last } : p)));
 }
 
 /** 편집 중인 문제: 화면 상태와 서버 동기화 큐에 함께 반영한다 */
@@ -180,10 +178,10 @@ function useRunner({
   const qc = useQueryClient();
   const { showResult, markUnseenIfHidden } = panes;
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
-  /** 진행 중인 제출: 중지 버튼이 쓰는 id와, 조회 대기를 바로 깨우는 함수 */
+  /** 진행 중인 제출: 중지 버튼이 쓰는 id */
   const current = useRef<RunHandle>(idleHandle());
   const [stopping, setStopping] = useState(false);
-
+  /** 제출 큐에 넣고 끝날 때까지 조회한다. 서버가 상태가 바뀔 때까지 기다렸다 답하므로(긴 조회) 짧은 간격으로 묻지 않는다. */
   const runMut = useMutation({
     mutationFn: async ({ cases, submit }: { cases: TestCase[]; submit: boolean }) => {
       await flushEdits(queue, problem.id);
@@ -192,7 +190,7 @@ function useRunner({
       current.current.id = s.id;
       // 제출 응답이 오기 전에 중지를 눌렀으면 지금 보낸다
       if (current.current.stopping) s = await api.cancelSubmission(s.id);
-      return pollUntilDone(s, current.current, (p) => setRun({ kind: 'running', submit, ahead: p.status === 'queued' ? p.ahead : null }));
+      return waitUntilDone(s, (p) => setRun({ kind: 'running', submit, ahead: p.status === 'queued' ? p.ahead : null }));
     },
     onSettled: () => {
       current.current = idleHandle();
@@ -208,14 +206,12 @@ function useRunner({
       if (!submit || s.status === 'cancelled' || s.status === 'error' || !s.result) return;
       void qc.invalidateQueries({ queryKey: ['submission-history'] });
       if (s.score === 100) onSolved();
-      // 점수는 서버가 기록한다 → 문제·목록을 다시 읽는다
-      void qc.invalidateQueries({ queryKey: qk.problem(problem.id) });
-      void qc.invalidateQueries({ queryKey: qk.problems });
+      showLastSubmission(qc, problem.id, s, s.result);
     },
     onError: (e) => setRun({ kind: 'error', message: errMsg(e) }),
   });
 
-  /** 실행·채점 중지: 서버에 알리고, 결과 조회를 바로 다시 한다 */
+  /** 실행·채점 중지: 서버에 알린다. 기다리던 조회는 상태가 바뀌면 바로 돌아온다. */
   const doStop = useCallback(async () => {
     const cur = current.current;
     if (cur.stopping) return;
@@ -227,7 +223,6 @@ function useRunner({
     } catch {
       /* 다음 조회에서 상태를 다시 본다 */
     }
-    cur.wake();
   }, []);
 
   const refuse = useCallback(
