@@ -39,6 +39,14 @@ export async function buildCatalog(src: CatalogSource): Promise<BuiltCatalog> {
 
 export type SyncResult = { problems: number; index: boolean };
 
+/** 편집 한 번에 바뀐 것: 문제 id(지워졌으면 목록에서 뺀다)와 컬렉션 */
+export type CatalogChange = { problemIds: string[]; collections: boolean };
+
+/** 부분 게시에 필요한 원본 조회 */
+export type CatalogReader = { problem: (id: string) => Promise<CatalogProblem | null>; collections: () => Promise<Collection[]> };
+
+const byTitle = (a: { title: string }, b: { title: string }) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0);
+
 /** 동시에 limit개씩 처리한다 */
 async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
   let next = 0;
@@ -60,7 +68,51 @@ export class CatalogPublisher {
   constructor(
     private readonly store: ObjectStore,
     private readonly source: () => Promise<CatalogSource>,
+    private readonly reader?: CatalogReader,
   ) {}
+
+  /**
+   * 바뀐 것만 게시한다(Worker CPU 10ms 안에서). 전체를 다시 만들지 않고 R2의 목록을 읽어 바뀐 문제 줄과 컬렉션만 고쳐 쓴다.
+   * 목록이 아직 없거나 reader가 없으면 전체 동기화로 대신한다. 같은 순간 다른 곳의 편집과 겹치면 늦게 쓴 쪽이 이기므로,
+   * 그때 빠진 줄은 그 문제를 다시 저장하거나 전체 동기화(sync)로 맞춘다.
+   */
+  publish(change: CatalogChange): Promise<SyncResult> {
+    const run = this.chain.then(() => this.runPartial(change));
+    this.chain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runPartial(change: CatalogChange): Promise<SyncResult> {
+    const raw = this.reader ? await this.store.get(CATALOG_INDEX_KEY) : null;
+    if (!raw || !this.reader) return this.run();
+    const json = new TextDecoder().decode(raw);
+    const index = (JSON.parse(json) as { data: CatalogIndex }).data;
+    let problems = 0;
+    for (const id of change.problemIds) {
+      const p = await this.reader.problem(id);
+      const at = index.problems.findIndex((x) => x.id === id);
+      if (!p) {
+        if (at >= 0) index.problems.splice(at, 1);
+        continue;
+      }
+      const detail = envelope(p);
+      const version = await versionOf(detail);
+      if (at >= 0 && index.problems[at]!.version === version) continue;
+      await this.store.put(catalogProblemKey(id, version), detail, { contentType: JSON_TYPE });
+      problems++;
+      const row = { id: p.id, title: p.title, folderId: p.folderId, mode: p.mode, language: p.language, updatedAt: p.updatedAt, version };
+      if (at >= 0) index.problems.splice(at, 1);
+      index.problems.push(row);
+      index.problems.sort(byTitle);
+    }
+    if (change.collections) index.collections = await this.reader.collections();
+    const next = envelope(index);
+    if (next === json) return { problems, index: false };
+    // 상세를 먼저 올린 뒤 목록을 바꾼다(목록이 가리키는 상세가 항상 있도록)
+    await this.store.put(CATALOG_INDEX_KEY, next, { contentType: JSON_TYPE });
+    this.published = null;
+    return { problems, index: true };
+  }
 
   sync(): Promise<SyncResult> {
     const run = this.chain.then(() => this.run());

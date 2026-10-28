@@ -80,7 +80,8 @@
 
 - api 코드(`apps/api/src`)는 Node·Workers 둘 다에서 돈다. `node:*`·`Buffer`·better-sqlite3는 `main.ts`·`db-node.ts`·`backup.ts`에서만 쓰고, 암호 기능은 `crypto.ts`(WebCrypto)를 쓴다. 어기면 `pnpm build`의 Worker 묶기가 실패한다.
 - 마이그레이션(`db-node.ts`)을 더하면 `pnpm --filter @solveline/api d1:schema`로 D1 스키마 파일을 다시 만든다(테스트가 어긋나면 실패한다). 기본 행을 넣는 마이그레이션은 `d1-schema.ts`의 SEED에도 더한다.
-- Worker 안의 API(`API_MODE = "worker"`, D1 바인딩)는 5단계 전환(운영자 승인) 전에는 켜지 않는다.
+- 2026-10-28부터 운영 API는 Worker 안의 API(`API_MODE = "worker"`, D1 `solveline`)다. pahidc는 judge·runner와 게이트웨이(`/judge/`)만 맡고, 예전 api 컨테이너는 compose `legacy` 프로필로 내려 두었다(롤백용).
+- Workers Free CPU 10ms: 요청 하나에서 문제 전체를 훑거나 큰 JSON을 해석하지 않는다. 카탈로그는 편집한 문제만 부분 게시한다(`CatalogPublisher.publish`).
 
 ## 채점 파이프라인 규칙 (0003, 0007)
 

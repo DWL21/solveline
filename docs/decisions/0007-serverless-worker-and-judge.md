@@ -106,7 +106,26 @@ npx wrangler d1 execute <새 D1> --remote --file d1.sql
    - 점검 시간 동안 api를 읽기 전용으로 둔 채 SQLite를 D1로 옮긴다.
    - Pages 바인딩을 켜고, judge Tunnel을 연결하고, 예전 api 컨테이너를 내린다.
 
+## 5단계 전환(2026-10-28, 운영자 승인)
+
+배포 한 번(`deploy.yml`)으로 다음 순서로 진행한다.
+
+1. **서버**: judge 결과를 Worker(`https://solveline.simplyimg.com`)로 보낸다. 게이트웨이는 `/judge/`를 judge로 넘긴다(Tunnel `solveline-api` 호스트, 요청마다 서명 확인). 예전 api는 compose `legacy` 프로필로 내린다.
+2. **Pages 비밀**: GitHub `production` 값을 그대로 넣는다. `SESSION_SECRET`이 같아서 로그인이 유지된다.
+3. **D1**: `wrangler d1 migrations apply`(매번, 이미 적용했으면 그대로)를 실행한다.
+4. **한 번만 하는 이전**(`/var/lib/solveline/.d1-migrated`가 없을 때):
+   - 예전 api를 멈춰 쓰기를 막는다.
+   - `scripts/d1-export.ts`로 SQLite를 SQL로 내보낸다. `INSERT OR REPLACE`를 쓰고, 외래 키 검사는 미루며, 100KB가 넘는 행은 조각으로 나눈다.
+   - `wrangler d1 execute --file`로 넣는다.
+   - 표마다 행 수를 맞춰 본다.
+   - 어느 단계든 실패하면 예전 api를 다시 띄우고 배포를 멈춘다(Pages는 바뀌지 않는다).
+5. **Pages**: API를 함께 묶은 `_worker.js`를 올린다. `wrangler.toml`의 `API_MODE = "worker"`와 D1 바인딩이 켜진다.
+6. **확인**: Worker `/api/health`, judge `/judge/health`, Worker → judge → runner의 `/api/runtime`을 본다.
+
+점검 시간은 4~5단계 사이의 1~2분이다. 이 동안 API가 응답하지 않는다.
+
 ## 롤백
 
-- 5단계 전까지는 운영이 바뀌지 않는다.
-- 전환 뒤 문제가 생기면 Pages를 이전 배포로 되돌리고 pahidc api를 다시 켠다. 그 사이 D1에 쌓인 변경은 D1 내보내기로 SQLite에 되돌린다(전환 직후 하루는 api 컨테이너와 DB 파일을 지우지 않는다).
+1. `wrangler.toml`에서 `API_MODE`를 지운다. 그러면 Worker가 다시 Tunnel로 넘긴다.
+2. compose에서 `api` 서비스의 `profiles: [legacy]`를 지우고 `JUDGE_URL`·`RESULTS_URL`을 예전 값으로 되돌려 배포한다.
+3. 전환 뒤 D1에 쌓인 변경은 `wrangler d1 export`로 받아 SQLite에 되돌린다. 예전 DB 파일 `/var/lib/solveline/solveline.db`는 지우지 않았다.

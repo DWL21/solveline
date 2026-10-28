@@ -30,6 +30,6 @@ done
 sudo install -d -o 1000 -g 1000 -m 700 /var/lib/solveline
 sudo docker compose -f compose.production.yaml config --quiet
 sudo docker compose -f compose.production.yaml up -d --build --force-recreate --wait --wait-timeout 300
-curl --fail --silent --show-error http://127.0.0.1:8083/api/health
+curl --fail --silent --show-error http://127.0.0.1:8083/judge/health
 # 오래된 빌드 캐시·이미지 정리 (서버 디스크 보호)
 sudo docker image prune -f >/dev/null

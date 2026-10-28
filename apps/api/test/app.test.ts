@@ -1025,6 +1025,8 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
     await E('DELETE', `/api/problems/${b}`);
     expect(CatalogIndex.parse(read(CATALOG_INDEX_KEY)).problems.map((p) => p.id)).toEqual([a]);
 
+    // 편집마다 바뀐 줄만 고쳐 썼어도 전체를 다시 만든 목록과 같다(Worker CPU 한도 때문에 부분 게시)
+    expect(read(CATALOG_INDEX_KEY)).toEqual((await E('GET', '/api/catalog/index')).body.data);
     // 다시 맞춰도 바뀐 것이 없으면 아무것도 올리지 않는다
     const n = r2.puts;
     expect(await s.catalog!.sync()).toEqual({ problems: 0, index: false });

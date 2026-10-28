@@ -70,18 +70,97 @@ jobs:
           mkdir -p "$RUNNER_TEMP/corepack-bin"
           corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
           export PATH="$RUNNER_TEMP/corepack-bin:$PATH"
-          pnpm install --frozen-lockfile --filter @solveline/web...
+          pnpm install --frozen-lockfile --filter @solveline/web... --filter @solveline/api...
           pnpm --filter @solveline/web build
+          # API를 함께 묶은 Pages Worker(apps/web/dist/_worker.js, 0007)
+          pnpm --filter @solveline/api build:worker
       - name: Deploy API, judge and runner
         run: bash scripts/deploy-production.sh
-      - name: Deploy web (Cloudflare Pages)
-        # 새 프론트가 호출하는 API를 먼저 배포한다. 기존 프론트 API는 호환성을 유지한다.
+      - name: Sync Pages secrets (Worker API)
+        # Worker 안의 API가 쓰는 값을 GitHub production 값 그대로 Pages 비밀에 넣는다(pahidc와 같은 SESSION_SECRET → 로그인 유지).
+        # 값은 출력하지 않는다. 임시 파일은 600이고 바로 지운다.
+        env:
+          PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+          SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS }}
+          ACCESS_PASSWORD: ${{ secrets.ACCESS_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          OWNER_EMAIL: ${{ vars.OWNER_EMAIL }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          JUDGE_SECRET: ${{ secrets.JUDGE_SECRET }}
+          R2_PROXY_SECRET: ${{ secrets.R2_PROXY_SECRET }}
+        working-directory: apps/web
+        run: |
+          umask 077
+          f="$RUNNER_TEMP/pages-secrets.json"
+          python3 -c 'import json, os
+          keys = "SESSION_TTL_DAYS ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL JUDGE_SECRET R2_PROXY_SECRET".split()
+          print(json.dumps({k: os.environ[k] for k in keys if os.environ.get(k)}))' > "$f"
+          npx --yes wrangler@4.151.0 pages secret bulk "$f" --project-name solveline >/dev/null
+          rm -f "$f"
+          echo "Pages 비밀을 맞췄습니다."
+      - name: Apply D1 migrations
+        env:
+          PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+          CI: "true"
+        working-directory: apps/web
+        run: npx --yes wrangler@4.151.0 d1 migrations apply solveline --remote
+      - name: One-time move of user data from SQLite to D1
+        # 0007 5단계. 한 번만 한다(/var/lib/solveline/.d1-migrated). 예전 api를 멈춰 쓰기를 막고, SQLite를 SQL로 내보내 D1에 넣은 뒤
+        # 표마다 행 수를 맞춰 본다. 어느 단계든 실패하면 예전 api를 다시 띄우고 실패로 끝낸다(Pages는 바뀌지 않는다).
+        env:
+          PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+          CI: "true"
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          MARK=/var/lib/solveline/.d1-migrated
+          if sudo test -f "$MARK"; then echo "이미 D1로 옮겼습니다."; exit 0; fi
+          COMPOSE=(sudo docker compose -f ../../compose.production.yaml)
+          restore() { echo "D1 이전 실패: 예전 api를 다시 띄웁니다." >&2; "${COMPOSE[@]}" --profile legacy up -d api || true; }
+          trap restore ERR
+          # 내보내기 도구가 든 api 이미지를 먼저 만든다(멈추는 시간을 줄인다)
+          "${COMPOSE[@]}" --profile legacy build api
+          # 쓰기를 멈춘다(점검 시작). Pages가 Worker API로 바뀔 때까지 API가 잠시 응답하지 않는다.
+          "${COMPOSE[@]}" --profile legacy stop api
+          "${COMPOSE[@]}" --profile legacy run --rm --no-deps -T api node --import tsx scripts/d1-export.ts /data/solveline.db /data/d1-import.sql | tee "$RUNNER_TEMP/d1-export.log"
+          umask 077
+          # 복사본은 runner 사용자 것이어야 wrangler가 읽는다(그래서 redirect는 sudo 밖에서)
+          # shellcheck disable=SC2024
+          sudo cat /var/lib/solveline/d1-import.sql > "$RUNNER_TEMP/d1-import.sql"
+          npx --yes wrangler@4.151.0 d1 execute solveline --remote --yes --file "$RUNNER_TEMP/d1-import.sql" >/dev/null
+          # 내보낸 행 수와 D1의 행 수가 표마다 같은지 본다
+          Q="SELECT 'users' t, COUNT(*) n FROM users UNION ALL SELECT 'problems', COUNT(*) FROM problems UNION ALL SELECT 'user_problems', COUNT(*) FROM user_problems UNION ALL SELECT 'submissions', COUNT(*) FROM submissions UNION ALL SELECT 'sessions', COUNT(*) FROM sessions UNION ALL SELECT 'collections', COUNT(*) FROM collections UNION ALL SELECT 'folders', COUNT(*) FROM folders"
+          npx --yes wrangler@4.151.0 d1 execute solveline --remote --json --command "$Q" > "$RUNNER_TEMP/d1-counts.json"
+          python3 - "$RUNNER_TEMP/d1-export.log" "$RUNNER_TEMP/d1-counts.json" <<'PY'
+          import json, re, sys
+          exported = dict((t, int(n)) for t, n in re.findall(r'(\w+) (\d+)', open(sys.argv[1]).read().split(':', 1)[1].split('(')[0]))
+          d1 = {r['t']: r['n'] for r in json.load(open(sys.argv[2]))[0]['results']}
+          bad = {t: (exported.get(t), n) for t, n in d1.items() if exported.get(t) != n}
+          print('D1 행 수:', d1)
+          sys.exit(f'행 수가 다릅니다: {bad}' if bad else 0)
+          PY
+          rm -f "$RUNNER_TEMP/d1-import.sql" "$RUNNER_TEMP/d1-counts.json"
+          sudo rm -f /var/lib/solveline/d1-import.sql
+          # 예전 api 컨테이너는 지우고(이미지·DB 파일은 남긴다) 표시를 남긴다
+          "${COMPOSE[@]}" --profile legacy rm -f api
+          sudo touch "$MARK"
+          trap - ERR
+          echo "D1로 옮겼습니다."
+      - name: Deploy web and Worker API (Cloudflare Pages)
         env:
           PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
         working-directory: apps/web
         run: npx --yes wrangler@4.151.0 pages deploy dist --project-name solveline --branch main --commit-hash "$GITHUB_SHA"
       - name: Verify public deployment
         run: |
-          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline-api.simplyimg.com/api/health
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline-api.simplyimg.com/judge/health
           curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline.simplyimg.com/api/health
+          # Worker API → (서명) → judge → runner까지 닿는지
+          for i in $(seq 1 12); do
+            if curl --fail --silent https://solveline.simplyimg.com/api/runtime | grep -q '"runner":"up"'; then echo "runtime up"; break; fi
+            [ "$i" = 12 ] && { echo "Worker API가 judge에 닿지 않습니다." >&2; exit 1; }
+            sleep 5
+          done
           curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline.simplyimg.com/ -o /dev/null

@@ -9,16 +9,19 @@ compatibility_date = "2026-10-23"
 binding = "CATALOG"
 bucket_name = "solveline-catalog"
 
-# 카탈로그를 R2에서 읽는다. 지우고 배포하면 다시 pahidc(API)에서 읽는다(0006 롤백).
+# ─── API를 Worker에서 실행(0007 5단계, 2026-10-28 전환) ───
+# 사용자 데이터는 D1. 스키마는 apps/api/migrations(배포가 wrangler d1 migrations apply로 적용한다).
+[[d1_databases]]
+binding = "DB"
+database_name = "solveline"
+database_id = "6abebb04-4276-48ba-8fa6-c22a1c2e5fa4"
+migrations_dir = "../api/migrations"
+
+# 비밀(SESSION_SECRET·GOOGLE_CLIENT_SECRET·ACCESS_PASSWORD·JUDGE_SECRET 등)은 배포가 GitHub production 값으로 Pages 비밀에 넣는다.
+# API_MODE를 지우고 배포하면 다시 pahidc api(Tunnel)로 넘긴다(롤백: docs/decisions/0007).
 [vars]
 CATALOG_SOURCE = "r2"
-
-# ─── API를 Worker에서 실행(0007 5단계 전환 때 켠다, 운영자 승인 필요) ───
-# 1) npx wrangler d1 create solveline 로 만든 database_id를 아래에 넣고 주석을 푼다.
-# 2) npx wrangler d1 migrations apply solveline --remote (스키마: apps/api/migrations)
-# 3) Pages 비밀(SESSION_SECRET·GOOGLE_CLIENT_SECRET·ACCESS_PASSWORD·JUDGE_SECRET)과 아래 변수를 넣고 API_MODE = "worker"를 켠다.
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "solveline"
-# database_id = "<wrangler d1 create 결과>"
-# migrations_dir = "../api/migrations"
+API_MODE = "worker"
+WEB_ORIGIN = "https://solveline.simplyimg.com"
+# judge는 pahidc 게이트웨이(Tunnel solveline-api 호스트)의 /judge/ 아래. 요청은 JUDGE_SECRET 서명이 있어야 한다.
+JUDGE_URL = "https://solveline-api.simplyimg.com/judge"

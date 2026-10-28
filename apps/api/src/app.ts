@@ -143,7 +143,7 @@ export function createApp(deps: AppDeps) {
   const signupSettings = new SignupSettingsStore(sql);
   const catalogSource = async () => ({ problems: await problems.catalogProblems(), folders: await folders.list(null), collections: await collections.list() });
   const catalog = deps.objectStore
-    ? new CatalogPublisher(deps.objectStore, catalogSource)
+    ? new CatalogPublisher(deps.objectStore, catalogSource, { problem: (id) => problems.catalogProblem(id), collections: () => collections.list() })
     : null;
   const configuredGoogle = () => (config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null);
   const google = deps.google === undefined ? configuredGoogle() : deps.google;
@@ -180,7 +180,13 @@ export function createApp(deps: AppDeps) {
     built = null;
     if (!catalog) return;
     try {
-      await catalog.sync();
+      // 바뀐 문제만 게시한다(전체를 다시 만들면 Worker CPU 한도를 넘는다)
+      const m = /^\/api\/(?:admin\/)?problems\/([^/]+)/.exec(c.req.path);
+      const ids = m ? [decodeURIComponent(m[1]!)] : [];
+      if (c.req.method === 'POST' && c.req.path === '/api/problems') ids.push(((await c.res.clone().json()) as { data: { id: string } }).data.id);
+      // 문제를 지우면 그 문제가 컬렉션에서도 빠진다
+      const collectionsChanged = c.req.path.includes('/collections') || (c.req.method === 'DELETE' && !!m);
+      await catalog.publish({ problemIds: ids, collections: collectionsChanged });
     } catch (e) {
       // 게시에 실패해도 SQLite에는 저장됐다. 다음 변경이나 재시작 때 다시 맞춘다.
       log.error('[catalog] R2 게시 실패', e);
