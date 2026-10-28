@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-node
       - name: 커버리지(래칫 기준 아래로 내려가면 실패)
-        run: pnpm --filter @solveline/api test:coverage
+        run: pnpm --filter @solveline/api --filter @solveline/judge test:coverage
         env:
           CI: "true"
       - uses: actions/upload-artifact@v7
@@ -74,6 +74,15 @@ jobs:
           path: |
             apps/api/coverage/
             apps/api/reports/
+          retention-days: 14
+      # 품질 리포트는 unit 아티팩트를 apps/api로 받으므로 judge는 따로 올린다
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unit-judge
+          path: |
+            apps/judge/coverage/
+            apps/judge/reports/
           retention-days: 14
 
   static-analysis:

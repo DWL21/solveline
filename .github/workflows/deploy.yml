@@ -21,9 +21,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Write /etc/solveline/api.env from GitHub Environment
+      - name: Write /etc/solveline/api.env and judge.env from GitHub Environment
         # 공개 저장소: 서버에 필요한 값만 이름으로 넘긴다(비밀 전체를 꺼내지 않는다). 값은 출력하지 않는다.
-        # 새 환경 변수는 apps/api/.env.example, 여기 env, 아래 KEYS에 함께 추가한다.
+        # 새 환경 변수는 apps/api/.env.example, 여기 env, 아래 KEYS(judge가 쓰면 JUDGE_KEYS도)에 함께 추가한다.
         env:
           SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS }}
           ACCESS_PASSWORD: ${{ secrets.ACCESS_PASSWORD }}
@@ -39,20 +39,29 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           # R2 키 대신 Pages Worker를 거쳐 게시(Pages 비밀 R2_PROXY_SECRET과 같은 값)
           R2_PROXY_SECRET: ${{ secrets.R2_PROXY_SECRET }}
+          # API와 judge가 서로의 요청에 붙이는 HMAC 서명 비밀(0007). api.env와 judge.env에 같은 값을 쓴다.
+          JUDGE_SECRET: ${{ secrets.JUDGE_SECRET }}
         run: |
-          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PROXY_SECRET"
-          REQUIRED="ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET"
+          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PROXY_SECRET JUDGE_SECRET"
+          # judge는 서명 비밀과 테스트셋을 올릴 R2 설정만 받는다(사용자 데이터·로그인 비밀은 주지 않는다)
+          JUDGE_KEYS="JUDGE_SECRET R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PROXY_SECRET"
+          REQUIRED="ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET JUDGE_SECRET"
           for k in $REQUIRED; do
             [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }
           done
           sudo install -d -m 700 -o root -g root /etc/solveline
-          for k in $KEYS; do
-            v="${!k}"
-            if [ -n "$v" ]; then printf '%s=%s\n' "$k" "${v//$'\n'/}"; fi
-          done | sudo tee /etc/solveline/api.env.new >/dev/null
-          sudo chmod 600 /etc/solveline/api.env.new
-          sudo mv /etc/solveline/api.env.new /etc/solveline/api.env
-          echo "env keys: $(sudo cut -d= -f1 /etc/solveline/api.env | tr '\n' ' ')"
+          write_env() {
+            local file=$1 k v
+            for k in $2; do
+              v="${!k}"
+              if [ -n "$v" ]; then printf '%s=%s\n' "$k" "${v//$'\n'/}"; fi
+            done | sudo tee "$file.new" >/dev/null
+            sudo chmod 600 "$file.new"
+            sudo mv "$file.new" "$file"
+            echo "$(basename "$file") keys: $(sudo cut -d= -f1 "$file" | tr '\n' ' ')"
+          }
+          write_env /etc/solveline/api.env "$KEYS"
+          write_env /etc/solveline/judge.env "$JUDGE_KEYS"
       - name: Build web (Cloudflare Pages)
         env:
           PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
@@ -63,7 +72,7 @@ jobs:
           export PATH="$RUNNER_TEMP/corepack-bin:$PATH"
           pnpm install --frozen-lockfile --filter @solveline/web...
           pnpm --filter @solveline/web build
-      - name: Deploy API and runner
+      - name: Deploy API, judge and runner
         run: bash scripts/deploy-production.sh
       - name: Deploy web (Cloudflare Pages)
         # 새 프론트가 호출하는 API를 먼저 배포한다. 기존 프론트 API는 호환성을 유지한다.

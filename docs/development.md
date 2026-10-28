@@ -18,12 +18,13 @@ $ pnpm install
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
 | `SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`, `ACCESS_PASSWORD`(관리자 모드) | `apps/api/.env` | GitHub → Settings → Environments → `production` → **Secrets** |
+| `JUDGE_SECRET`(api↔judge 서명) | `apps/api/.env`와 `apps/judge/.env`에 같은 값 | 같은 환경의 **Secrets** → 서버 `api.env`·`judge.env` |
 | `GOOGLE_CLIENT_ID`, `OWNER_EMAIL`, `CONTACT_EMAIL`(선택), `SESSION_TTL_DAYS`(선택) | `apps/api/.env` | 같은 환경의 **Variables** |
 
 Google OAuth 클라이언트의 승인된 리디렉션 URI는 `https://solveline.simplyimg.com/api/auth/google/callback`(로컬은 `http://localhost:<웹 포트>/api/auth/google/callback`)입니다.
 
 `apps/api/.env`는 gitignore 대상입니다. 변수 목록과 설명은 [`apps/api/.env.example`](../apps/api/.env.example)에 있습니다.
-배포 워크플로가 `production` 환경에서 위 값만 이름으로 꺼내 서버 `/etc/solveline/api.env`로 기록합니다. 새 변수는 [`deploy.yml`](../.github/workflows/deploy.yml)의 목록에도 추가해야 합니다.
+배포 워크플로가 `production` 환경에서 위 값만 이름으로 꺼내 서버 `/etc/solveline/api.env`(judge가 쓰는 값은 `judge.env`)로 기록합니다. 새 변수는 [`deploy.yml`](../.github/workflows/deploy.yml)의 목록에도 추가해야 합니다.
 
 ## 로컬 실행
 
@@ -35,6 +36,8 @@ Google OAuth 클라이언트의 승인된 리디렉션 URI는 `https://solveline
 $ openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
 ```
 
+채점 서비스용으로 [`apps/judge/.env.example`](../apps/judge/.env.example)을 `apps/judge/.env`로 복사하고, 32자 이상의 같은 `JUDGE_SECRET`을 `apps/api/.env`와 `apps/judge/.env`에 넣습니다.
+
 ### 2. 실행
 
 ```console
@@ -44,6 +47,7 @@ $ pnpm dev
 
 * 웹: http://localhost:5173 — Google 계정으로 로그인, 관리자 모드는 `/admin`
 * API: http://localhost:8787/api/health
+* judge: http://localhost:8790/health (runner는 judge만 부릅니다)
 
 ## 스택
 

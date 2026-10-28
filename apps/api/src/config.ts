@@ -25,10 +25,9 @@ const EnvSchema = z.object({
   NODE_ENV: optionalString,
   PORT: positiveNumber(8787),
   DATA_DIR: optionalString,
-  RUNNER_URL: optionalString,
-  /** 쉼표로 구분한 runner 주소들. 있으면 RUNNER_URL보다 우선 */
-  RUNNER_URLS: optionalString,
-  RUNNER_SLOTS: positiveNumber(2),
+  /** 채점 서비스(judge) 주소와, API·judge가 나눠 가진 서명 비밀(32자 이상) */
+  JUDGE_URL: optionalString,
+  JUDGE_SECRET: optionalString,
   SESSION_SECRET: optionalString,
   GOOGLE_CLIENT_ID: optionalString,
   GOOGLE_CLIENT_SECRET: optionalString,
@@ -55,9 +54,9 @@ export type Config = {
   port: number;
   dataDir: string;
   production: boolean;
-  runnerUrls: string[];
-  /** runner 한 대에 동시에 보내는 제출 수(runner의 RUN_SLOTS와 맞춘다) */
-  runnerSlots: number;
+  judgeUrl: string;
+  /** judge와의 HMAC 서명 비밀. 개발 환경에서 없으면 프로세스마다 임의 값(judge도 같은 값을 받아야 한다) */
+  judgeSecret: string;
   google: { clientId: string; clientSecret: string } | null;
   ownerEmail: string | null;
   adminPassword: string | null;
@@ -96,11 +95,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.PORT,
     dataDir: resolve(e.DATA_DIR ?? './data'),
     production,
-    runnerUrls: (e.RUNNER_URLS ?? e.RUNNER_URL ?? 'http://127.0.0.1:8000')
-      .split(',')
-      .map((u) => u.trim().replace(/\/$/, ''))
-      .filter(Boolean),
-    runnerSlots: Math.floor(e.RUNNER_SLOTS),
+    judgeUrl: (e.JUDGE_URL ?? 'http://127.0.0.1:8790').replace(/\/$/, ''),
+    judgeSecret: e.JUDGE_SECRET ?? cryptoRandom(),
     google: e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET ? { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET } : null,
     ownerEmail: e.OWNER_EMAIL?.toLowerCase() ?? null,
     adminPassword: e.ACCESS_PASSWORD ?? null,
@@ -126,6 +122,8 @@ function checkSecrets(e: z.infer<typeof EnvSchema>, production: boolean) {
   if (e.TEST_AUTH_TOKEN && e.TEST_AUTH_TOKEN.length < 24) throw new ConfigError('TEST_AUTH_TOKEN은 24자 이상이어야 합니다.');
   if (e.ACCESS_PASSWORD && e.ACCESS_PASSWORD.length < 24) throw new ConfigError('ACCESS_PASSWORD는 24자 이상이어야 합니다.');
   if (e.SESSION_SECRET && e.SESSION_SECRET.length < 32) throw new ConfigError('SESSION_SECRET은 32자 이상이어야 합니다.');
+  if (production && !e.JUDGE_SECRET) throw new ConfigError('운영 환경에는 JUDGE_SECRET이 필요합니다.');
+  if (e.JUDGE_SECRET && e.JUDGE_SECRET.length < 32) throw new ConfigError('JUDGE_SECRET은 32자 이상이어야 합니다.');
 
   const r2Values = [e.R2_ACCOUNT_ID, e.R2_ACCESS_KEY_ID, e.R2_SECRET_ACCESS_KEY, e.R2_BUCKET];
   if (e.R2_PROXY_SECRET && e.R2_PROXY_SECRET.length < 32) throw new ConfigError('R2_PROXY_SECRET은 32자 이상이어야 합니다.');

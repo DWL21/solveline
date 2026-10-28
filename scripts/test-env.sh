@@ -22,8 +22,11 @@ case "${1:-up}" in
         echo "E2E_SESSION_SECRET=$(rand)"
         echo "E2E_TEST_AUTH_TOKEN=$(rand)"
         echo "E2E_MASTER_PASSWORD=$(rand)"
+        echo "E2E_JUDGE_SECRET=$(rand)"
       } > "$ENV_FILE"
     fi
+    # judge 분리 전에 만든 파일에는 judge 비밀이 없다
+    grep -q '^E2E_JUDGE_SECRET=' "$ENV_FILE" || (umask 077; echo "E2E_JUDGE_SECRET=$(rand)" >> "$ENV_FILE")
     set -a; . "$ENV_FILE"; set +a
     # CI가 캐시로 빌드·로드한 이미지는 다시 빌드하지 않는다. 로컬 기본 동작은 빌드다.
     BUILD_ARGS=(--build)
@@ -34,12 +37,12 @@ case "${1:-up}" in
     ;;
   down)
     if [ -f "$ENV_FILE" ]; then set -a; . "$ENV_FILE"; set +a; fi
-    E2E_SESSION_SECRET=${E2E_SESSION_SECRET:-x} E2E_TEST_AUTH_TOKEN=${E2E_TEST_AUTH_TOKEN:-x} E2E_MASTER_PASSWORD=${E2E_MASTER_PASSWORD:-x} \
+    E2E_SESSION_SECRET=${E2E_SESSION_SECRET:-x} E2E_TEST_AUTH_TOKEN=${E2E_TEST_AUTH_TOKEN:-x} E2E_MASTER_PASSWORD=${E2E_MASTER_PASSWORD:-x} E2E_JUDGE_SECRET=${E2E_JUDGE_SECRET:-x} \
       "${COMPOSE[@]}" down --remove-orphans --volumes
     ;;
   logs)
     if [ -f "$ENV_FILE" ]; then set -a; . "$ENV_FILE"; set +a; fi
-    E2E_SESSION_SECRET=${E2E_SESSION_SECRET:-x} E2E_TEST_AUTH_TOKEN=${E2E_TEST_AUTH_TOKEN:-x} E2E_MASTER_PASSWORD=${E2E_MASTER_PASSWORD:-x} \
+    E2E_SESSION_SECRET=${E2E_SESSION_SECRET:-x} E2E_TEST_AUTH_TOKEN=${E2E_TEST_AUTH_TOKEN:-x} E2E_MASTER_PASSWORD=${E2E_MASTER_PASSWORD:-x} E2E_JUDGE_SECRET=${E2E_JUDGE_SECRET:-x} \
       "${COMPOSE[@]}" logs --no-color --timestamps
     ;;
   *) echo "사용법: $0 up|down|logs" >&2; exit 2 ;;

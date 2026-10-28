@@ -31,6 +31,16 @@ runs:
         load: true
         cache-from: type=gha,scope=solveline-api-amd64-v1
         cache-to: type=gha,mode=max,scope=solveline-api-amd64-v1
+    - name: Judge image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: docker/judge.Dockerfile
+        platforms: linux/amd64
+        tags: ${{ inputs.image-prefix }}-judge
+        load: true
+        cache-from: type=gha,scope=solveline-judge-amd64-v1
+        cache-to: type=gha,mode=max,scope=solveline-judge-amd64-v1
     - name: Web image
       uses: docker/build-push-action@v7
       with:

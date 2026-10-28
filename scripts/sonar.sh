@@ -19,7 +19,9 @@ cleanup() { if [ "${SONAR_KEEP:-0}" != 1 ]; then "${COMPOSE[@]}" down -v >/dev/n
 trap cleanup EXIT
 
 echo "▶ 커버리지 측정"
-(cd apps/api && pnpm -s exec vitest run --coverage >/dev/null 2>&1) || { echo '커버리지 측정 실패'; exit 1; }
+for app in api judge; do
+  (cd "apps/$app" && pnpm -s exec vitest run --coverage >/dev/null 2>&1) || { echo "커버리지 측정 실패($app)"; exit 1; }
+done
 
 echo "▶ SonarQube 시작"
 "${COMPOSE[@]}" up -d --wait --wait-timeout 600

@@ -8,11 +8,12 @@
 
 | 경로 | 내용 | 실행 환경 |
 |---|---|---|
-| `apps/api` | Hono REST API, Google 로그인·관리자 모드, 문제 저장(SQLite), 히든 테스트셋(해시 파일), 제출 큐·디스패처, 매일 백업 | Node 24 (Docker, pahidc) |
+| `apps/api` | Hono REST API, Google 로그인·관리자 모드, 문제 저장(SQLite), 제출 기록·judge 클라이언트, 매일 백업 | Node 24 (Docker, pahidc) |
+| `apps/judge` | 채점 서비스: 제출 대기열·디스패처, 히든 테스트셋(해시 파일, R2 미러), runner 호출 | Node 24 (Docker, pahidc) |
 | `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE, `public/_worker.js`(카탈로그 캐시·R2 읽기, 나머지 `/api/*`는 Tunnel로) | Cloudflare Pages |
 | `runner` | 코드 실행 서버(Python 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 21.0.2, Python 3.13.13) |
-| `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
-| `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 API 이미지·nginx 게이트웨이·배포 | pahidc |
+| `packages/shared` | API 계약(Zod 스키마·타입), api↔judge 계약·서명, 기본 코드 템플릿 | api·judge·web 공용 |
+| `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 API·judge 이미지·nginx 게이트웨이·배포 | pahidc |
 | `.github/workflows` | 통합 CI(`ci.yml`), 배포(`deploy.yml`), 운영 스모크(`smoke.yml`) | GitHub-hosted / self-hosted(pahidc) |
 | `docs/decisions` | 결정 기록 | — |
 
@@ -32,11 +33,12 @@
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
 | `ACCESS_PASSWORD` (관리자 모드 마스터 비밀번호), `GOOGLE_CLIENT_SECRET` | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
+| `JUDGE_SECRET` (api↔judge 서명) | 개발은 비워 두면 임의 값(judge에도 같은 값을 줘야 한다) | GitHub Environment `production` **secrets** → `api.env`·`judge.env` |
 | `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 
-- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/solveline/api.env`(root, 600)로 기록한다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
-- 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`의 `env:`와 `KEYS`(필수면 `REQUIRED`도)에 함께 추가해야 반영된다.
+- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/solveline/api.env`·`judge.env`(root, 600)로 기록한다. judge.env에는 judge가 쓰는 값(`JUDGE_SECRET`, R2 설정)만 넣는다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
+- 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`의 `env:`와 `KEYS`(judge가 쓰면 `JUDGE_KEYS`, 필수면 `REQUIRED`도)에 함께 추가해야 반영된다.
 - `production` 환경은 `main` 브랜치에서만 쓸 수 있다(deployment branch policy).
 - `.env.example`은 커밋 대상이다. 실제 값을 넣지 않는다.
 - 키·토큰·비밀번호·쿠키·`.env` 내용을 **커밋·PR 본문·이슈·로그·출력에 남기지 않는다.**
@@ -51,7 +53,8 @@
 
 ## 코드 실행 샌드박스 규칙
 
-- 사용자 코드는 `runner` 컨테이너에서만 실행한다. api·web 컨테이너에서 실행하지 않는다.
+- 사용자 코드는 `runner` 컨테이너에서만 실행한다. api·judge·web 컨테이너에서 실행하지 않는다.
+- `sandbox` 네트워크에는 runner와 judge만 붙는다. api는 runner에 직접 닿지 않는다.
 - runner는 `internal: true` 네트워크에만 붙어 **인터넷에 나갈 수 없다**. 포트를 호스트에 열지 않는다.
 - runner 서버는 root로 돌지만 capability는 `CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`만 남긴다. 사용자 코드는 항상 `sandbox`(uid 10001)로 낮추고 새 세션·rlimit(CPU, 파일 크기, 프로세스 수, Python 주소 공간)·10초 제한을 건다.
 - 루트 파일시스템은 읽기 전용, 쓰기는 `/tmp` tmpfs(512MB)만. 컨테이너 메모리 1.5GB, CPU 2, PID 512.
@@ -72,12 +75,13 @@
 - R2 키 형식을 바꾸면 `apps/api/src/catalog.ts`와 `apps/web/public/_worker.js`를 함께 고친다.
 - pahidc는 R2 API 키 없이 Worker의 `/api/internal/r2`(공유 비밀 `R2_PROXY_SECRET`)로만 R2에 쓴다. R2 바인딩·변수는 `apps/web/wrangler.toml`이 관리한다.
 
-## 채점 파이프라인 규칙 (0003)
+## 채점 파이프라인 규칙 (0003, 0007)
 
-- 실행은 반드시 제출 큐(`submissions`)를 거친다. api 안의 디스패처만 runner를 부른다. 우선순위: 코드 실행(0) > 제출(1).
-- 히든 케이스는 문제 본문에 넣지 않는다. `DATA_DIR/testsets/<sha256>.json`(바뀌지 않는 파일)에 두고 본문에는 `hiddenTestset {hash, count}`만 둔다.
+- 실행은 반드시 제출 기록(`submissions`)과 judge의 대기열을 거친다. judge만 runner를 부른다. 우선순위: 코드 실행(0) > 제출(1).
+- api와 judge는 서로의 요청에 공유 비밀 `JUDGE_SECRET` HMAC 서명과 시각(±5분)을 붙인다(`packages/shared`의 `judgeHeaders`). judge는 결과를 api `/api/internal/judge/results`로 보내고, 실패하면 남겨 두었다가 다시 보낸다. 결과의 원본은 api(SQLite, 나중에 D1)다.
+- 히든 케이스는 문제 본문에 넣지 않는다. judge가 `DATA_DIR/testsets/<sha256>.json`(바뀌지 않는 파일)에 두고 R2 `testsets/`에 올린다. 본문에는 `hiddenTestset {hash, count}`만 둔다.
 - runner는 상태가 없다. 테스트셋은 해시로 캐시하고, 없으면 409를 돌려 디스패처가 올리게 한다. runner를 늘릴 때는 `RUNNER_URLS`에 더한다.
-- 디스패처는 api 프로세스 안에 있으므로 api는 1대만 띄운다(여러 대가 필요하면 외부 큐로 옮긴다).
+- 디스패처는 judge 프로세스 안에 있으므로 judge는 1대만 띄운다(대기열은 `DATA_DIR/judge/judge.db`).
 - 백업: api가 매일 `DATA_DIR/backups`에 DB 스냅숏(7일)과 테스트셋 사본을 남긴다. 30일 지난 제출 기록과 안 쓰는 테스트셋은 정리한다.
 
 ## 접근 제어
@@ -91,7 +95,7 @@
 - **관리자 모드**(`/admin`): 마스터 비밀번호 `ACCESS_PASSWORD`로만 연다(상수 시간 비교, IP별 분당 5회·전체 시간당 60회, 12시간짜리 서명 쿠키). 사용자 목록·상세, 편집 권한 부여·회수, 신규 가입 전체 허용·중지.
 - **신규 가입 제어**(`signup_settings`): 기본값은 허용. 마스터가 전체 중지하면 가입 대기 계정을 포함한 신규 가입만 막고, 기존 회원 로그인·세션은 유지한다. 설정은 DB에 저장한다. 이메일 블랙리스트는 사용하지 않는다.
 
-비밀 값(`ACCESS_PASSWORD`, `SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`)은 GitHub Environment `production` secret에만 두고 코드·이슈·PR·로그·Actions 출력에 남기지 않는다. 계약은 `packages/shared/src/index.ts`.
+비밀 값(`ACCESS_PASSWORD`, `SESSION_SECRET`, `GOOGLE_CLIENT_SECRET`, `JUDGE_SECRET`, `R2_PROXY_SECRET`)은 GitHub Environment `production` secret에만 두고 코드·이슈·PR·로그·Actions 출력에 남기지 않는다. 계약은 `packages/shared/src/index.ts`.
 
 ## 코드 규칙
 

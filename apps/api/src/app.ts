@@ -26,6 +26,10 @@ import {
   RunRequest,
   RunResult,
   Submission,
+  JudgeStatus,
+  verifyJudge,
+  lastSubmissionOf,
+  type TestCase,
   SubmissionDetail,
   SubmissionHistory,
   SubmissionRequest,
@@ -52,17 +56,14 @@ import { passwordMatches } from './auth/password.ts';
 import { challengeOf, GoogleAuthError, googleClient, newVerifier, type GoogleClient } from './auth/google.ts';
 import { RateLimiter } from './auth/rate-limit.ts';
 import { SessionStore } from './auth/sessions.ts';
-import { CaseInputError, validateCases, type RunnerClient } from './runner.ts';
-import { Dispatcher, SubmissionStore } from './dispatcher.ts';
-import { TestsetStore } from './testsets.ts';
+import { JudgeError, type Judge } from './judge.ts';
+import { isTerminal, SubmissionStore } from './submissions.ts';
 import { buildCatalog, CatalogPublisher } from './catalog.ts';
 import { sqliteSql, type Sql } from './sql.ts';
-import type { ObjectStore } from './r2.ts';
+import type { ObjectStore } from '@solveline/judge/r2';
 import { log } from './redact.ts';
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 502 | 503;
-
-type Runner = Pick<RunnerClient, 'run' | 'runtime' | 'cancel'>;
 
 export type AppDeps = {
   config: Config;
@@ -70,8 +71,8 @@ export type AppDeps = {
   /** 저장소가 쓰는 SQL. 없으면 db(better-sqlite3)를 쓴다. Worker에서는 D1 */
   sql?: Sql;
   /** runner 여러 대. 디스패처가 빈 슬롯에 나눠 보낸다. */
-  runners: Runner[];
-  testsets?: TestsetStore;
+  /** 채점 서비스(pahidc). 실행·대기열·히든 테스트셋은 judge가 맡는다 */
+  judge: Judge;
   /** 공용 문제 데이터·테스트셋을 게시할 R2. 없으면 게시하지 않는다(데이터는 SQLite·로컬 파일에만) */
   objectStore?: ObjectStore | null;
   /** 테스트에서 Google 대신 끼워 넣는다. 없으면 config.google로 만든다. */
@@ -130,23 +131,21 @@ const clientIp = (c: Context) =>
   c.req.header('cf-connecting-ip') ?? c.req.header('x-real-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
 
 export function createApp(deps: AppDeps) {
-  const { config, db, runners } = deps;
+  const { config, db, judge } = deps;
   const sql = deps.sql ?? sqliteSql(db);
-  const testsets = deps.testsets ?? new TestsetStore(':memory:');
   const now = deps.now ?? Date.now;
   const sessions = new SessionStore(sql, config.sessionTtlMs);
   const temporaryTtlMs = Math.min(config.sessionTtlMs, 24 * 3_600_000);
   const temporarySessions = new SessionStore(sql, temporaryTtlMs);
-  const problems = new ProblemStore(sql, testsets);
-  const submissions = new SubmissionStore(db);
-  const dispatcher = new Dispatcher(submissions, problems, testsets, runners as RunnerClient[], config.runnerSlots);
+  const problems = new ProblemStore(sql);
+  const submissions = new SubmissionStore(sql);
   const folders = new FolderStore(sql);
   const collections = new CollectionStore(sql);
   const users = new UserStore(sql);
   const signupSettings = new SignupSettingsStore(sql);
   const catalogSource = async () => ({ problems: await problems.catalogProblems(), folders: await folders.list(null), collections: await collections.list() });
   const catalog = deps.objectStore
-    ? new CatalogPublisher(deps.objectStore, catalogSource, testsets, async () => new Set([...(await problems.testsetHashes()), ...submissions.activeTestsets()]))
+    ? new CatalogPublisher(deps.objectStore, catalogSource)
     : null;
   const configuredGoogle = () => (config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null);
   const google = deps.google === undefined ? configuredGoogle() : deps.google;
@@ -165,6 +164,7 @@ export function createApp(deps: AppDeps) {
   app.use('/api/*', cors({ origin: config.webOrigin, credentials: true, allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowHeaders: ['content-type', 'x-draft-owner'] }));
   app.onError((err, c) => {
     if (err instanceof StoreError) return fail(c, err.code === 'duplicate_name' ? 409 : 400, err.code, err.message);
+    if (err instanceof JudgeError) return fail(c, err.status === 400 || err.status === 404 || err.status === 409 ? err.status : 502, err.code, err.message);
     log.error(`[api] ${c.req.path}`, err);
     return fail(c, 500, 'internal', '요청을 처리하지 못했습니다.');
   });
@@ -487,7 +487,7 @@ export function createApp(deps: AppDeps) {
 
   app.use('/api/*', async (c, next) => {
     const p = c.req.path;
-    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/catalog/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
+    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/catalog/') || p.startsWith('/api/internal/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
     const s = await readSession(c);
     const u = s ? await users.byId(s.userId) : null;
     if (!s || !u) {
@@ -511,10 +511,13 @@ export function createApp(deps: AppDeps) {
   };
 
   // 실행 환경: runner 중 하나라도 살아 있으면 up
-  app.get('/api/runtime', async (c) => {
-    const all = await Promise.all(runners.map((r) => r.runtime()));
-    return ok(c, Runtime, all.find((r) => r.runner === 'up') ?? all[0] ?? { runner: 'down', versions: { java: null, python: null } });
-  });
+  app.get('/api/runtime', async (c) => ok(c, Runtime, await judge.runtime()));
+
+  /** 예전 형식: 문제 입력의 cases에 hidden 케이스가 있으면 judge에 테스트셋으로 저장한다(편집 권한자만) */
+  const inlineHidden = async (cases: TestCase[] | undefined, editor: boolean) => {
+    const hidden = cases?.filter((x) => x.hidden) ?? [];
+    return editor && hidden.length ? await judge.putTestset(hidden) : undefined;
+  };
 
   // ─── 내 풀이 상태(사용자 데이터, pahidc SQLite). 웹이 카탈로그와 합친다 ───
   app.get('/api/me/problems', async (c) => ok(c, z.array(MyProblemSummary), await problems.mySummaries(c.get('userId'))));
@@ -539,7 +542,7 @@ export function createApp(deps: AppDeps) {
   app.post('/api/problems', editorOnly, async (c) => {
     const body = await readJson(c, ProblemInput);
     if (!body) return fail(c, 400, 'invalid_request', '문제 형식이 올바르지 않습니다.');
-    return ok(c, Problem, await problems.create(body, c.get('userId')));
+    return ok(c, Problem, await problems.create(body, c.get('userId'), await inlineHidden(body.cases, true)));
   });
 
   app.get('/api/problems/:id', async (c) => {
@@ -551,7 +554,7 @@ export function createApp(deps: AppDeps) {
   app.put('/api/problems/:id', async (c) => {
     const body = await readJson(c, ProblemInput);
     if (!body) return fail(c, 400, 'invalid_request', '문제 형식이 올바르지 않습니다.');
-    const p = await problems.update(c.req.param('id'), body, c.get('userId'), c.get('editor'));
+    const p = await problems.update(c.req.param('id'), body, c.get('userId'), c.get('editor'), await inlineHidden(body.cases, c.get('editor')));
     return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
@@ -562,7 +565,7 @@ export function createApp(deps: AppDeps) {
       return fail(c, 409, 'draft_owner_mismatch', '계정이 변경되어 동기화를 중지했어요. 다시 로그인해 주세요.');
     const body = await readJson(c, ProblemPatch);
     if (!body) return fail(c, 400, 'invalid_request', '변경 내용의 형식이 올바르지 않습니다.');
-    const p = await problems.patch(c.req.param('id'), body, c.get('userId'), c.get('editor'));
+    const p = await problems.patch(c.req.param('id'), body, c.get('userId'), c.get('editor'), await inlineHidden(body.cases, c.get('editor')));
     return p ? ok(c, Problem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
@@ -627,46 +630,57 @@ export function createApp(deps: AppDeps) {
 
   // ─── 히든 테스트셋(공용 채점 케이스): 편집 권한자만 보고 고친다 ───
   app.get('/api/problems/:id/hidden', editorOnly, async (c) => {
-    const cases = await problems.hidden(c.req.param('id')!);
-    return cases ? ok(c, HiddenCases, { cases }) : fail(c, 404, 'not_found', '없는 문제입니다.');
+    const ref = await problems.hiddenRef(c.req.param('id')!);
+    if (ref === false) return fail(c, 404, 'not_found', '없는 문제입니다.');
+    return ok(c, HiddenCases, { cases: ref ? ((await judge.testset(ref.hash)) ?? []) : [] });
   });
 
   app.put('/api/problems/:id/hidden', editorOnly, async (c) => {
     const body = await readJson(c, HiddenCases);
     if (!body) return fail(c, 400, 'invalid_request', '히든 케이스 형식이 올바르지 않습니다.');
-    const ref = await problems.setHidden(c.req.param('id')!, body.cases.map((x) => ({ ...x, hidden: true })));
-    if (ref === false) return fail(c, 404, 'not_found', '없는 문제입니다.');
-    return ok(c, HiddenCases, { cases: await problems.hidden(c.req.param('id')!) ?? [] });
+    if ((await problems.hiddenRef(c.req.param('id')!)) === false) return fail(c, 404, 'not_found', '없는 문제입니다.');
+    const ref = await judge.putTestset(body.cases.map((x) => ({ ...x, hidden: true })));
+    await problems.setHidden(c.req.param('id')!, ref);
+    return ok(c, HiddenCases, { cases: ref ? ((await judge.testset(ref.hash)) ?? []) : [] });
   });
 
-  // ─── 제출 큐 ───
-  /** 요청을 검사해 대기열에 넣는다. 오류면 [status, code, message]를 돌려준다. */
-  const enqueue = async (userId: string, req: SubmissionRequest, timeLimitOverride?: number): Promise<string | [Status, string, string]> => {
+  // ─── 제출: 기록은 여기, 실행은 judge ───
+  /** judge가 알려 준 상태를 기록하고, 채점이 처음 끝났으면 그 사용자의 마지막 제출을 갱신한다 */
+  const record = async (s: JudgeStatus): Promise<Submission | null> => {
+    const applied = await submissions.apply(s);
+    if (!applied) return null;
+    const sub = applied.submission;
+    if (applied.finished && sub.kind === 'submit' && sub.status === 'done' && sub.result && sub.problemId && applied.userId)
+      await problems.setLastSubmission(sub.problemId, applied.userId, lastSubmissionOf(sub.result, sub.caseIds.length, sub.language, sub.finishedAt ?? new Date(now()).toISOString()));
+    return sub;
+  };
+
+  /** 기록을 남기고 judge에 맡긴다. judge가 거절하면(잘못된 케이스 등) 기록을 지우고 오류를 그대로 돌려준다. */
+  const enqueue = async (userId: string, req: SubmissionRequest, wait: number, timeLimitOverride?: number): Promise<Submission | [Status, string, string]> => {
     const problem = req.problemId ? await problems.get(req.problemId, userId) : null;
     if (req.problemId && !problem) return [404, 'not_found', '없는 문제입니다.'];
     const timeLimitMs = problem?.timeLimitMs ?? timeLimitOverride ?? 10_000;
+    // 코드 실행은 보이는 케이스, 제출은 히든 테스트셋(없으면 요청의 케이스)
+    const ref = req.kind === 'submit' ? problem?.hiddenTestset : null;
+    const cases = ref ? null : req.kind === 'run' ? req.cases.filter((x) => !x.hidden) : req.cases;
+    const id = randomUUID();
+    await submissions.insert({ id, userId, problemId: req.problemId, kind: req.kind, language: req.language, mode: req.mode, code: req.code, cases, testsetHash: ref?.hash ?? null, timeLimitMs });
     try {
-      if (req.kind === 'run') {
-        const cases = req.cases.filter((x) => !x.hidden);
-        if (!cases.length) return [400, 'no_cases', '실행할 테스트 케이스가 없습니다.'];
-        validateCases(req.mode, cases);
-        return submissions.insert({ userId, ...req, cases, testsetHash: null, caseIds: cases.map((x) => x.id), timeLimitMs });
-      }
-      const ref = problem?.hiddenTestset;
-      if (ref) {
-        const cases = testsets.get(ref.hash);
-        if (!cases) return [500, 'testset_missing', '테스트셋 파일이 없습니다.'];
-        if (cases.some((x) => !x.expected.trim())) return [400, 'no_expected', '기댓값이 없는 히든 케이스가 있습니다.'];
-        validateCases(req.mode, cases);
-        return submissions.insert({ userId, ...req, cases: null, testsetHash: ref.hash, caseIds: cases.map((x) => x.id), timeLimitMs });
-      }
-      if (!req.cases.length || req.cases.some((x) => !x.expected.trim())) return [400, 'no_expected', '채점하려면 기댓값이 있는 테스트 케이스가 필요합니다.'];
-      validateCases(req.mode, req.cases);
-      return submissions.insert({ userId, ...req, testsetHash: null, caseIds: req.cases.map((x) => x.id), timeLimitMs });
+      const s = await judge.submit({ id, kind: req.kind, language: req.language, mode: req.mode, code: req.code, cases, testsetHash: ref?.hash ?? null, timeLimitMs }, wait);
+      return (await record(s))!;
     } catch (e) {
-      if (e instanceof CaseInputError) return [400, 'invalid_case', e.message];
-      throw e;
+      if (!(e instanceof JudgeError) || e.status >= 500) throw e;
+      await submissions.remove(id);
+      return [e.status === 409 ? 500 : 400, e.code, e.message];
     }
+  };
+
+  /** 아직 안 끝났으면 judge에 묻는다(긴 조회). judge가 모르면 마지막으로 기록한 상태 */
+  const refresh = async (id: string, wait: number): Promise<Submission | null> => {
+    const cur = await submissions.get(id);
+    if (!cur || isTerminal(cur.status)) return cur;
+    const s = await judge.status(id, wait);
+    return s ? record(s) : cur;
   };
 
   /** 긴 조회 대기 시간(?wait=초, 최대 25초: 프록시 응답 제한보다 충분히 짧게) */
@@ -684,54 +698,69 @@ export function createApp(deps: AppDeps) {
     if (blocked) return blocked;
     const body = await readJson(c, SubmissionRequest);
     if (!body) return fail(c, 400, 'invalid_request', '제출 형식이 올바르지 않습니다.');
-    const id = await enqueue(c.get('userId'), body);
-    if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
-    dispatcher.kick();
     // ?wait=초: 짧은 실행은 이 요청 하나로 결과까지 받는다
-    const s = (await dispatcher.poll(id, waitMs(c))) ?? submissions.get(id)!;
-    if (s.status === 'queued' || s.status === 'running') c.status(202);
+    const s = await enqueue(c.get('userId'), body, waitMs(c));
+    if (Array.isArray(s)) return fail(c, s[0], s[1], s[2]);
+    if (!isTerminal(s.status)) c.status(202);
     return ok(c, Submission, s);
   });
 
   app.get('/api/submissions', async (c) => {
     const raw = c.req.query('offset') ?? '0';
     if (!/^(0|[1-9]\d*)$/.test(raw) || Number(raw) > 100_000) return fail(c, 400, 'invalid_offset', '조회 위치가 올바르지 않습니다.');
-    return ok(c, SubmissionHistory, submissions.history(c.get('userId'), Number(raw)));
+    return ok(c, SubmissionHistory, await submissions.history(c.get('userId'), Number(raw)));
   });
 
   app.get('/api/submissions/:id/detail', async (c) => {
-    const detail = submissions.detail(c.req.param('id'), c.get('userId'));
+    const detail = await submissions.detail(c.req.param('id'), c.get('userId'));
     return detail ? ok(c, SubmissionDetail, detail) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
   app.get('/api/submissions/:id', async (c) => {
     const id = c.req.param('id');
-    const s = submissions.ownedBy(id, c.get('userId')) ? await dispatcher.poll(id, waitMs(c)) : null;
+    const s = (await submissions.ownedBy(id, c.get('userId'))) ? await refresh(id, waitMs(c)) : null;
     return s ? ok(c, Submission, s) : fail(c, 404, 'not_found', '없는 제출입니다.');
   });
 
   /** 실행·채점 중지. 이미 끝난 제출이면 그대로 돌려준다. */
   app.post('/api/submissions/:id/cancel', async (c) => {
     const id = c.req.param('id');
-    const s = submissions.ownedBy(id, c.get('userId')) ? await dispatcher.cancel(id) : null;
-    return s ? ok(c, Submission, s) : fail(c, 404, 'not_found', '없는 제출입니다.');
+    if (!(await submissions.ownedBy(id, c.get('userId')))) return fail(c, 404, 'not_found', '없는 제출입니다.');
+    const st = await judge.cancel(id);
+    const s = st ? await record(st) : await submissions.get(id);
+    return ok(c, Submission, s!);
   });
 
-  /** 동기 실행(스크립트용): 대기열에 넣고 끝날 때까지 기다린다 */
+  /** judge가 끝난 결과를 보낸다(서명 확인). 같은 결과를 여러 번 받아도 한 번만 반영한다. */
+  app.post('/api/internal/judge/results', async (c) => {
+    const body = await c.req.text();
+    if (!config.judgeSecret || !(await verifyJudge(config.judgeSecret, (n) => c.req.header(n), 'POST', '/api/internal/judge/results', body, now())))
+      return fail(c, 401, 'bad_signature', '서명이 올바르지 않습니다.');
+    let parsed: ReturnType<typeof JudgeStatus.safeParse>;
+    try {
+      parsed = JudgeStatus.safeParse(JSON.parse(body));
+    } catch {
+      return fail(c, 400, 'invalid_request', '결과 형식이 올바르지 않습니다.');
+    }
+    if (!parsed.success) return fail(c, 400, 'invalid_request', '결과 형식이 올바르지 않습니다.');
+    const s = await record(parsed.data);
+    return s ? c.json({ data: { recorded: true } }) : fail(c, 404, 'not_found', '없는 제출입니다.');
+  });
+
+  /** 동기 실행(스크립트용): judge에 맡기고 끝날 때까지 기다린다 */
   app.post('/api/run', async (c) => {
     const blocked = limited(c);
     if (blocked) return blocked;
     const body = await readJson(c, RunRequest);
     if (!body) return fail(c, 400, 'invalid_request', '실행 요청 형식이 올바르지 않습니다.');
     const { timeLimitMs, ...rest } = body;
-    const id = await enqueue(c.get('userId'), { problemId: null, kind: 'run', ...rest, cases: body.cases.map((x) => ({ ...x, hidden: false })) }, timeLimitMs);
-    if (typeof id !== 'string') return fail(c, id[0], id[1], id[2]);
-    dispatcher.kick();
-    const done = await dispatcher.wait(id);
-    if (done.status === 'cancelled') return fail(c, 409, 'cancelled', '실행이 중지되었습니다.');
-    if (done.status === 'error' || !done.result) return fail(c, 502, 'runner_error', done.error ?? '실행하지 못했습니다.');
-    return ok(c, RunResult, done.result);
+    let s = await enqueue(c.get('userId'), { problemId: null, kind: 'run', ...rest, cases: body.cases.map((x) => ({ ...x, hidden: false })) }, 25_000, timeLimitMs);
+    if (Array.isArray(s)) return fail(c, s[0], s[1], s[2]);
+    while (!isTerminal(s.status)) s = (await refresh(s.id, 25_000))!;
+    if (s.status === 'cancelled') return fail(c, 409, 'cancelled', '실행이 중지되었습니다.');
+    if (s.status === 'error' || !s.result) return fail(c, 502, 'runner_error', s.error ?? '실행하지 못했습니다.');
+    return ok(c, RunResult, s.result);
   });
 
-  return { app, dispatcher, problems, submissions, testsets, catalog };
+  return { app, problems, submissions, catalog, record };
 }

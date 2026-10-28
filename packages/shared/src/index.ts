@@ -421,3 +421,62 @@ export const RoleInput = z.object({ editor: z.boolean() });
 /** 신규 가입만 제어한다. 기존 회원의 로그인·세션에는 영향을 주지 않는다. */
 export const SignupSettings = z.object({ signupEnabled: z.boolean() });
 export type SignupSettings = z.infer<typeof SignupSettings>;
+
+// ─── judge(채점 서비스) 계약: API(Worker) ↔ judge(pahidc) ───
+
+/** API가 judge에 맡기는 실행. id는 API가 정한 제출 id. cases와 testsetHash 중 하나만 쓴다. */
+export const JudgeJob = z.object({
+  id: z.string().min(1).max(64),
+  kind: SubmissionKind,
+  language: Language,
+  mode: ProblemMode,
+  code: z.string().max(MAX_TEXT),
+  cases: z.array(TestCase).max(60).nullable(),
+  testsetHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  timeLimitMs: z.number().int().min(100).max(10_000),
+});
+export type JudgeJob = z.infer<typeof JudgeJob>;
+
+/** judge가 아는 실행 상태. 끝나면 같은 모양으로 API에 결과를 보낸다(콜백). */
+export const JudgeStatus = z.object({
+  id: z.string(),
+  status: SubmissionStatus,
+  ahead: z.number().int().min(0).nullable(),
+  caseIds: z.array(z.string()),
+  result: RunResult.nullable(),
+  score: z.number().int().min(0).max(100).nullable(),
+  error: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type JudgeStatus = z.infer<typeof JudgeStatus>;
+
+export const JUDGE_SIGNATURE_HEADER = 'x-judge-signature';
+export const JUDGE_TIMESTAMP_HEADER = 'x-judge-timestamp';
+/** 서명 시각 허용 오차(재전송 방지) */
+const JUDGE_SKEW_MS = 5 * 60_000;
+
+const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/** HMAC-SHA256(시각·메서드·경로·본문). WebCrypto라 Node와 Worker에서 똑같이 돈다. */
+export async function judgeSignature(secret: string, timestamp: string, method: string, path: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestamp}\n${method.toUpperCase()}\n${path}\n${body}`)));
+}
+
+/** 요청에 붙일 서명 헤더 */
+export async function judgeHeaders(secret: string, method: string, path: string, body: string, now = Date.now()): Promise<Record<string, string>> {
+  const ts = String(now);
+  return { [JUDGE_TIMESTAMP_HEADER]: ts, [JUDGE_SIGNATURE_HEADER]: await judgeSignature(secret, ts, method, path, body) };
+}
+
+/** 서명·시각 검사. 길이가 같은 문자열을 끝까지 비교한다(시간 차로 서명을 알아내지 못하게). */
+export async function verifyJudge(secret: string, header: (name: string) => string | undefined, method: string, path: string, body: string, now = Date.now()): Promise<boolean> {
+  const ts = header(JUDGE_TIMESTAMP_HEADER);
+  const sig = header(JUDGE_SIGNATURE_HEADER);
+  if (!ts || !sig || !/^\d+$/.test(ts) || Math.abs(now - Number(ts)) > JUDGE_SKEW_MS) return false;
+  const expected = await judgeSignature(secret, ts, method, path, body);
+  if (expected.length !== sig.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+  return diff === 0;
+}

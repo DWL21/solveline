@@ -16,18 +16,22 @@
 solveline.simplyimg.com ─ Cloudflare Pages (web 정적 파일)
                         └─ /api/* → Pages 프록시 → solveline-api.simplyimg.com
                                                    └─ Cloudflare Tunnel → pahidc 127.0.0.1:8083
-                                                       └─ nginx → api:8787 (Hono, SQLite, 제출 큐)
-                                                                  └─ runner:8000 (internal 네트워크)
+                                                       └─ nginx → api:8787 (Hono, SQLite, 제출 기록)
+                                                                  └─ judge:8790 (대기열·디스패처·테스트셋 캐시, HMAC 서명)
+                                                                     └─ runner:8000 (internal 네트워크)
 ```
+
+api는 runner에 직접 닿지 않습니다(sandbox 네트워크 밖). 실행은 judge에 맡기고, judge가 끝난 결과를 api의 `/api/internal/judge/results`로 보냅니다([`decisions/0007-serverless-worker-and-judge.md`](decisions/0007-serverless-worker-and-judge.md)).
 
 채점 흐름(자세히는 [`decisions/0003-judge-pipeline.md`](decisions/0003-judge-pipeline.md)):
 
 ```
-브라우저 ─POST /api/submissions─▶ api: submissions 표(queued) ─디스패처(코드 실행 > 제출)─▶ 빈 runner 슬롯
-   └─ GET /api/submissions/:id 로 결과 조회         runner: 테스트셋을 해시로 캐시, 없을 때만 받음 (409 → 업로드)
+브라우저 ─POST /api/submissions─▶ api: submissions 표(queued) ─서명 POST /jobs─▶ judge: 대기열 ─디스패처(코드 실행 > 제출)─▶ 빈 runner 슬롯
+   └─ GET /api/submissions/:id?wait= 로 결과 조회(judge에 긴 조회 위임)   runner: 테스트셋을 해시로 캐시, 없을 때만 받음 (409 → 업로드)
+judge ─서명 POST /api/internal/judge/results─▶ api: 결과·점수·마지막 제출 기록(같은 결과는 한 번만 반영)
 ```
 
-`main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/api.env` 기록 → web 빌드 → API·runner·게이트웨이 `docker compose up --build` → Pages 업로드 → 공개 주소 헬스 체크. PR의 `check`, `docker`, `secret-scan`은 기존처럼 GitHub-hosted에서 실행합니다.
+`main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/api.env`·`judge.env` 기록 → web 빌드 → API·judge·runner·게이트웨이 `docker compose up --build` → Pages 업로드 → 공개 주소 헬스 체크. PR의 `check`, `docker`, `secret-scan`은 기존처럼 GitHub-hosted에서 실행합니다.
 
 배포 준비·전환·롤백은 [Pages 배포](pages-deployment.md)를 참고하세요.
 
