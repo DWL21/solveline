@@ -8,9 +8,9 @@
 |---|---|---|
 | #120·#125·#130 | 카탈로그 분리·엣지 캐시, 긴 조회·저장 간격, Worker 경유 R2 게시 | 머지·배포 완료 |
 | #128 | 1단계: 저장소 비동기 `Sql`, D1 어댑터 | 머지·배포 완료 |
-| #133 | `CATALOG_SOURCE = "r2"`(Worker가 R2에서 읽기) | 열림. R2 객체 수 확인 뒤 머지 |
-| #135 | 2단계: `apps/judge` 분리와 배포 구성 | 열림. `JUDGE_SECRET` secret이 생긴 뒤 머지 |
-| #139(Draft, #135 위) | 3단계: API를 Pages Worker로 묶기, D1·R2 바인딩, WebCrypto, D1 요청 제한, D1 스키마 | #135 머지 뒤 main을 merge하고 Ready |
+| #133 | `CATALOG_SOURCE = "r2"`(Worker가 R2에서 읽기) | 머지·배포 완료(ETag 32자 hex, 문제 1,046개 확인) |
+| #135 | 2단계: `apps/judge` 분리와 배포 구성 | 머지·배포 완료(`/api/runtime`이 judge를 거쳐 runner up) |
+| #139 | 3단계: API를 Pages Worker로 묶기, D1·R2 바인딩, WebCrypto, D1 요청 제한, D1 스키마 | 열림(Ready). CI 통과 뒤 머지 |
 | #140 이슈의 PR(Draft, #139 위) | 4단계: D1 매일 암호화 백업·정리 워크플로 | #139 머지 뒤 Ready. 설정 전에는 건너뛴다 |
 
 Cloudflare 쪽:
@@ -20,9 +20,8 @@ Cloudflare 쪽:
 
 ## 남은 일(순서대로)
 
-1. **#133**: 운영자가 `npx wrangler r2 bucket info solveline-catalog`로 객체 수(문제 약 1,046 + 목록 + 테스트셋 51)를 확인하면 머지한다. 배포 뒤 `curl -s -D - -o /dev/null https://solveline.simplyimg.com/api/catalog/index`의 ETag가 32자 hex인지 본다(`curl -I`는 Worker의 GET 분기를 타지 않는다).
-2. **#135**: GitHub secret `JUDGE_SECRET`을 만든 뒤 머지한다. 배포 뒤 `docker compose ps`(SSH는 확인용)로 judge가 healthy인지, 코드 실행·제출이 되는지 본다.
-3. **#139·#140**: 아래 PR이 머지되면 main을 merge(rebase 금지)해 Ready로 바꾸고 CI 통과 뒤 머지한다.
+1. **#133·#135**: 끝났다. 남은 확인: 로그인한 계정으로 운영에서 코드 실행·제출이 judge를 거쳐 끝나는지 본다(운영 스모크는 비회원 경로만 본다).
+2. **#139·#140**: 아래 PR이 머지되면 main을 merge(rebase 금지)해 Ready로 바꾸고 CI 통과 뒤 머지한다.
 4. **3단계에서 남긴 일**(0007 「단계」 3번의 남은 일):
    - 편집할 때 카탈로그 전체를 다시 해시하지 않고 바뀐 문제만 고쳐 쓰기(Workers Free CPU 10ms)
    - Miniflare(wrangler dev)로 Worker 번들 실제 실행 검사
