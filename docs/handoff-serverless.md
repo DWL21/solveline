@@ -7,10 +7,11 @@
 | PR | 내용 | 상태 |
 |---|---|---|
 | #120 | 카탈로그 분리, Worker 엣지 캐시, R2 게시 코드 | 머지·배포 완료 |
-| #125 | 제출 결과 긴 조회, 자동 저장 10초/60초, 타이머 5분 | 머지·배포 중 |
-| #130 | R2 키 없이 Worker `/api/internal/r2`로 게시, Pages R2 바인딩, 상세 바이트 고정 | 열림. CI 통과하면 머지 |
-| #128(Draft) | 1단계: 저장소 비동기 `Sql`, D1 어댑터 | main(#120·#125)을 merge한 뒤 Ready |
-| `refactor/judge` | 2단계: `apps/judge` 분리(진행 중, PR 없음) | 아래 남은 일 |
+| #125 | 제출 결과 긴 조회, 자동 저장 10초/60초, 타이머 5분 | 머지·배포 완료 |
+| #130 | R2 키 없이 Worker `/api/internal/r2`로 게시, Pages R2 바인딩, 상세 바이트 고정 | 머지·배포 완료 |
+| #133 | `CATALOG_SOURCE = "r2"`(Worker가 R2에서 읽기) | 열림. R2 객체 수 확인 뒤 머지 |
+| #128 | 1단계: 저장소 비동기 `Sql`, D1 어댑터 | 머지·배포 완료 |
+| #134 이슈의 PR(`refactor/134`) | 2단계: `apps/judge` 분리와 배포 구성 | 열림. `JUDGE_SECRET` secret이 생긴 뒤 머지 |
 
 Cloudflare 쪽:
 - R2 버킷 `solveline-catalog`를 만들었다.
