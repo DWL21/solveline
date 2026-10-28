@@ -62,9 +62,9 @@ export class CatalogPublisher {
 
   constructor(
     private store: ObjectStore,
-    private source: () => CatalogSource,
+    private source: () => Promise<CatalogSource>,
     private testsets: TestsetStore,
-    private testsetsInUse: () => Set<string>,
+    private testsetsInUse: () => Promise<Set<string>>,
   ) {}
 
   sync(): Promise<SyncResult> {
@@ -82,14 +82,14 @@ export class CatalogPublisher {
   }
 
   private async run(): Promise<SyncResult> {
-    const cat = buildCatalog(this.source());
+    const cat = buildCatalog(await this.source());
     this.published ??= await this.loadPublished();
     this.remoteTestsets ??= new Set((await this.store.list('testsets/')).map((k) => k.slice('testsets/'.length).replace(/\.json\.gz$/, '')));
     const published = this.published;
     const remote = this.remoteTestsets;
 
     // 상세가 가리키는 테스트셋이 먼저 있어야 한다
-    const missing = [...this.testsetsInUse()].filter((h) => !remote.has(h));
+    const missing = [...(await this.testsetsInUse())].filter((h) => !remote.has(h));
     let testsets = 0;
     await pool(missing, 4, async (hash) => {
       const raw = this.testsets.raw(hash);
@@ -119,7 +119,7 @@ export class CatalogPublisher {
   /** 로컬에 없는 테스트셋을 R2에서 받아 둔다(디스크를 잃어도 R2에서 되살린다). 받은 개수를 돌려준다. */
   async hydrate(): Promise<number> {
     let restored = 0;
-    for (const hash of this.testsetsInUse()) {
+    for (const hash of await this.testsetsInUse()) {
       if (this.testsets.raw(hash) !== null) continue;
       const gz = await this.store.get(testsetKey(hash));
       if (!gz) continue;
