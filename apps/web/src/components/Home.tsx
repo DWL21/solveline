@@ -1,5 +1,5 @@
 import { Language } from '@solveline/shared';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
 import { useMe } from '../lib/me.ts';
@@ -479,7 +479,7 @@ function SectionHeader({ kind }: Readonly<{ kind: 'folder' | 'collection' }>) {
       setOpen(false);
     },
   });
-  const submit = (e: FormEvent) => {
+  const submit = (e: SubmitEvent) => {
     e.preventDefault();
     if (name.trim()) create.mutate();
   };
@@ -607,7 +607,7 @@ function MoreSentinel({ onMore, remaining }: Readonly<{ onMore: () => void; rema
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!el || !('IntersectionObserver' in window)) return;
+    if (!el || !('IntersectionObserver' in globalThis)) return;
     const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && onMore(), { rootMargin: '600px' });
     io.observe(el);
     return () => io.disconnect();

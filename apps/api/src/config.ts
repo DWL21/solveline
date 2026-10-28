@@ -5,7 +5,7 @@ import { z } from 'zod';
 const optionalString = z
   .string()
   .optional()
-  .transform((v) => (v && v.trim() ? v.trim() : undefined));
+  .transform((v) => v?.trim() || undefined);
 
 const positiveNumber = (fallback: number) =>
   z
@@ -106,7 +106,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     contactEmail: e.CONTACT_EMAIL ?? e.OWNER_EMAIL ?? null,
     // 개발 편의: 비밀이 없으면 프로세스마다 임의 값 (재시작하면 세션이 무효화된다)
     sessionSecret: e.SESSION_SECRET ?? cryptoRandom(),
-    sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3600_000,
+    sessionTtlMs: e.SESSION_TTL_DAYS * 24 * 3_600_000,
     webOrigin,
     secureCookie: !isLocal,
     testAuthToken: production ? null : (e.TEST_AUTH_TOKEN ?? null),

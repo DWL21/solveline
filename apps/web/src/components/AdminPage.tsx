@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type SubmitEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminUser, AdminUserDetail } from '@solveline/shared';
 import { ApiError, adminApi, qk } from '../lib/api.ts';
@@ -28,7 +28,7 @@ function AdminLogin() {
       qc.setQueryData(qk.admin, s);
     },
   });
-  const submit = (e: FormEvent) => {
+  const submit = (e: SubmitEvent) => {
     e.preventDefault();
     if (password && !login.isPending) login.mutate();
   };

@@ -100,7 +100,7 @@ export type CollectionItemsInput = z.infer<typeof CollectionItemsInput>;
 
 /** 풀이 시간: 문제 화면이 보이는 동안 누적. solvedMs는 처음 100점을 받은 순간의 누적 시간(초기화하면 null). */
 export const ProblemTimer = z.object({
-  elapsedMs: z.number().int().min(0).max(1_000 * 3600 * 24 * 365),
+  elapsedMs: z.number().int().min(0).max(1000 * 3600 * 24 * 365),
   solvedMs: z.number().int().min(0).nullable(),
   /** 사용자가 일시정지했는지(새로고침해도 유지) */
   paused: z.boolean().default(false),
@@ -151,10 +151,10 @@ export type ProblemInput = z.infer<typeof ProblemInput>;
 /** 로컬 임시 저장의 변경분. 보내지 않은 필드는 최신 서버 값을 유지한다. */
 export const ProblemPatch = ProblemInput.omit({ lastSubmission: true }).partial().extend({
   // 부분 업데이트에서는 기존 생성용 기본값을 채우면 안 된다.
-  folderId: ProblemInput.shape.folderId.removeDefault().optional(),
-  timeLimitMs: ProblemInput.shape.timeLimitMs.removeDefault().optional(),
-  myCases: ProblemInput.shape.myCases.removeDefault().optional(),
-  memo: ProblemInput.shape.memo.removeDefault().optional(),
+  folderId: ProblemInput.shape.folderId.unwrap().optional(),
+  timeLimitMs: ProblemInput.shape.timeLimitMs.unwrap().optional(),
+  myCases: ProblemInput.shape.myCases.unwrap().optional(),
+  memo: ProblemInput.shape.memo.unwrap().optional(),
   code: CodeSet.partial().optional(),
   starterCode: CodeSet.partial().optional(),
   timer: ProblemTimer.optional(),

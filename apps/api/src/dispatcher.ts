@@ -59,7 +59,7 @@ export type NewSubmission = {
 };
 
 export class SubmissionStore {
-  constructor(private db: Db) {}
+  constructor(private readonly db: Db) {}
 
   insert(s: NewSubmission, now = new Date()): string {
     const id = randomUUID();
@@ -187,18 +187,18 @@ export class SubmissionStore {
  * runner는 상태가 없으므로 RUNNER_URLS에 주소를 더하면 처리량이 늘어난다.
  */
 export class Dispatcher {
-  private active = new Map<RunnerClient, number>();
-  private waiters = new Map<string, ((s: Submission) => void)[]>();
+  private readonly active = new Map<RunnerClient, number>();
+  private readonly waiters = new Map<string, ((s: Submission) => void)[]>();
   /** 실행 중인 제출 → 맡은 runner, 중지 요청을 받은 제출 */
-  private running = new Map<string, RunnerClient>();
-  private cancelling = new Set<string>();
+  private readonly running = new Map<string, RunnerClient>();
+  private readonly cancelling = new Set<string>();
 
   constructor(
-    private store: SubmissionStore,
-    private problems: ProblemStore,
-    private testsets: TestsetStore,
-    private runners: RunnerClient[],
-    private slotsPerRunner: number,
+    private readonly store: SubmissionStore,
+    private readonly problems: ProblemStore,
+    private readonly testsets: TestsetStore,
+    private readonly runners: RunnerClient[],
+    private readonly slotsPerRunner: number,
   ) {
     for (const r of runners) this.active.set(r, 0);
   }

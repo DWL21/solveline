@@ -40,7 +40,7 @@ export function LoginScreen() {
     try {
       await api.temporaryLogin();
       const next = new URLSearchParams(location.search).get('next');
-      location.href = next && /^\/(?![\/\\])/.test(next) && next.length < 300 ? next : '/';
+      location.href = next && /^\/(?![/\\])/.test(next) && next.length < 300 ? next : '/';
     } catch (e) {
       setTemporaryError(e instanceof Error ? e.message : '임시 로그인에 실패했어요');
       setPending(false);

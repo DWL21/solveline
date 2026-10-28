@@ -16,8 +16,8 @@ export function SolvedDialog({
 }>) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
+    globalThis.addEventListener('keydown', h);
+    return () => globalThis.removeEventListener('keydown', h);
   }, [onClose]);
 
   return (

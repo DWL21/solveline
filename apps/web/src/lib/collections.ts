@@ -22,7 +22,7 @@ export function buildTree(collections: Collection[]): CollectionNode[] {
     const hit = byPath.get(path);
     if (hit) return hit;
     const parts = path.split('/');
-    const node: CollectionNode = { path, name: parts[parts.length - 1]!, depth: parts.length - 1, collection: null, children: [] };
+    const node: CollectionNode = { path, name: parts.at(-1)!, depth: parts.length - 1, collection: null, children: [] };
     byPath.set(path, node);
     if (parts.length === 1) roots.push(node);
     else ensure(parts.slice(0, -1).join('/')).children.push(node);
@@ -31,7 +31,7 @@ export function buildTree(collections: Collection[]): CollectionNode[] {
   for (const c of collections) ensure(c.name).collection = c;
   const sort = (nodes: CollectionNode[]) => {
     nodes.sort((a, b) => natural(a.name, b.name));
-    nodes.forEach((n) => sort(n.children));
+    for (const n of nodes) sort(n.children);
   };
   sort(roots);
   return roots;

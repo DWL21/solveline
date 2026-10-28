@@ -255,17 +255,17 @@ export function stripSourceMentions(db: Db) {
       .split('\n')
       .filter((l) => !sourceLine.test(l) && !originLine.test(l))
       .join('\n')
-      .replace(figure, '[그림]')
+      .replaceAll(figure, '[그림]')
       // 지문 속 괄호 링크 "(https://www.기존.net/problem/…)"와 남은 원문 주소
-      .replace(/\s*\(https?:\/\/[^)\s]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^)\s]*\)/g, '')
-      .replace(/https?:\/\/[^\s)\]]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^\s)\]]*/g, '')
+      .replaceAll(/\s*\(https?:\/\/[^)\s]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^)\s]*\)/g, '')
+      .replaceAll(/https?:\/\/[^\s)\]]*\u0061\u0063\u006d\u0069\u0063\u0070\u0063\.net[^\s)\]]*/g, '')
       .replace(/^\n+/, '');
     if (title !== p.title || description !== (body.description ?? '')) updProblem.run(title, JSON.stringify({ ...body, description }), p.id);
   }
 
   const updCollection = db.prepare('UPDATE collections SET description = ? WHERE id = ?');
   for (const c of db.prepare('SELECT id, description FROM collections').all() as { id: string; description: string }[]) {
-    const description = c.description.replace(/\s*\(\ubc31\uc900 [^)]*\)/g, '').replace(/\(\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '(').replace(/\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '');
+    const description = c.description.replaceAll(/\s*\(\ubc31\uc900 [^)]*\)/g, '').replaceAll(/\(\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '(').replaceAll(/\ud504\ub85c\uadf8\ub798\uba38\uc2a4\s*/g, '');
     if (description !== c.description) updCollection.run(description, c.id);
   }
 
@@ -334,14 +334,14 @@ export function openDb(dataDir: string): Db {
   db.pragma('busy_timeout = 5000');
   db.exec('CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY)');
   const applied = new Set(db.prepare('SELECT id FROM _migrations').pluck().all() as number[]);
-  migrations.forEach((m, i) => {
-    if (applied.has(i)) return;
+  for (const [i, m] of migrations.entries()) {
+    if (applied.has(i)) continue;
     if (typeof m === 'function') {
       db.transaction(() => {
         m(db);
         db.prepare('INSERT INTO _migrations (id) VALUES (?)').run(i);
       })();
-      return;
+      continue;
     }
     const sql = typeof m === 'string' ? m : m.sql;
     const fkOff = typeof m !== 'string';
@@ -358,7 +358,7 @@ export function openDb(dataDir: string): Db {
     } finally {
       if (fkOff) db.pragma('foreign_keys = ON');
     }
-  });
+  }
   return db;
 }
 
@@ -395,8 +395,8 @@ const parse = <T>(v: string | null | undefined): T | null => (v ? (JSON.parse(v)
  */
 export class ProblemStore {
   constructor(
-    private db: Db,
-    private testsets: TestsetStore,
+    private readonly db: Db,
+    private readonly testsets: TestsetStore,
   ) {}
 
   /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
@@ -462,10 +462,11 @@ export class ProblemStore {
   /** 사용자 상태의 일부를 바꾼다(없으면 만든다) */
   private upsertState(id: string, userId: string, patch: { language?: string; code?: string; my_cases?: string; memo?: string; timer?: string; last_submission?: string }, now = new Date()) {
     const cols = Object.keys(patch) as (keyof typeof patch)[];
+    const updates = cols.map((c) => `${c} = excluded.${c}`).join(', ');
     this.db
       .prepare(
         `INSERT INTO user_problems (user_id, problem_id, ${cols.join(', ')}, updated_at) VALUES (?, ?, ${cols.map(() => '?').join(', ')}, ?)
-         ON CONFLICT (user_id, problem_id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}, updated_at = excluded.updated_at`,
+         ON CONFLICT (user_id, problem_id) DO UPDATE SET ${updates}, updated_at = excluded.updated_at`,
       )
       .run(userId, id, ...cols.map((c) => patch[c]!), now.toISOString());
   }
@@ -648,7 +649,7 @@ type FolderRow = { id: string; name: string; position: number; created_at: strin
 
 /** 폴더: 사용자별 개인 정리. 문제는 사용자마다 폴더 하나에 들어간다(folder_items). 비회원에게는 틀 폴더를 보여 준다. */
 export class FolderStore {
-  constructor(private db: Db) {}
+  constructor(private readonly db: Db) {}
 
   private toFolder(r: FolderRow): Folder {
     return { id: r.id, name: r.name, position: r.position, createdAt: r.created_at };
@@ -700,7 +701,7 @@ type CollectionRow = { id: string; name: string; description: string; created_at
  * 이름의 '/'는 계층이다(예: "모의고사/1회"). 화면이 이름으로 나무를 그린다.
  */
 export class CollectionStore {
-  constructor(private db: Db) {}
+  constructor(private readonly db: Db) {}
 
   private toCollection(r: CollectionRow): Collection {
     const problemIds = this.db.prepare('SELECT problem_id FROM collection_items WHERE collection_id = ? ORDER BY position').pluck().all(r.id) as string[];
@@ -757,7 +758,7 @@ export class CollectionStore {
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM collection_items WHERE collection_id = ?').run(id);
       const ins = this.db.prepare('INSERT INTO collection_items (collection_id, problem_id, position) VALUES (?, ?, ?)');
-      unique.forEach((pid, i) => ins.run(id, pid, i));
+      for (const [i, pid] of unique.entries()) ins.run(id, pid, i);
       this.db.prepare('UPDATE collections SET updated_at = ? WHERE id = ?').run(now.toISOString(), id);
     })();
     return this.get(id);
@@ -792,7 +793,7 @@ export type User = { id: string; email: string; name: string; picture: string; e
  * 편집 권한(role=editor)은 관리자 모드(마스터)에서 준다.
  */
 export class UserStore {
-  constructor(private db: Db) {}
+  constructor(private readonly db: Db) {}
 
   private toUser(r: UserRow): User {
     return { id: r.id, email: r.email, name: r.name, picture: r.picture, editor: r.role === 'editor' };
@@ -920,7 +921,7 @@ export class UserStore {
 
 /** 전체 신규 가입 정책. 기본값은 기존처럼 가입 허용이다. */
 export class SignupSettingsStore {
-  constructor(private db: Db) {}
+  constructor(private readonly db: Db) {}
 
   enabled(): boolean {
     return this.db.prepare('SELECT enabled FROM signup_settings WHERE id = 1').pluck().get() === 1;

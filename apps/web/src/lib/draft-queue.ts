@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ProblemPatch, type Problem } from '@solveline/shared';
 
-export const IDLE_SAVE_MS = 5_000;
+export const IDLE_SAVE_MS = 5000;
 export const MAX_SAVE_MS = 30_000;
 export const TIMER_SAVE_MS = 60_000;
 const KEEPALIVE_BYTES = 60_000;
@@ -50,24 +50,24 @@ function remainingPatch(current: ProblemPatch, sent: ProblemPatch): ProblemPatch
 /** 계정별 영속 변경 큐. 서버 요청은 문제별로 하나만 실행한다. */
 export class DraftQueue {
   readonly prefix: string;
-  private memory = new Map<string, Entry>();
-  private unpersisted = new Set<string>();
-  private errors = new Set<string>();
-  private inflight = new Map<string, Promise<boolean>>();
-  private controllers = new Set<AbortController>();
-  private listeners = new Set<() => void>();
-  private retryAt = new Map<string, number>();
+  private readonly memory = new Map<string, Entry>();
+  private readonly unpersisted = new Set<string>();
+  private readonly errors = new Set<string>();
+  private readonly inflight = new Map<string, Promise<boolean>>();
+  private readonly controllers = new Set<AbortController>();
+  private readonly listeners = new Set<() => void>();
+  private readonly retryAt = new Map<string, number>();
   private active = false;
   version = 0;
   onSaved?: (id: string, problem: Problem) => void;
-  constructor(readonly owner: string, private storage: StorageLike, private send: Send, private now = Date.now,
-    private lock: (key: string, run: () => Promise<boolean>) => Promise<boolean> = (_key, run) => run()) {
+  constructor(readonly owner: string, private readonly storage: StorageLike, private readonly send: Send, private readonly now = Date.now,
+    private readonly lock: (key: string, run: () => Promise<boolean>) => Promise<boolean> = (_key, run) => run()) {
     this.prefix = `solveline:draft:v1:${encodeURIComponent(owner)}:`;
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  notify = () => { this.version++; this.listeners.forEach((listener) => listener()); };
+  notify = () => { this.version++; for (const listener of this.listeners) listener(); };
   start() { this.active = true; }
-  stop() { this.active = false; this.controllers.forEach((controller) => controller.abort()); }
+  stop() { this.active = false; for (const controller of this.controllers) controller.abort(); }
   private key(id: string) { return this.prefix + encodeURIComponent(id); }
   read(id: string): Entry | undefined {
     if (this.unpersisted.has(id)) return this.memory.get(id);

@@ -83,7 +83,7 @@ const wrapIndent = ViewPlugin.fromClass(
       for (const { from, to } of view.visibleRanges) {
         for (let pos = from; pos <= to; ) {
           const line = view.state.doc.lineAt(pos);
-          const lead = /^[ \t]*/.exec(line.text)![0].replace(/\t/g, '    ').length;
+          const lead = /^[ \t]*/.exec(line.text)![0].replaceAll('\t', '    ').length;
           const hang = lead + 2;
           marks.push(Decoration.line({ attributes: { style: `padding-left: calc(${hang}ch + 6px); text-indent: -${hang}ch` } }).range(line.from));
           pos = line.to + 1;
@@ -219,7 +219,7 @@ export function CodeEditor({
     const clampFont = (v: number) => Math.round(Math.min(MAX_FONT, Math.max(MIN_FONT, v)));
     // iOS(Safari·Chrome)는 두 손가락 동작을 화면 확대 제스처로 먼저 가져간다 → 제스처 이벤트로 받아 코드 글자에만 적용한다.
     // 키보드가 열려 있든 닫혀 있든 같게 동작한다.
-    if ('ongesturestart' in window) {
+    if ('ongesturestart' in globalThis) {
       let base = 0;
       const gStart = (e: Event) => {
         e.preventDefault();

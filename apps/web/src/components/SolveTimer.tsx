@@ -4,7 +4,7 @@ import type { DraftQueue } from '../lib/draft-queue.ts';
 import { formatDuration } from '../lib/time.ts';
 
 /** 타이머가 늦게 깨어나도(절전·백그라운드 제한) 한 번에 크게 늘지 않게 */
-const MAX_TICK_MS = 5_000;
+const MAX_TICK_MS = 5000;
 
 /**
  * 풀이 시간 자동 측정. 문제 화면이 열려 있고 탭이 보일 때만 늘어난다.

@@ -20,7 +20,7 @@ const loadWorkspace = () => import('./components/Workspace.tsx');
 const Workspace = lazy(() => loadWorkspace().then((m) => ({ default: m.Workspace })));
 const prefetchWorkspace = () => {
   const run = () => void loadWorkspace();
-  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 3000 });
+  if ('requestIdleCallback' in globalThis) globalThis.requestIdleCallback(run, { timeout: 3000 });
   else setTimeout(run, 1500);
 };
 

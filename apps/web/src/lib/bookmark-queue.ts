@@ -1,9 +1,9 @@
 /** 같은 문제의 변경을 모으고, 전송 중 바뀐 값은 앞선 요청이 끝난 뒤 보낸다. */
 type Entry = { desired: boolean; version: number; timer: ReturnType<typeof setTimeout> | null; ready: boolean; running: boolean; fail: () => void };
 export class BookmarkQueue {
-  private entries = new Map<string, Entry>();
-  private send: (owner: string, id: string, value: boolean) => Promise<unknown>;
-  private delay: number;
+  private readonly entries = new Map<string, Entry>();
+  private readonly send: (owner: string, id: string, value: boolean) => Promise<unknown>;
+  private readonly delay: number;
   constructor(send: (owner: string, id: string, value: boolean) => Promise<unknown>, delay = 500) {
     this.send = send;
     this.delay = delay;
