@@ -419,7 +419,7 @@ export class ProblemStore {
        LEFT JOIN user_problems s ON s.user_id = ? AND s.problem_id = k.id
        LEFT JOIN bookmarks b ON b.user_id = ? AND b.problem_id = k.id
        LEFT JOIN folder_items f ON f.user_id = ? AND f.problem_id = k.id`,
-      ...Array<string>(6).fill(userId),
+      ...new Array<string>(6).fill(userId),
     );
     return rows.map((r) => ({
       id: r.id,
@@ -486,7 +486,7 @@ export class ProblemStore {
        LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = ?
        LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = ?
        ORDER BY p.title`,
-      ...Array<string | null>(4).fill(userId),
+      ...new Array<string | null>(4).fill(userId),
     );
     return rows.map((r) => ({
       id: r.id,
