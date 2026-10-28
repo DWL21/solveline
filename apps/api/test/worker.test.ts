@@ -253,6 +253,9 @@ describe('SQLite → D1 이전', () => {
     const d1 = d1FromSchemaFile();
     d1.exec(dump);
     d1.exec(dump); // 두 번 넣어도 같다
+    // 그 사이 SQLite에서 지운 행은 다시 넣으면 D1에서도 사라진다
+    d1.prepare("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES ('stale', ?, 1, '2026-01-01')").run(user.id);
+    d1.exec(dump);
     for (const t of D1_TABLES) expect(d1.prepare(`SELECT * FROM ${t} ORDER BY 1`).all(), t).toEqual(src.prepare(`SELECT * FROM ${t} ORDER BY 1`).all());
     expect(d1.pragma('foreign_key_check')).toEqual([]);
   });

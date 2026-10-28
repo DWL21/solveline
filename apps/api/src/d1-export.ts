@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 
 /**
  * 운영 SQLite를 D1에 넣을 SQL로 내보낸다(0007 5단계 전환 때 한 번). 스키마는 D1 마이그레이션이 만들고, 여기서는 행만 넣는다.
- * - 다시 실행해도 같도록 INSERT OR REPLACE를 쓴다.
+ * - 먼저 D1의 표를 비운다(다시 실행하면 그 사이 SQLite에서 지운 행도 D1에서 사라진다). 행은 INSERT OR REPLACE로 넣는다.
  * - 외래 키 검사는 끝까지 미룬다(표 순서와 무관하게 넣는다).
  * - D1은 SQL 한 문장이 100KB를 넘으면 받지 않는다. 그런 행은 긴 글자 열을 비워 넣은 뒤 조각을 이어 붙인다(UPDATE … || …).
  */
@@ -23,7 +23,7 @@ const quote = (v: unknown): string => {
 const chunks = (s: string) => Array.from({ length: Math.ceil(s.length / CHUNK) }, (_, i) => s.slice(i * CHUNK, (i + 1) * CHUNK));
 
 export function exportForD1(db: Database.Database): { sql: string; rows: Record<string, number> } {
-  const out: string[] = ['PRAGMA defer_foreign_keys = on;'];
+  const out: string[] = ['PRAGMA defer_foreign_keys = on;', ...[...D1_TABLES].reverse().map((t) => `DELETE FROM ${t};`)];
   const rows: Record<string, number> = {};
   for (const table of D1_TABLES) {
     const info = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; pk: number }[];
