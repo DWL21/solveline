@@ -62,3 +62,9 @@ export function problemIdsUnder(node: CollectionNode): string[] {
 
 /** 경로의 각 단계(이동 경로 표시용): "a/b/c" → ["a", "a/b", "a/b/c"] */
 export const ancestors = (path: string) => path.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/'));
+
+/** 최근 제출이 100점인 문제만 완료로 보고, 목록 순서대로 다음 문제를 고른다. */
+export function collectionProgress<T extends { id: string; lastSubmission?: { score: number } | null }>(problems: T[]) {
+  const solved = problems.filter((p) => p.lastSubmission?.score === 100).length;
+  return { solved, total: problems.length, cleared: problems.length > 0 && solved === problems.length, next: problems.find((p) => p.lastSubmission?.score !== 100) };
+}

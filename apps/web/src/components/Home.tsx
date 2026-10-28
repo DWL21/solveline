@@ -2,12 +2,12 @@ import { Language } from '@solveline/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Collection, Folder, ProblemSummary } from '@solveline/shared';
-import { useMe } from '../lib/me.ts';
+import { loginHref, useMe } from '../lib/me.ts';
 import { ApiError, api, qk } from '../lib/api.ts';
 import { ListSkeleton } from './Loading.tsx';
 import { BookmarkStar } from './BookmarkStar.tsx';
 import type { Scope } from '../lib/route.ts';
-import { ancestors, buildTree, findNode, flatten, problemIdsUnder, type CollectionNode } from '../lib/collections.ts';
+import { ancestors, buildTree, collectionProgress, findNode, flatten, problemIdsUnder, type CollectionNode } from '../lib/collections.ts';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const byTitle = (a: ProblemSummary, b: ProblemSummary) => a.title.localeCompare(b.title, 'ko', { numeric: true });
@@ -30,7 +30,8 @@ export function scopeList(scope: Scope, all: ProblemSummary[], collections: Coll
   const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((p): p is ProblemSummary => !!p);
   if (scope.kind === 'collection') {
     const col = collections.find((c) => c.id === scope.id);
-    if (col) return pick(col.problemIds);
+    const node = col && findNode(buildTree(collections), col.name);
+    if (node) return pick(problemIdsUnder(node));
   }
   // 묶음: 하위 컬렉션의 문제를 모아서
   if (scope.kind === 'group') {
@@ -98,7 +99,8 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
   const cards = effective.kind === 'all' ? tree : inCollection && node ? node.children : [];
 
   const list = scopeList(effective, all, collections.data);
-  const solved = list.filter((p) => p.lastSubmission?.score === 100).length;
+  const progress = collectionProgress(list);
+  const solved = progress.solved;
 
   const q = filter.trim().toLowerCase();
   const shown = list.filter((p) => (!bookmarksOnly || p.bookmarked) && (!q || p.title.toLowerCase().includes(q)));
@@ -151,6 +153,14 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
             {folder && signedIn && <ScopeActions kind="folder" item={folder} onDeleted={() => onScope({ kind: 'all' })} />}
             {collection && editor && <ScopeActions kind="collection" item={collection} onDeleted={() => onScope({ kind: 'all' })} />}
           </div>
+          {inCollection && list.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
+              {signedIn ? (
+                progress.cleared ? <span className="font-semibold text-ok">✓ {node?.name.includes('단계') ? '단계' : node?.name.includes('세트') ? '세트' : '컬렉션'} 클리어</span> :
+                  <button type="button" className="btn-primary" onClick={() => progress.next && onPick(progress.next.id)}>다음 미완료 문제 풀기</button>
+              ) : <span className="text-dim">로그인하면 풀이 진행 상황을 확인할 수 있어요. <a className="text-sky underline" href={loginHref()}>로그인</a></span>}
+            </div>
+          )}
           {collection?.description && <p className="mb-1 text-[13px] whitespace-pre-wrap text-dim">{collection.description}</p>}
           {cards.length > 0 && (
             <section className="mt-3 mb-5" aria-label={effective.kind === 'all' ? '컬렉션' : '하위 컬렉션'}>
@@ -168,7 +178,7 @@ export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope:
           <div className="mt-3 mb-4 flex flex-wrap items-center gap-2">
             <input
               className="field w-full font-sans sm:w-72"
-              placeholder="제목·유형·레벨 검색 (예: Lv2, DP)"
+              placeholder="제목·유형·단계 검색 (예: 3단계, DP)"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               aria-label="문제 검색"
@@ -511,7 +521,7 @@ function CollectionCard({ node, all, signedIn, onOpen }: { node: CollectionNode;
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
         <span>문제 {total}</span>
         {node.children.length > 0 && <span>하위 {node.children.length}</span>}
-        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}</span>}
+        {signedIn && total > 0 && <span className={solved === total ? 'font-semibold text-ok' : ''}>✓ {solved}/{total}{solved === total && ` · ${node.name.includes('단계') ? '단계' : node.name.includes('세트') ? '세트' : '컬렉션'} 클리어`}</span>}
       </div>
       {signedIn && total > 0 && (
         <div className="h-1 overflow-hidden rounded-full bg-line" aria-hidden>
