@@ -10,10 +10,12 @@ test('API가 살아 있고 공개 설정을 돌려준다', { tag: '@R11' }, asyn
   expect(cfg.data.googleEnabled).toBe(true);
 });
 
-test('첫 화면이 컬렉션과 문제 목록을 보여 준다', { tag: ['@R11', '@R1'] }, async ({ page }) => {
+test('첫 화면이 컬렉션을 보여 주고 전체 문제로 이동한다', { tag: ['@R11', '@R1'] }, async ({ page }) => {
   await page.goto('/#/');
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('전체 문제');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('컬렉션');
   await expect(page.getByRole('region', { name: '컬렉션' }).getByRole('listitem').first()).toBeVisible();
+  await page.getByRole('button', { name: '전체 보기' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('전체 문제');
 });
 
 test('문제 화면이 열리고 비회원은 로그인하기를 본다', { tag: ['@R11', '@R1'] }, async ({ page }) => {
