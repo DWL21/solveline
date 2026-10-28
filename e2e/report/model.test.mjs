@@ -8,7 +8,7 @@ const results = {
   suites: [{
     title: 'ui/a.spec.ts', file: 'ui/a.spec.ts',
     suites: [{
-      title: '비회원', file: 'ui/a.spec.ts',
+      title: '비회원 @cross', file: 'ui/a.spec.ts',
       specs: [{
         title: '문제를 연다', tags: ['R1', 'cross'],
         tests: [{ projectName: 'desktop-chromium', status: 'expected', results: [{ duration: 1200, attachments: [{ name: 'evidence: 읽기 전용', path: '/home/runner/work/x/e2e/reports/artifacts/t/evidence-1.png' }, { name: 'trace', path: '/x/trace.zip' }] }] }],

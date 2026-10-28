@@ -36,7 +36,7 @@ if (!process.argv.includes('--no-pdf')) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
-    const small = 'font-size:7pt;color:#5f6b72;font-family:sans-serif;width:100%;padding:0 16mm;display:flex;justify-content:space-between;';
+    const small = 'font-size:7pt;color:#555;font-family:\'Noto Sans CJK KR\',\'Apple SD Gothic Neo\',sans-serif;width:100%;padding:0 18mm;display:flex;justify-content:space-between;';
     await page.pdf({
       path: join(out, `${model.id}.pdf`),
       format: 'A4',

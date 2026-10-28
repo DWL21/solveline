@@ -36,7 +36,7 @@ export function parseCases(results) {
         const runs = t.results ?? [];
         const last = runs.at(-1);
         cases.push({
-          title: [...path, spec.title].join(' › '),
+          title: [...path, spec.title].join(' › ').replace(/\s@\w+/g, ''), // 기기 태그(@cross 등)는 기기 열로 보인다
           file: spec.file ?? file,
           project: t.projectName,
           status: t.status,

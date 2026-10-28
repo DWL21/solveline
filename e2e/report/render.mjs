@@ -5,7 +5,6 @@ export const MARKER = { pr: '<!-- solveline-qa-report:pr -->', final: '<!-- solv
 
 const STATUS = { expected: '통과', unexpected: '실패', flaky: '불안정', skipped: '건너뜀' };
 const REQ = { passed: '통과', failed: '실패', partial: '일부', notRun: '미실행' };
-const ICON = { pass: '✅', conditional: '🟡', fail: '❌' };
 const PROJECTS = {
   api: ['API', '브라우저 없음'],
   'desktop-chromium': ['데스크톱 Chrome', 'Chromium'],
@@ -66,13 +65,14 @@ const reusable = [
 export function toMarkdown(m, links = {}) {
   const L = [];
   L.push(MARKER[m.kind]);
-  L.push(`## ${ICON[m.verdict.status]} QA 테스트 보고서 · ${stageName(m)}`);
+  L.push(`## QA 테스트 보고서 (${stageName(m)})`);
   L.push('');
-  L.push(`**판정: ${m.verdict.label}** — ${md(m.verdict.reason)}`);
+  L.push(`**판정: ${m.verdict.label}**  `);
+  L.push(md(m.verdict.reason));
   L.push('');
   L.push('| 문서 번호 | 버전 | 대상 | 커밋 | 근거 실행 | 작성 |');
   L.push('|---|---|---|---|---|---|');
-  L.push(`| ${m.id} | ${m.version} | ${m.pr ? `#${m.pr.number} ${md(m.pr.title)}` : '—'} | \`${(m.sha ?? '').slice(0, 7)}\` | ${links.run ? `[CI #${m.run?.id}](${links.run})` : '—'} | GitHub Actions 자동 생성 · ${date(m.generatedAt)} |`);
+  L.push(`| ${m.id} | ${m.version} | ${m.pr ? `#${m.pr.number} ${md(m.pr.title)}` : '—'} | \`${(m.sha ?? '').slice(0, 7)}\` | ${links.run ? `[CI #${m.run?.id}](${links.run})` : '—'} | GitHub Actions(자동) ${date(m.generatedAt)} |`);
   L.push('');
   L.push('### 1. 수행한 테스트 요약');
   const total = (m.unit?.tests ?? 0) + (m.e2e?.total ?? 0) + (m.smoke?.total ?? 0);
@@ -83,7 +83,7 @@ export function toMarkdown(m, links = {}) {
   L.push('');
   L.push('### 3. 완료 평가(종료 기준)');
   L.push('| 기준 | 목표 | 결과 | 충족 |', '|---|---|---|---|');
-  for (const c of m.criteria) L.push(`| ${c.name} | ${md(c.target)} | ${md(c.actual)} | ${c.met ? '✅' : '❌'} |`);
+  for (const c of m.criteria) L.push(`| ${c.name} | ${md(c.target)} | ${md(c.actual)} | ${c.met ? '충족' : '**미충족**'} |`);
   L.push('');
   L.push('### 4. 진행을 막은 요인');
   L.push(m.blockers.length ? m.blockers.slice(0, 15).map((b) => `- ${md(b)}`).join('\n') : '- 없음');
@@ -133,7 +133,6 @@ const byRequirement = (a, b) => (Number(a.requirements[0]?.slice(1) ?? 99) - Num
 /** A4 문서. image(path)는 증거 그림을 data URI로 바꾼다(없으면 null). */
 export function toHtml(m, links = {}, image = () => null) {
   const chip = (ok, yes = '충족', no = '미충족') => `<span class="chip ${ok ? 'ok' : 'bad'}">${ok ? yes : no}</span>`;
-  const verdictClass = { pass: 'ok', conditional: 'warn', fail: 'bad' }[m.verdict.status];
   const table = (head, rows, numeric = []) => `<table><thead><tr>${head.map((x, i) => `<th${numeric.includes(i) ? ' class="n"' : ''}>${h(x)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td${numeric.includes(i) ? ' class="n"' : ''}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   const figures = m.evidence.map((e) => ({ ...e, src: image(e.path) })).filter((e) => e.src);
   const total = (m.unit?.tests ?? 0) + (m.e2e?.total ?? 0) + (m.smoke?.total ?? 0);
@@ -142,10 +141,12 @@ export function toHtml(m, links = {}, image = () => null) {
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${h(m.id)} QA 테스트 완료 보고서</title>
 <style>${CSS}</style></head><body>
 <section class="cover">
-  <div class="org">Solveline · 품질 보증</div>
-  <h1>테스트 완료 보고서</h1>
-  <p class="sub">${h(m.pr ? `PR #${m.pr.number} ${m.pr.title}` : '배포 커밋')} · ${stageName(m)}</p>
-  <div class="verdict ${verdictClass}"><b>판정: ${h(m.verdict.label)}</b><span>${h(m.verdict.reason)}</span></div>
+  <div class="org">${h(m.id)} · v${h(m.version)}</div>
+  <div class="titleblock">
+    <h1>테스트 완료 보고서</h1>
+    <p class="sub">Solveline · ${h(m.pr ? `PR #${m.pr.number} ${m.pr.title}` : '배포 커밋')}<br>${stageName(m)}</p>
+  </div>
+  <div class="verdict"><b>판정: ${h(m.verdict.label)}</b>${h(m.verdict.reason)}</div>
   <h3>문서 정보</h3>
   ${table(['항목', '내용'], [
     ['문서 번호', h(m.id)],
@@ -191,7 +192,7 @@ export function toHtml(m, links = {}, image = () => null) {
   ${m.blockers.length ? `<ul>${m.blockers.map((b) => `<li>${h(b)}</li>`).join('')}</ul>` : '<p>없음</p>'}
 </section>
 
-<section class="pb">
+<section>
   <h2>6. 테스트 측정치</h2>
   ${table(['영역', '지표', '값'], measures(m).map(([a, b, c]) => [h(a), h(b), h(c)]))}
   <h3>6.1 요구사항별 결과</h3>
@@ -201,7 +202,7 @@ export function toHtml(m, links = {}, image = () => null) {
   ${m.e2e?.slowest?.length ? `<h3>6.3 가장 느린 테스트</h3><ul>${m.e2e.slowest.map((t) => `<li>${sec(t.durationMs)} · ${h(t.project)} · ${h(t.title)}</li>`).join('')}</ul>` : ''}
 </section>
 
-<section class="pb">
+<section>
   <h2>7. 결함 현황</h2>
   <p>대장 ${m.defects.length}건(해결 ${m.defects.filter((d) => d.status === '해결').length}) · 열린 버그 이슈 ${m.openBugs.length}건. 발견 위치: ${h(Object.entries(m.foundIn).map(([k, v]) => `${k} ${v}`).join(', ') || '—')}</p>
   ${table(['ID', '내용', '심각도', '발견 위치', '조치', '상태'], [
@@ -233,38 +234,36 @@ ${figures.length ? `<section class="pb"><h2>부록 A. 실행 증거</h2><p>근�
 }
 
 const CSS = `
-@page { size: A4; margin: 20mm 16mm 18mm; }
-:root { --fg:#1b1f23; --muted:#5f6b72; --line:#c9d1d6; --head:#eef2f4; --accent:#1f4e79; --ok:#1e6b3a; --okbg:#e2f1e7; --warn:#8a5a00; --warnbg:#fcefd6; --bad:#a4262c; --badbg:#fbe3e4; }
+@page { size: A4; margin: 22mm 18mm 20mm; }
+:root { --fg:#000; --sub:#444; --line:#000; --hair:#9a9a9a; --head:#e9e9e9; }
 * { box-sizing:border-box; }
 html { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-body { margin:0; color:var(--fg); font:9.4pt/1.6 "Noto Sans CJK KR","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
-h1 { font-size:24pt; margin:0 0 2mm; letter-spacing:-.01em; }
-h2 { font-size:12.5pt; color:var(--accent); margin:7mm 0 2.5mm; padding-bottom:1.2mm; border-bottom:1pt solid var(--accent); break-after:avoid; }
+body { margin:0; color:var(--fg); font:9.5pt/1.65 "Noto Sans CJK KR","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+h1 { font-size:22pt; font-weight:700; margin:0; letter-spacing:.02em; }
+h2 { font-size:12pt; font-weight:700; margin:8mm 0 2.5mm; padding-bottom:1mm; border-bottom:.8pt solid var(--line); break-after:avoid; }
 section > h2:first-child { margin-top:0; }
-h3 { font-size:10pt; margin:5mm 0 1.5mm; break-after:avoid; }
-p { margin:0 0 2mm; } ul { margin:0 0 2mm; padding-left:5mm; } li { margin:.4mm 0; }
-a { color:var(--accent); text-decoration:none; word-break:break-all; }
+h3 { font-size:10pt; font-weight:700; margin:5mm 0 1.5mm; break-after:avoid; }
+p { margin:0 0 2mm; } ul { margin:0 0 2mm; padding-left:5mm; } li { margin:.3mm 0; }
+a { color:inherit; text-decoration:none; word-break:break-all; }
 .pb { break-before:page; }
-table { width:100%; border-collapse:collapse; margin:1mm 0 3mm; font-size:8.4pt; }
+table { width:100%; border-collapse:collapse; margin:1mm 0 3mm; font-size:8.5pt; border-top:.9pt solid var(--line); border-bottom:.9pt solid var(--line); }
 thead { display:table-header-group; } tr { break-inside:avoid; }
-th, td { border:.5pt solid var(--line); padding:1.3mm 2mm; text-align:left; vertical-align:top; }
-th { background:var(--head); font-weight:700; }
+th, td { border:.4pt solid var(--hair); border-left:0; border-right:0; padding:1.3mm 2mm; text-align:left; vertical-align:top; }
+th { background:var(--head); font-weight:700; border-bottom:.6pt solid var(--line); }
 td:first-child { white-space:nowrap; }
 .n { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
-.chip { display:inline-block; padding:0 1.6mm; border-radius:2mm; font-size:7.6pt; font-weight:700; white-space:nowrap; }
-.chip.ok { color:var(--ok); background:var(--okbg); } .chip.warn { color:var(--warn); background:var(--warnbg); } .chip.bad { color:var(--bad); background:var(--badbg); }
-.muted { color:var(--muted); }
-.cover .org { font-size:9pt; letter-spacing:.14em; color:var(--accent); border-top:3pt solid var(--accent); padding-top:6mm; margin-top:8mm; }
-.cover h1 { margin-top:5mm; }
-.cover .sub { font-size:11pt; color:var(--muted); margin-bottom:6mm; }
-.verdict { border:1pt solid; border-radius:1.5mm; padding:3.5mm 4mm; margin:0 0 4mm; display:flex; flex-direction:column; gap:1mm; }
-.verdict b { font-size:12pt; }
-.verdict.ok { border-color:var(--ok); background:var(--okbg); } .verdict.ok b { color:var(--ok); }
-.verdict.warn { border-color:var(--warn); background:var(--warnbg); } .verdict.warn b { color:var(--warn); }
-.verdict.bad { border-color:var(--bad); background:var(--badbg); } .verdict.bad b { color:var(--bad); }
-.cover td:first-child { width:30mm; background:#f7f9fa; }
-.figs { display:grid; grid-template-columns:1fr 1fr; gap:4mm; }
+.chip { font-weight:400; white-space:nowrap; }
+.chip.bad { font-weight:700; text-decoration:underline; }
+.muted { color:var(--sub); }
+.cover .org { font-size:9pt; color:var(--sub); text-align:right; }
+.cover .titleblock { text-align:center; margin:30mm 0 18mm; }
+.cover h1 { font-size:26pt; }
+.cover .sub { font-size:11pt; color:var(--sub); margin-top:4mm; text-align:center; }
+.verdict { border:.9pt solid var(--line); padding:3mm 4mm; margin:0 0 5mm; }
+.verdict b { display:block; font-size:11pt; margin-bottom:1mm; }
+.cover td:first-child { width:30mm; font-weight:700; }
+.figs { display:grid; grid-template-columns:1fr 1fr; gap:5mm 4mm; }
 figure { margin:0; break-inside:avoid; }
-figure img { width:100%; max-height:95mm; object-fit:contain; object-position:left top; border:.5pt solid var(--line); display:block; }
-figcaption { font-size:7.8pt; color:var(--fg); margin-top:1mm; }
+figure img { width:100%; max-height:95mm; object-fit:contain; object-position:left top; border:.4pt solid var(--hair); display:block; }
+figcaption { font-size:8pt; margin-top:1mm; }
 `;
