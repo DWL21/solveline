@@ -58,6 +58,36 @@ Worker: D1에 결과·점수·마지막 제출 기록(같은 제출을 두 번 �
    - pahidc를 거치지 않으므로 서버가 망가져도 백업이 남는다.
 3. 테스트셋은 R2에 원본이 있으므로 따로 복사하지 않는다.
 
+### 매일 내보내기 설정과 복원(4단계)
+
+워크플로 `.github/workflows/backup-d1.yml`(매일 03:23 KST, 수동 실행 가능)이 `scripts/backup-d1.sh`를 실행한다. 백업을 올린 뒤에 매일 정리 SQL `apps/api/d1/cleanup.sql`(지난 세션·요청 제한, 30일 지난 끝난 제출)을 실행한다. 아래 값이 하나라도 없으면 아무것도 하지 않고 성공으로 끝난다.
+
+| 이름 | 종류(`production` 환경) | 내용 |
+|---|---|---|
+| `CLOUDFLARE_BACKUP_TOKEN` | secret | D1 편집(내보내기·정리)과 R2 `solveline-backup` 쓰기만 허용한 API 토큰 |
+| `CLOUDFLARE_ACCOUNT_ID` | variable | Cloudflare 계정 ID |
+| `D1_DATABASE` | variable | D1 이름(`solveline`) |
+| `BACKUP_AGE_RECIPIENT` | variable | age 공개 키(`age1…`). 공개해도 되는 값이다 |
+| `BACKUP_BUCKET` | variable(선택) | 기본 `solveline-backup` |
+
+운영자가 처음 한 번 한다(값을 저장소·이슈에 남기지 않는다):
+
+```bash
+age-keygen -o solveline-backup.key        # 비공개 키: 오프라인에 보관하고 저장소·GitHub에 올리지 않는다
+age-keygen -y solveline-backup.key | gh variable set BACKUP_AGE_RECIPIENT --repo DWL21/solveline --env production
+npx wrangler r2 bucket create solveline-backup
+npx wrangler r2 bucket lifecycle add solveline-backup expire-7d d1/ --expire-days 7   # d1/ 아래를 7일 뒤 지운다
+```
+
+복원(예: 2026-11-02 백업):
+
+```bash
+npx wrangler r2 object get solveline-backup/d1/solveline-2026-11-02.sql.age --file d1.sql.age --remote
+age -d -i solveline-backup.key -o d1.sql d1.sql.age
+# 새 D1에 넣는다(기존 D1이면 Time Travel이 먼저다). SQLite로 확인만 할 때는: sqlite3 check.db < d1.sql
+npx wrangler d1 execute <새 D1> --remote --file d1.sql
+```
+
 ## 단계(PR)
 
 1. **저장소 비동기화**: 모든 저장소가 `Sql` 인터페이스(`all`·`get`·`run`·`batch`)를 쓴다. better-sqlite3 어댑터(테스트·로컬 개발)와 D1 어댑터를 둔다. 동작은 바뀌지 않는다.

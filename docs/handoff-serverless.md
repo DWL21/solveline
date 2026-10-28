@@ -6,12 +6,12 @@
 
 | PR | 내용 | 상태 |
 |---|---|---|
-| #120 | 카탈로그 분리, Worker 엣지 캐시, R2 게시 코드 | 머지·배포 완료 |
-| #125 | 제출 결과 긴 조회, 자동 저장 10초/60초, 타이머 5분 | 머지·배포 완료 |
-| #130 | R2 키 없이 Worker `/api/internal/r2`로 게시, Pages R2 바인딩, 상세 바이트 고정 | 머지·배포 완료 |
-| #133 | `CATALOG_SOURCE = "r2"`(Worker가 R2에서 읽기) | 열림. R2 객체 수 확인 뒤 머지 |
+| #120·#125·#130 | 카탈로그 분리·엣지 캐시, 긴 조회·저장 간격, Worker 경유 R2 게시 | 머지·배포 완료 |
 | #128 | 1단계: 저장소 비동기 `Sql`, D1 어댑터 | 머지·배포 완료 |
-| #134 이슈의 PR(`refactor/134`) | 2단계: `apps/judge` 분리와 배포 구성 | 열림. `JUDGE_SECRET` secret이 생긴 뒤 머지 |
+| #133 | `CATALOG_SOURCE = "r2"`(Worker가 R2에서 읽기) | 열림. R2 객체 수 확인 뒤 머지 |
+| #135 | 2단계: `apps/judge` 분리와 배포 구성 | 열림. `JUDGE_SECRET` secret이 생긴 뒤 머지 |
+| #139(Draft, #135 위) | 3단계: API를 Pages Worker로 묶기, D1·R2 바인딩, WebCrypto, D1 요청 제한, D1 스키마 | #135 머지 뒤 main을 merge하고 Ready |
+| #140 이슈의 PR(Draft, #139 위) | 4단계: D1 매일 암호화 백업·정리 워크플로 | #139 머지 뒤 Ready. 설정 전에는 건너뛴다 |
 
 Cloudflare 쪽:
 - R2 버킷 `solveline-catalog`를 만들었다.
@@ -20,33 +20,19 @@ Cloudflare 쪽:
 
 ## 남은 일(순서대로)
 
-1. **#130 머지·확인**
-   - 배포가 끝나면 `npx wrangler r2 bucket info solveline-catalog`로 객체 수를 확인한다(사용자 계정 필요).
-   - 그다음 `apps/web/wrangler.toml`에 `[vars] CATALOG_SOURCE = "r2"`를 넣는 PR을 만든다.
-   - 배포 뒤 `curl -sI https://solveline.simplyimg.com/api/catalog/index`의 ETag가 R2 형식(32자 hex)인지 본다.
-2. **#128 정리**: `origin/main`을 merge하고 검사를 통과시킨 뒤 Ready로 바꾸고, CI가 통과하면 머지한다.
-3. **2단계 judge 분리 마무리**(`refactor/judge`, #128 위에 쌓음):
-   - `docker/judge.Dockerfile`을 만든다. `docker/api.Dockerfile`에는 `apps/judge` 패키지를 복사한다(api가 `@solveline/judge/r2`를 쓴다).
-   - `compose.production.yaml`:
-     - `judge` 서비스를 추가한다(`default`와 `sandbox` 네트워크, `/var/lib/solveline:/data`, `RUNNER_URLS=http://runner:8000`, `RESULTS_URL=http://api:8787`, `PORT=8790`, env_file `/etc/solveline/judge.env`).
-     - api는 `sandbox` 네트워크에서 빼고 `JUDGE_URL=http://judge:8790`을 준다.
-   - `deploy.yml`·`scripts/deploy-production.sh`: `JUDGE_SECRET`을 api.env와 새 judge.env에 쓴다. judge.env에는 `JUDGE_SECRET`·`R2_PROXY_SECRET`·`WEB_ORIGIN`을 넣는다.
-     - GitHub secret `JUDGE_SECRET`은 사용자가 만든다(아래 명령).
-   - judge의 테스트셋 미러가 R2 키 대신 #130의 `WorkerR2Store`(Worker 경유)를 쓰게 한다. main을 merge하면 `apps/api/src/r2.ts`가 충돌하는데, 그 파일은 `apps/judge/src/r2.ts`로 옮겼다.
-   - `compose.test.yaml`·`scripts/test-env.sh`: judge 서비스를 추가하고 `E2E_JUDGE_SECRET`을 만든다.
-   - CI `unit` 잡: judge 커버리지를 추가한다. `sonar-project.properties`의 sources·tests·lcov에 `apps/judge`를 넣는다.
-   - `AGENTS.md`·`docs/architecture.md`에 judge를 반영한다. "api 안의 디스패처만 runner를 부른다"는 "judge만"으로 고친다.
-4. **3단계 Worker 실행**:
-   - API(Hono)를 esbuild로 묶어 기존 `_worker.js`의 카탈로그 캐시와 합친다.
-   - D1(`d1Sql`), R2 바인딩 직접 쓰기, `node:crypto` 대신 WebCrypto(또는 `nodejs_compat`)를 쓴다.
-   - 요청 제한(`RateLimiter`)은 메모리라 Worker에서 소용없으므로 D1 테이블로 옮긴다.
-   - judge는 `HttpJudge`로 Tunnel 호스트 `solveline-judge.simplyimg.com`을 부른다(Tunnel 경로 추가는 사용자).
-   - D1 스키마는 지금 마이그레이션 결과를 덤프해 `wrangler d1 migrations` 파일로 만든다.
-   - Workers Free CPU 10ms에 주의한다. 히든 테스트셋은 해석하지 않고 judge로 흘려보낸다.
-5. **4단계 백업**:
-   - GitHub Actions 일정 실행(GitHub-hosted)이 `wrangler d1 export`로 내보내고 `age`로 암호화한 뒤, R2 버킷 `solveline-backup`(수명 주기 7일)에 올린다.
-   - `CLOUDFLARE_API_TOKEN`과 age 공개 키는 사용자가 넣는다.
-6. **5단계 전환(사용자 승인 필수)**: D1 생성, SQLite → D1 이전, Pages 바인딩, judge Tunnel 연결, 예전 api 컨테이너 내리기.
+1. **#133**: 운영자가 `npx wrangler r2 bucket info solveline-catalog`로 객체 수(문제 약 1,046 + 목록 + 테스트셋 51)를 확인하면 머지한다. 배포 뒤 `curl -s -D - -o /dev/null https://solveline.simplyimg.com/api/catalog/index`의 ETag가 32자 hex인지 본다(`curl -I`는 Worker의 GET 분기를 타지 않는다).
+2. **#135**: GitHub secret `JUDGE_SECRET`을 만든 뒤 머지한다. 배포 뒤 `docker compose ps`(SSH는 확인용)로 judge가 healthy인지, 코드 실행·제출이 되는지 본다.
+3. **#139·#140**: 아래 PR이 머지되면 main을 merge(rebase 금지)해 Ready로 바꾸고 CI 통과 뒤 머지한다.
+4. **3단계에서 남긴 일**(0007 「단계」 3번의 남은 일):
+   - 편집할 때 카탈로그 전체를 다시 해시하지 않고 바뀐 문제만 고쳐 쓰기(Workers Free CPU 10ms)
+   - Miniflare(wrangler dev)로 Worker 번들 실제 실행 검사
+5. **5단계 전환(운영자 승인 필수)**:
+   - D1 생성 → `apps/web/wrangler.toml`의 `[[d1_databases]]` 주석을 풀고 `database_id`를 넣는다 → `npx wrangler d1 migrations apply solveline --remote`
+   - Pages 비밀: `SESSION_SECRET`·`GOOGLE_CLIENT_SECRET`·`ACCESS_PASSWORD`·`JUDGE_SECRET`. 변수: `GOOGLE_CLIENT_ID`·`OWNER_EMAIL`·`CONTACT_EMAIL`·`JUDGE_URL=https://solveline-judge.simplyimg.com`·`WEB_ORIGIN`
+   - Tunnel에 `solveline-judge.simplyimg.com → judge:8790`을 추가하고, judge의 `RESULTS_URL`을 `https://solveline.simplyimg.com`으로 바꾼다
+   - `deploy.yml`의 web 빌드를 `pnpm install --filter @solveline/web... --filter @solveline/api...` → web 빌드 → `pnpm --filter @solveline/api build:worker`로 바꿔 묶은 `_worker.js`를 올린다
+   - 점검 시간: api를 읽기 전용으로 두고 SQLite → D1 이전(`sqlite3 .dump`에서 `_migrations` 제외, `wrangler d1 execute --file`) → `API_MODE = "worker"` → 확인 → 예전 api 컨테이너 내리기(하루는 지우지 않는다)
+   - 백업 설정(0007 「매일 내보내기 설정과 복원」)
 
 ## 사용자가 해야 하는 일
 
