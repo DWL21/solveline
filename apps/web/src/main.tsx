@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Session } from '@solveline/shared';
 import { App } from './App.tsx';
-import { ApiError, qk } from './lib/api.ts';
+import { ApiError, markSignedOut, qk } from './lib/api.ts';
 import './index.css';
 
 // 화상 키보드가 열리면 앱을 키보드 위 보이는 영역에 맞춘다(하단 바가 키보드 바로 위에 붙게).
@@ -47,6 +47,7 @@ function onError(error: unknown) {
   const lost = (error.status === 401 && error.code !== 'admin_required' && error.code !== 'invalid_password');
   // 이미 비회원이면 아무것도 하지 않는다(쿼리를 지우면 다시 요청해 401이 반복된다)
   if (lost && client.getQueryData<Session>(qk.session)?.authenticated) {
+    markSignedOut();
     client.setQueryData(qk.session, signedOut);
     client.removeQueries({ predicate: (q) => q.queryKey[0] !== qk.session[0] });
   }

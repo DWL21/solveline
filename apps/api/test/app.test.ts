@@ -2,13 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { templateFor, type ProblemInput, type TestCase } from '@solveline/shared';
+import { CatalogIndex, mergeProblem, mergeSummaries, templateFor, type ProblemInput, type TestCase } from '@solveline/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { openDb, stripSourceMentions, UserStore, SignupSettingsStore } from '../src/db.ts';
 import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
 import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
 import { SubmissionStore } from '../src/dispatcher.ts';
+import { CATALOG_INDEX_KEY, catalogProblemKey, testsetKey } from '../src/catalog.ts';
+import { MemoryObjectStore, type ObjectStore } from '../src/r2.ts';
+import { TestsetStore } from '../src/testsets.ts';
+import { gunzipSync } from 'node:zlib';
 
 const OWNER = 'owner@example.com';
 const MASTER = 'master-password-0123456789abcdef';
@@ -26,7 +30,7 @@ const fakeGoogle: GoogleClient = {
  * 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다.
  * 코드가 'hold'면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
  */
-function setup(env: Record<string, string> = {}) {
+function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null = null) {
   const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:', OWNER_EMAIL: OWNER, ...env });
   const calls: RunJob[] = [];
   const uploads: string[] = [];
@@ -56,8 +60,8 @@ function setup(env: Record<string, string> = {}) {
     },
   };
   const db = openDb(':memory:');
-  const { app, dispatcher } = createApp({ config, db, runners: [runner], google: fakeGoogle });
-  return { app, db, dispatcher, calls, uploads, held };
+  const { app, dispatcher, catalog, testsets } = createApp({ config, db, runners: [runner], google: fakeGoogle, objectStore });
+  return { app, db, dispatcher, calls, uploads, held, catalog, testsets };
 }
 
 const cookieOf = (res: Response, name: string) =>
@@ -907,5 +911,123 @@ describe('입력값 파싱', () => {
   it('빈 기댓값은 검사하지 않는다', () => {
     expect(() => validateCases('function', [{ id: 'a', args: ['1'], stdin: '', expected: ' ', hidden: false }])).not.toThrow();
     expect(() => validateCases('function', [{ id: 'a', args: ['x'], stdin: '', expected: '', hidden: false }])).toThrow(CaseInputError);
+  });
+});
+
+describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
+  it('카탈로그는 로그인과 무관하고, 내 상태와 합치면 예전 /api/problems 응답과 같다', async () => {
+    const s = setup();
+    const E = as(s, await login(s));
+    const U = as(s, await login(s, 'user@example.com'), 'user@example.com');
+    const folder = (await E('POST', '/api/folders', { name: '그래프' })).body.data.id;
+    const a = (await E('POST', '/api/problems', { ...problem, folderId: folder })).body.data.id;
+    const b = (await E('POST', '/api/problems', { ...problem, title: '가나다' })).body.data.id;
+    await U('PUT', `/api/problems/${a}`, { ...problem, language: 'java', code: { java: 'mine', python: 'p' }, memo: '메모' });
+    await U('PUT', `/api/problems/${b}/bookmark`, { bookmarked: true });
+
+    const guestIndex = await s.app.request('/api/catalog/index');
+    expect(guestIndex.status).toBe(200);
+    expect(guestIndex.headers.get('etag')).toMatch(/^"[0-9a-f]{16}"$/);
+    const index = CatalogIndex.parse((await guestIndex.json()).data);
+    expect(index.problems.map((p) => p.title)).toEqual(['가나다', '두 수의 합']);
+    // 쿠키가 있어도 카탈로그에는 사용자 데이터가 섞이지 않는다
+    expect((await U('GET', '/api/catalog/index')).body.data).toEqual(index);
+    const detail = (await U('GET', `/api/catalog/problems/${a}`)).body.data;
+    expect(detail).not.toHaveProperty('code');
+    expect(detail).not.toHaveProperty('memo');
+    expect((await s.app.request('/api/catalog/problems/none')).status).toBe(404);
+    // 목록을 막 읽은 직후에 바꿔도 다음 목록에 바로 보인다(1초 재사용분을 버린다)
+    await E('POST', '/api/collections', { name: '바로 보임', description: '' });
+    expect(CatalogIndex.parse((await (await s.app.request('/api/catalog/index')).json()).data).collections.map((x) => x.name)).toContain('바로 보임');
+
+    // 내 상태는 로그인해야 하고, 상태가 있는 문제만 온다
+    expect((await s.app.request('/api/me/problems')).status).toBe(401);
+    const mine = (await U('GET', '/api/me/problems')).body.data;
+    expect(mine.map((m: { id: string }) => m.id).sort()).toEqual([a, b].sort());
+    for (const who of [U, E]) {
+      const me = (await who('GET', '/api/me/problems')).body.data;
+      expect(mergeSummaries(index.problems, me)).toEqual((await who('GET', '/api/problems')).body.data);
+      for (const id of [a, b]) {
+        const merged = mergeProblem((await who('GET', `/api/catalog/problems/${id}`)).body.data, (await who('GET', `/api/me/problems/${id}`)).body.data);
+        expect(merged).toEqual((await who('GET', `/api/problems/${id}`)).body.data);
+      }
+    }
+    // 비회원 합치기 = 예전 비회원 응답
+    const guestList = await (await s.app.request('/api/problems')).json();
+    expect(mergeSummaries(index.problems, null)).toEqual(guestList.data);
+    const guestDetail = await (await s.app.request(`/api/problems/${a}`)).json();
+    expect(mergeProblem(detail, null)).toEqual(guestDetail.data);
+    expect((await U('GET', '/api/me/problems/none')).status).toBe(404);
+  });
+
+  it('편집 권한자의 변경은 바로 R2에 게시하고, 바뀐 문제만 다시 올린다', async () => {
+    const r2 = new MemoryObjectStore();
+    const s = setup({}, r2);
+    const E = as(s, await login(s), OWNER);
+    const U = as(s, await login(s, 'user@example.com'), 'user@example.com');
+    const a = (await E('POST', '/api/problems', problem)).body.data.id;
+    const b = (await E('POST', '/api/problems', { ...problem, title: '다른 문제' })).body.data.id;
+    const read = (key: string) => JSON.parse(new TextDecoder().decode(r2.objects.get(key)!.body)).data;
+    let index = CatalogIndex.parse(read(CATALOG_INDEX_KEY));
+    expect(index.problems).toHaveLength(2);
+    const va = index.problems.find((p) => p.id === a)!.version;
+    expect(read(catalogProblemKey(a, va))).toEqual((await E('GET', `/api/catalog/problems/${a}`)).body.data);
+    // R2 목록은 원본(API)의 목록과 같다
+    expect(index).toEqual((await E('GET', '/api/catalog/index')).body.data);
+
+    // 일반 사용자의 자동 저장은 게시하지 않는다
+    const before = r2.puts;
+    await U('PUT', `/api/problems/${a}`, { ...problem, code: { java: 'x', python: 'y' } });
+    expect(r2.puts).toBe(before);
+
+    // 제목을 바꾸면 그 문제 상세와 목록만 올린다
+    await E('PUT', `/api/problems/${b}`, { ...problem, title: '새 제목' });
+    expect(r2.puts).toBe(before + 2);
+    index = CatalogIndex.parse(read(CATALOG_INDEX_KEY));
+    expect(index.problems.find((p) => p.id === a)!.version).toBe(va);
+    expect(index.problems.map((p) => p.title)).toContain('새 제목');
+
+    // 히든 테스트셋은 gzip으로 올리고, 지운 로컬 파일은 R2에서 되살린다
+    await E('PUT', `/api/problems/${a}/hidden`, { cases: [{ id: 'h', args: ['[2, 2]'], stdin: '', expected: '4', hidden: true }] });
+    const hash: string = (await E('GET', `/api/catalog/problems/${a}`)).body.data.hiddenTestset.hash;
+    const gz = r2.objects.get(testsetKey(hash))!;
+    expect(gz.contentType).toBe('application/gzip');
+    expect(JSON.parse(gunzipSync(gz.body).toString())[0].id).toBe('h');
+    const fresh = new TestsetStore(':memory:');
+    expect(fresh.putRaw(hash, 'tampered')).toBe(false);
+    const restarted = createApp({ config: loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' }), db: s.db, runners: [], testsets: fresh, objectStore: r2 });
+    expect(await restarted.catalog!.hydrate()).toBe(1);
+    expect(fresh.get(hash)![0]!.id).toBe('h');
+
+    // 컬렉션 변경도 목록에 반영된다
+    const col = (await E('POST', '/api/collections', { name: '모음', description: '' })).body.data.id;
+    await E('PUT', `/api/collections/${col}/items`, { problemIds: [a] });
+    expect(CatalogIndex.parse(read(CATALOG_INDEX_KEY)).collections).toEqual([expect.objectContaining({ id: col, problemIds: [a] })]);
+
+    // 문제를 지우면 목록에서 빠진다
+    await E('DELETE', `/api/problems/${b}`);
+    expect(CatalogIndex.parse(read(CATALOG_INDEX_KEY)).problems.map((p) => p.id)).toEqual([a]);
+
+    // 다시 맞춰도 바뀐 것이 없으면 아무것도 올리지 않는다
+    const n = r2.puts;
+    expect(await s.catalog!.sync()).toEqual({ problems: 0, testsets: 0, index: false });
+    expect(r2.puts).toBe(n);
+  });
+
+  it('처음 켜면 전체를 올리고, 이미 올린 R2를 읽어 이어서 맞춘다', async () => {
+    const r2 = new MemoryObjectStore();
+    const s = setup({}, r2);
+    const E = as(s, await login(s));
+    await E('POST', '/api/problems', problem);
+    // 같은 저장소를 쓰는 새 프로세스: R2 목록을 읽어 바뀐 것이 없음을 안다
+    const { catalog } = createApp({ config: loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:' }), db: s.db, runners: [], objectStore: r2 });
+    const n = r2.puts;
+    expect(await catalog!.sync()).toEqual({ problems: 0, testsets: 0, index: false });
+    expect(r2.puts).toBe(n);
+  });
+
+  it('R2 설정은 넷 다 있거나 다 없어야 한다', () => {
+    expect(() => loadConfig({ R2_BUCKET: 'b' })).toThrow(/함께 설정/);
+    expect(loadConfig({}).r2).toBeNull();
   });
 });

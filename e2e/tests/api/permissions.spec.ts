@@ -12,6 +12,9 @@ type Op = { name: string; call: (r: APIRequestContext, ctx: { problemId: string;
 
 const ops: Op[] = [
   { name: '문제 목록 조회', call: (r) => r.get('/api/problems'), expect: { guest: 200, user: 200, editor: 200, master: 200 } },
+  { name: '카탈로그 목록 조회', call: (r) => r.get('/api/catalog/index'), expect: { guest: 200, user: 200, editor: 200, master: 200 } },
+  { name: '카탈로그 상세 조회', call: (r, c) => r.get(`/api/catalog/problems/${c.problemId}`), expect: { guest: 200, user: 200, editor: 200, master: 200 } },
+  { name: '내 풀이 상태 조회', call: (r, c) => r.get(`/api/me/problems/${c.problemId}`), expect: { guest: 401, user: 200, editor: 200, master: 401 } },
   { name: '문제 만들기', call: (r) => r.post('/api/problems', { data: aProblem() }), expect: { guest: 401, user: 403, editor: 200, master: 401 } },
   { name: '히든 케이스 보기', call: (r, c) => r.get(`/api/problems/${c.problemId}/hidden`), expect: { guest: 401, user: 403, editor: 200, master: 401 } },
   { name: '히든 케이스 바꾸기', call: (r, c) => r.put(`/api/problems/${c.problemId}/hidden`, { data: { cases: [] } }), expect: { guest: 401, user: 403, editor: 200, master: 401 } },
