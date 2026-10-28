@@ -1,0 +1,67 @@
+name: 결함 보고
+description: 재현 절차와 증거를 갖춘 결함 보고
+title: "fix: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 요약
+      description: 무엇이 어떻게 잘못되는지 한 줄로
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 심각도
+      options:
+        - "치명(S1): 데이터 손실·보안·서비스 중단"
+        - "높음(S2): 핵심 기능을 쓸 수 없고 우회 방법 없음"
+        - "보통(S3): 기능 일부 오류, 우회 가능"
+        - "낮음(S4): 표시·문구·사용성"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 절차
+      placeholder: |
+        1. 비회원으로 첫 화면을 연다
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 결과
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 실제 결과
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 환경
+      placeholder: "운영 / CI 실행 번호, 브라우저·기기, 커밋"
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 증거
+      description: 스크린샷·영상·Playwright trace(e2e 아티팩트)·서버 로그. 비밀 값은 지운다
+  - type: input
+    id: requirement
+    attributes:
+      label: 관련 요구사항
+      description: docs/quality/test-cases.md의 요구사항 번호(R1…R11)
+  - type: dropdown
+    id: found-in
+    attributes:
+      label: 발견 위치
+      description: 품질 지표의 결함 발견 위치로 집계한다
+      options: [단위, 정적 분석, API 자동화, UI 자동화, 운영 스모크, 수동·탐색, 사용자 제보]

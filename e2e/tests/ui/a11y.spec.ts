@@ -10,7 +10,7 @@ for (const [name, path] of [
   ['로그인', '/login'],
   ['약관', '/terms'],
 ] as const) {
-  test(`접근성: ${name}`, async ({ page }, testInfo) => {
+  test(`접근성: ${name}`, { tag: '@R9' }, async ({ page }, testInfo) => {
     await page.goto(path);
     await page.waitForLoadState('networkidle');
     const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();

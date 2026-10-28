@@ -27,7 +27,7 @@ const ops: Op[] = [
   { name: '관리자: 사용자 목록', call: (r) => r.get('/api/admin/users'), expect: { guest: 401, user: 401, editor: 401, master: 200 } },
 ];
 
-test.describe('권한 결정표', () => {
+test.describe('권한 결정표', { tag: '@R2' }, () => {
   const roles: Role[] = ['guest', 'user', 'editor', 'master'];
   for (const role of roles) {
     test.describe(role, () => {

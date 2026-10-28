@@ -21,4 +21,6 @@ export const env = {
   testAuthToken: process.env.E2E_TEST_AUTH_TOKEN ?? '',
   masterPassword: process.env.E2E_MASTER_PASSWORD ?? '',
   ci: !!process.env.CI,
+  /** 시연 모드: 통과한 테스트도 영상·trace·스크린샷을 남긴다(CI 수동 실행의 demo 입력) */
+  demo: process.env.E2E_DEMO === '1',
 };

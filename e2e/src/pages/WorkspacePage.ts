@@ -8,16 +8,12 @@ export class WorkspacePage {
   readonly editor: Locator;
   readonly runButton: Locator;
   readonly submitButton: Locator;
-  readonly result: Locator;
-  readonly saveState: Locator;
   readonly tabs: Locator;
 
   constructor(readonly page: Page) {
     this.editor = page.getByRole('textbox', { name: '코드 에디터' });
     this.runButton = page.getByRole('button', { name: '코드 실행' });
     this.submitButton = page.getByRole('button', { name: /^제출 후 채점/ });
-    this.result = page.locator('section').filter({ has: page.getByText(/실행 결과가 여기에|테스트 \d|테스트 결과|채점|컴파일 에러|실행할 테스트/) }).last();
-    this.saveState = page.getByText(/저장됨|저장 중|저장 실패/).first();
     this.tabs = page.getByRole('navigation', { name: '문제 화면' });
   }
 
@@ -63,9 +59,5 @@ export class WorkspacePage {
   /** 실행·채점이 끝날 때까지 기다린 뒤 결과 영역 텍스트 */
   async waitResult(timeout = 60_000) {
     await expect(this.page.getByText(/개 중 \d+개 (성공|통과)|컴파일 에러|정답입니다|실행하지 못했어요/).first()).toBeVisible({ timeout });
-  }
-
-  verdict(n: number) {
-    return this.page.getByText(`테스트 ${n}`, { exact: true }).locator('..');
   }
 }

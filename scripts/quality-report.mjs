@@ -70,6 +70,7 @@ const e2e = pw
             tests.push({
               title: spec.title,
               file: spec.file ?? file,
+              requirements: (Array.isArray(spec.tags) ? spec.tags : []).map((tag) => String(tag).replace(/^@/, '')).filter((tag) => /^R\d+$/.test(tag)), // JSON 리포트는 태그를 @ 없이 준다
               project: t.projectName,
               status: t.status, // expected | unexpected | flaky | skipped
               retries: Math.max(0, results.length - 1),
@@ -90,6 +91,17 @@ const e2e = pw
         else if (t.status === 'flaky') p.flaky++;
         else p.skipped++;
       }
+      // 요구사항 추적: 테스트마다 @R 태그가 있어야 하고, 태그가 여럿이면 각 요구사항에 센다(docs/quality/test-cases.md)
+      const byRequirement = {};
+      for (const t of tests)
+        for (const r of t.requirements) {
+          const s = (byRequirement[r] ??= { total: 0, passed: 0, failed: 0, flaky: 0, skipped: 0 });
+          s.total++;
+          if (t.status === 'expected') s.passed++;
+          else if (t.status === 'unexpected') s.failed++;
+          else if (t.status === 'flaky') s.flaky++;
+          else s.skipped++;
+        }
       const executed = tests.filter((t) => t.status !== 'skipped');
       return {
         total: tests.length,
@@ -103,6 +115,8 @@ const e2e = pw
         firstTryPassRate: executed.length ? (executed.filter((t) => t.status === 'expected').length / executed.length) * 100 : null,
         wallMs: pw.stats?.duration ?? null,
         byProject,
+        byRequirement,
+        untraced: tests.filter((t) => t.requirements.length === 0),
         slowest: [...tests].sort((a, b) => b.durationMs - a.durationMs).slice(0, 5),
         flakyTests: tests.filter((t) => t.status === 'flaky'),
         failedTests: tests.filter((t) => t.status === 'unexpected'),
@@ -125,6 +139,7 @@ if (e2e) {
   if (e2e.failed) problems.push(`자동화 실패: ${e2e.failed}건`);
   if (e2e.flaky) problems.push(`자동화 불안정: ${e2e.flaky}건`);
   if (e2e.globalErrors) problems.push(`자동화 전역 오류: ${e2e.globalErrors}건`);
+  if (e2e.untraced.length) problems.push(`요구사항 태그 없음: ${[...new Set(e2e.untraced.map((t) => `${t.file} › ${t.title}`))].slice(0, 5).join(', ')}`);
   // 프로젝트 삭제·잘못된 태그로 전체 기기 검사가 사라지는 회귀도 잡는다.
   for (const project of ['api', 'desktop-chromium', 'desktop-webkit', 'mobile-iphone', 'mobile-pixel', 'tablet-ipad']) {
     const stats = e2e.byProject[project];
@@ -143,7 +158,7 @@ const metrics = {
   generatedAt: new Date().toISOString(),
   commit: process.env.GITHUB_SHA ?? process.env.GIT_COMMIT ?? null,
   unit: unit && { ...unit, coverage: cov && { lines: cov.lines.pct, branches: cov.branches.pct, functions: cov.functions.pct, statements: cov.statements.pct } },
-  e2e: e2e && { total: e2e.total, passed: e2e.passed, failed: e2e.failed, flaky: e2e.flaky, skipped: e2e.skipped, globalErrors: e2e.globalErrors, passRate: e2e.passRate, firstTryPassRate: e2e.firstTryPassRate, wallMs: e2e.wallMs, byProject: e2e.byProject },
+  e2e: e2e && { total: e2e.total, passed: e2e.passed, failed: e2e.failed, flaky: e2e.flaky, skipped: e2e.skipped, globalErrors: e2e.globalErrors, passRate: e2e.passRate, firstTryPassRate: e2e.firstTryPassRate, wallMs: e2e.wallMs, byProject: e2e.byProject, byRequirement: e2e.byRequirement },
   sonar: sonar && { gate: sonar.gate, measures: sonar.measures, issues: sonar.issues },
 };
 
@@ -169,6 +184,11 @@ if (sonar) {
 if (e2e) {
   lines.push('', '## 실행 단위별', '', '| 프로젝트 | 통과 | 실패 | 불안정 | 건너뜀 | 시간 |', '|---|---|---|---|---|---|');
   for (const [p, s] of Object.entries(e2e.byProject)) lines.push(`| ${p} | ${s.passed} | ${s.failed} | ${s.flaky} | ${s.skipped} | ${sec(s.durationMs)} |`);
+  const reqs = Object.entries(e2e.byRequirement).sort(([a], [b]) => +a.slice(1) - +b.slice(1));
+  if (reqs.length) {
+    lines.push('', '## 요구사항별', '', '| 요구사항 | 통과 | 실패 | 불안정 | 건너뜀 |', '|---|---|---|---|---|');
+    for (const [r, s] of reqs) lines.push(`| ${r} | ${s.passed}/${s.total} | ${s.failed} | ${s.flaky} | ${s.skipped} |`);
+  }
   if (e2e.failedTests.length) {
     lines.push('', '## 실패', '');
     for (const t of e2e.failedTests) lines.push(`- \`${t.project}\` ${t.file} › ${t.title}`);

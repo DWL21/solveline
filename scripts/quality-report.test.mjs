@@ -13,7 +13,7 @@ const coveragePath = 'apps/api/coverage/coverage-summary.json';
 const pwPath = 'e2e/reports/results.json';
 const sonarPath = 'reports/quality/sonar.json';
 const passed = () => ({
-  suites: [{ specs: projects.map((projectName) => ({ title: projectName, tests: [{ projectName, status: 'expected', results: [{ status: 'passed', duration: 10 }] }] })) }],
+  suites: [{ specs: projects.map((projectName, i) => ({ title: projectName, tags: [`R${i + 1}`], tests: [{ projectName, status: 'expected', results: [{ status: 'passed', duration: 10 }] }] })) }],
   errors: [], stats: { duration: 100 },
 });
 const inputs = () => ({
@@ -111,3 +111,20 @@ for (const [path, value] of [[coveragePath, {}], [pwPath, { suites: [{ specs: [{
     assert.match(r.summary, /읽기 실패/);
   });
 }
+
+test('요구사항 태그(@R…)가 없는 자동화 테스트는 추적표에서 빠지므로 차단한다', () => {
+  const pw = passed();
+  pw.suites[0].specs[0].tags = ['cross'];
+  const r = run({ ...inputs(), [pwPath]: pw });
+  assert.equal(r.status, 1);
+  assert.match(r.summary, /요구사항 태그 없음/);
+});
+test('요구사항별 결과를 집계한다(태그가 여럿이면 각각에 센다)', () => {
+  const pw = passed();
+  pw.suites[0].specs[0].tags = ['R1', 'R2'];
+  pw.suites[0].specs[1].tests[0].status = 'unexpected';
+  const r = run({ ...inputs(), [pwPath]: pw });
+  assert.deepEqual(r.metrics.e2e.byRequirement.R1, { total: 1, passed: 1, failed: 0, flaky: 0, skipped: 0 });
+  assert.deepEqual(r.metrics.e2e.byRequirement.R2, { total: 2, passed: 1, failed: 1, flaky: 0, skipped: 0 });
+  assert.match(r.summary, /## 요구사항별/);
+});

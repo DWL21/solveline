@@ -4,6 +4,7 @@ Solveline의 테스트 자동화와 품질 관리를 한곳에 모은 문서입�
 
 | 문서 | 내용 |
 |---|---|
+| [요구사항과 테스트 케이스](test-cases.md) | 요구사항 R1~R11, 테스트 케이스 추적표, 기기별 실행, 시연 방법 |
 | [테스트 전략](strategy.md) | 원칙, 테스트 피라미드, 위험 기반 범위, 설계 기법, 환경, 진입·종료 기준, 불안정 테스트 정책 |
 | [품질 지표](metrics.md) | 지표 정의·계산식·목표·수집 위치, 품질 게이트, 리뷰 주기 |
 | [팀 적용 가이드](guide.md) | 테스트 작성 규칙, 패턴(페이지 객체·데이터 빌더), PR 체크리스트, 처음 오는 사람의 30분 |
@@ -36,6 +37,8 @@ Solveline의 테스트 자동화와 품질 관리를 한곳에 모은 문서입�
 | 정적 분석 | `scripts/sonar.sh` (`SONAR_KEEP=1`이면 http://localhost:9000 에서 결과 보기) | 3~5분 |
 | 품질 리포트 | `node scripts/quality-report.mjs` → `reports/quality/summary.md` | 즉시 |
 | 테스트 리포트 | `pnpm --filter @solveline/e2e report` (실패 시 trace·영상 포함) | — |
+| 요구사항 하나만 | `pnpm --filter @solveline/e2e exec playwright test --grep @R3` | — |
+| 시연(모든 테스트 영상·trace) | GitHub Actions → CI → Run workflow → `demo` 켜기 → `e2e` 아티팩트 | ~5분 |
 
 처음이면 `pnpm install` 뒤 `pnpm --filter @solveline/e2e exec playwright install chromium webkit`.
 
