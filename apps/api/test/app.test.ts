@@ -644,6 +644,26 @@ describe('제출 큐', () => {
     expect((await call('GET', '/api/submissions/' + done.id)).body.data.result.results[0].status).toBe('pass');
   });
 
+  it('긴 조회: 짧은 실행은 제출 요청 하나로 결과를 받고, 오래 걸리면 상태가 바뀔 때 답한다', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    const quick = await call('POST', '/api/submissions?wait=25', { problemId: p.id, kind: 'run', language: 'python', mode: 'function', code: 'x', cases: problem.cases });
+    expect(quick.status).toBe(200);
+    expect(quick.body.data.status).toBe('done');
+
+    const held = await call('POST', '/api/submissions?wait=0', { problemId: p.id, kind: 'run', language: 'python', mode: 'function', code: 'hold', cases: problem.cases });
+    expect(held.status).toBe(202);
+    const id = held.body.data.id;
+    // 시간이 다 되면 그때 상태를 돌려준다(최대 25초로 자른다)
+    const started = Date.now();
+    expect((await call('GET', `/api/submissions/${id}?wait=0.05`)).body.data.status).toBe('running');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+    // 기다리는 동안 중지되면 바로 돌아온다
+    const waiting = call('GET', `/api/submissions/${id}?wait=25`);
+    await call('POST', `/api/submissions/${id}/cancel`);
+    expect((await waiting).body.data.status).toBe('cancelled');
+  });
+
   it('제출은 히든 테스트셋(해시)으로 채점하고 점수를 서버가 기록한다', async () => {
     const call = await authed();
     const hidden = [

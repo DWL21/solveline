@@ -275,6 +275,12 @@ export const RunResult = z.object({
 });
 export type RunResult = z.infer<typeof RunResult>;
 
+/** 채점 결과로 마지막 제출 기록을 만든다. 서버가 저장하는 값과 화면에 바로 반영하는 값이 같다. total은 채점한 케이스 수. */
+export function lastSubmissionOf(result: RunResult, total: number, language: Language, at: string): LastSubmission {
+  const passed = result.compile.ok ? result.results.filter((r) => r.status === 'pass').length : 0;
+  return { score: total ? Math.round((passed / total) * 100) : 0, passed, total, language, at };
+}
+
 
 // ─── 기본 템플릿 (기존 형식) ───
 

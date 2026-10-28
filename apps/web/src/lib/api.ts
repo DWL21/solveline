@@ -71,6 +71,7 @@ async function request<S extends z.ZodType>(schema: S, path: string, init: Reque
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({ method, body: JSON.stringify(body ?? {}) });
+const LONG_POLL_S = 25;
 
 export const api = {
   session: () => request(Session, '/api/auth/session'),
@@ -93,8 +94,9 @@ export const api = {
   deleteProblem: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/problems/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   run: (r: RunRequest) => request(RunResult, '/api/run', json('POST', r)),
   /** 제출 큐: 바로 id를 받고, submission(id)로 결과를 조회한다 */
-  submit: (r: SubmissionRequest) => request(Submission, '/api/submissions', json('POST', r)),
-  submission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}`),
+  /** 긴 조회: 짧은 실행은 제출 요청 하나로 결과까지 받고, 아니면 상태가 바뀔 때까지(최대 25초) 서버가 기다렸다 답한다 */
+  submit: (r: SubmissionRequest) => request(Submission, `/api/submissions?wait=${LONG_POLL_S}`, json('POST', r)),
+  submission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}?wait=${LONG_POLL_S}`),
   submissionHistory: (offset = 0) => request(SubmissionHistory, `/api/submissions?offset=${offset}`),
   submissionDetail: (id: string) => request(SubmissionDetail, `/api/submissions/${encodeURIComponent(id)}/detail`),
   cancelSubmission: (id: string) => request(Submission, `/api/submissions/${encodeURIComponent(id)}/cancel`, json('POST')),
