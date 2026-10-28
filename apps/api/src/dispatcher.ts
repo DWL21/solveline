@@ -308,7 +308,7 @@ export class Dispatcher {
       if (job.kind === 'submit') {
         const last = lastSubmissionOf(result, ids.length, job.language, new Date().toISOString());
         score = last.score;
-        if (job.problem_id && job.user_id) this.problems.setLastSubmission(job.problem_id, job.user_id, last);
+        if (job.problem_id && job.user_id) await this.problems.setLastSubmission(job.problem_id, job.user_id, last);
       }
       this.store.finish(job.id, { result, score });
     } catch (e) {

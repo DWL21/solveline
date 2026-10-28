@@ -11,6 +11,8 @@ import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '..
 import { SubmissionStore } from '../src/dispatcher.ts';
 import { CATALOG_INDEX_KEY, catalogProblemKey, testsetKey } from '../src/catalog.ts';
 import { MemoryObjectStore, type ObjectStore } from '../src/r2.ts';
+import { d1Sql, sqliteSql } from '../src/sql.ts';
+import { fakeD1 } from './fake-d1.ts';
 import { TestsetStore } from '../src/testsets.ts';
 import { gunzipSync } from 'node:zlib';
 
@@ -30,7 +32,7 @@ const fakeGoogle: GoogleClient = {
  * 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다.
  * 코드가 'hold'면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
  */
-function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null = null) {
+function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null = null, opts: { d1?: boolean } = {}) {
   const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40), DATA_DIR: ':memory:', OWNER_EMAIL: OWNER, ...env });
   const calls: RunJob[] = [];
   const uploads: string[] = [];
@@ -60,7 +62,9 @@ function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null
     },
   };
   const db = openDb(':memory:');
-  const { app, dispatcher, catalog, testsets } = createApp({ config, db, runners: [runner], google: fakeGoogle, objectStore });
+  // d1: 저장소를 D1 어댑터(가짜 D1)로 돌린다. Worker에서와 같은 경로를 검증한다.
+  const sql = opts.d1 ? d1Sql(fakeD1(db)) : undefined;
+  const { app, dispatcher, catalog, testsets } = createApp({ config, db, sql, runners: [runner], google: fakeGoogle, objectStore });
   return { app, db, dispatcher, calls, uploads, held, catalog, testsets };
 }
 
@@ -142,7 +146,7 @@ describe('임시 로그인', () => {
   it('신규 가입 중지와 JSON 요청 제한을 따른다', async () => {
     const s = setup();
     expect((await s.app.request('/api/auth/temporary', { method: 'POST' })).status).toBe(400);
-    new SignupSettingsStore(s.db).setEnabled(false);
+    await new SignupSettingsStore(sqliteSql(s.db)).setEnabled(false);
     expect((await s.app.request('/api/auth/temporary', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
   });
 });
@@ -492,18 +496,18 @@ describe('관리자 모드(마스터 비밀번호)', () => {
     expect((await A('GET', '/api/admin/signup-settings')).body.data.signupEnabled).toBe(true);
     expect((await A('GET', '/api/admin/blocklist')).status).toBe(404);
     expect((await A('POST', '/api/admin/blocklist', { email: 'user@example.com' })).status).toBe(404);
-    const id = new UserStore(s.db).byGoogleSub(`sub-${OWNER}`)!.id;
+    const id = (await new UserStore(sqliteSql(s.db)).byGoogleSub(`sub-${OWNER}`))!.id;
     expect((await A('PUT', `/api/admin/users/${id}/block`, { blocked: true })).status).toBe(404);
     expect((await A('GET', `/api/admin/users/${id}`)).body.data).not.toHaveProperty('blocked');
   });
 });
 
 describe('설정', () => {
-  it('가입 정책은 DB 재시작 후에도 유지되고 기존 블랙리스트 DB를 이전한다', () => {
+  it('가입 정책은 DB 재시작 후에도 유지되고 기존 블랙리스트 DB를 이전한다', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'solveline-signup-'));
     let db = openDb(dir);
     try {
-      const user = new UserStore(db).create({ sub: 'old-sub', email: 'old@example.com', name: 'old', picture: '' }, { terms: 'old', privacy: 'old' });
+      const user = await new UserStore(sqliteSql(db)).create({ sub: 'old-sub', email: 'old@example.com', name: 'old', picture: '' }, { terms: 'old', privacy: 'old' });
       // 마지막 마이그레이션 적용 전의 DB 구조를 재현한다.
       db.exec(`DROP TABLE signup_settings;
         CREATE TABLE blocked_emails (email TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -511,13 +515,13 @@ describe('설정', () => {
         DELETE FROM _migrations WHERE id = 8; -- 가입 정책 마이그레이션(#49)`);
       db.close();
       db = openDb(dir);
-      expect(new UserStore(db).byId(user.id)?.email).toBe('old@example.com');
+      expect((await new UserStore(sqliteSql(db)).byId(user.id))?.email).toBe('old@example.com');
       expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'blocked_emails'").get()).toBeUndefined();
-      expect(new SignupSettingsStore(db).enabled()).toBe(true);
-      new SignupSettingsStore(db).setEnabled(false);
+      expect(await new SignupSettingsStore(sqliteSql(db)).enabled()).toBe(true);
+      await new SignupSettingsStore(sqliteSql(db)).setEnabled(false);
       db.close();
       db = openDb(dir);
-      expect(new SignupSettingsStore(db).enabled()).toBe(false);
+      expect(await new SignupSettingsStore(sqliteSql(db)).enabled()).toBe(false);
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -622,10 +626,10 @@ describe('풀이 시간', () => {
 });
 
 describe('제출 큐', () => {
-  it('채점 제출만 최신순으로 20개씩 조회한다', () => {
+  it('채점 제출만 최신순으로 20개씩 조회한다', async () => {
     const db = openDb(':memory:');
     const store = new SubmissionStore(db);
-    const user = new UserStore(db).create({ sub: 'history', email: 'history@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
+    const user = await new UserStore(sqliteSql(db)).create({ sub: 'history', email: 'history@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
     const base = { userId: user.id, problemId: null, language: 'python' as const, mode: 'function' as const, code: 'submitted code', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
     const ids = Array.from({ length: 21 }, (_, i) => store.insert({ ...base, kind: 'submit' }, new Date(2026, 0, 1, 0, 0, i)));
     store.insert({ ...base, kind: 'run' }, new Date(2026, 0, 1, 0, 1));
@@ -724,10 +728,10 @@ describe('제출 큐', () => {
     expect(res.body.error?.code).toBe('invalid_case');
   });
 
-  it('코드 실행이 제출 채점보다 먼저 꺼내진다', () => {
+  it('코드 실행이 제출 채점보다 먼저 꺼내진다', async () => {
     const db = openDb(':memory:');
     const store = new SubmissionStore(db);
-    const user = new UserStore(db).create({ sub: 's', email: 'u@example.com', name: 'u', picture: '' }, { terms: 'v', privacy: 'v' });
+    const user = await new UserStore(sqliteSql(db)).create({ sub: 's', email: 'u@example.com', name: 'u', picture: '' }, { terms: 'v', privacy: 'v' });
     const base = { userId: user.id, problemId: null, language: 'java' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, caseIds: [], timeLimitMs: 10_000 };
     const sub = store.insert({ ...base, kind: 'submit' }, new Date('2026-01-01T00:00:00Z'));
     const run = store.insert({ ...base, kind: 'run' }, new Date('2026-01-01T00:00:01Z'));
@@ -1026,5 +1030,32 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
   it('R2 설정은 넷 다 있거나 다 없어야 한다', () => {
     expect(() => loadConfig({ R2_BUCKET: 'b' })).toThrow(/함께 설정/);
     expect(loadConfig({}).r2).toBeNull();
+  });
+});
+
+describe('D1 어댑터', () => {
+  it('가입·문제·자동 저장·북마크·폴더·컬렉션·관리자 상세가 D1 경로에서도 같다', async () => {
+    const s = setup({ ACCESS_PASSWORD: MASTER }, null, { d1: true });
+    const E = as(s, await login(s), OWNER);
+    const U = as(s, await login(s, 'user@example.com'), 'user@example.com');
+    const folder = (await U('POST', '/api/folders', { name: '내 폴더' })).body.data.id;
+    expect((await U('POST', '/api/folders', { name: '내 폴더' })).status).toBe(409);
+    const p = (await E('POST', '/api/problems', problem)).body.data.id;
+    await U('PATCH', `/api/problems/${p}`, { code: { python: 'mine' }, memo: '메모', folderId: folder, timer: { elapsedMs: 5, solvedMs: null, paused: false } });
+    await U('PUT', `/api/problems/${p}/bookmark`, { bookmarked: true });
+    const mine = (await U('GET', '/api/me/problems')).body.data;
+    expect(mine).toEqual([{ id: p, bookmarked: true, folderId: folder, language: 'python', lastSubmission: null, timer: { elapsedMs: 5, solvedMs: null, paused: false } }]);
+    const state = (await U('GET', `/api/me/problems/${p}`)).body.data;
+    expect([state.code.python, state.memo]).toEqual(['mine', '메모']);
+    const col = (await E('POST', '/api/collections', { name: '묶음', description: '' })).body.data.id;
+    expect((await E('PUT', `/api/collections/${col}/items`, { problemIds: [p, 'none'] })).status).toBe(400);
+    expect((await E('PUT', `/api/collections/${col}/items`, { problemIds: [p, p] })).body.data.problemIds).toEqual([p]);
+    const admin = await masterLogin(s);
+    const users = (await (await s.app.request('/api/admin/users', { headers: { cookie: admin } })).json()).data;
+    const member = users.find((u: { email: string }) => u.email === 'user@example.com');
+    const detail = (await (await s.app.request(`/api/admin/users/${member.id}`, { headers: { cookie: admin } })).json()).data;
+    expect(detail.problems.map((x: { problemId: string }) => x.problemId)).toEqual([p]);
+    expect((await U('DELETE', `/api/folders/${folder}`)).status).toBe(200);
+    expect((await U('GET', `/api/me/problems/${p}`)).body.data.folderId).toBeNull();
   });
 });

@@ -27,6 +27,7 @@ import {
   type TestsetRef,
 } from '@solveline/shared';
 import type { TestsetStore } from './testsets.ts';
+import { isUniqueViolation, stmt, type Param, type Sql, type Stmt } from './sql.ts';
 
 export type Db = Database.Database;
 
@@ -314,7 +315,6 @@ export class StoreError extends Error {
   }
 }
 
-const isUniqueViolation = (e: unknown) => e instanceof Error && 'code' in e && (e as { code: string }).code === 'SQLITE_CONSTRAINT_UNIQUE';
 
 /** dataDir가 ':memory:'면 메모리 DB (테스트용) */
 export function openDb(dataDir: string): Db {
@@ -362,6 +362,7 @@ export function openDb(dataDir: string): Db {
   return db;
 }
 
+
 type Row = {
   id: string;
   title: string;
@@ -395,25 +396,28 @@ const parse = <T>(v: string | null | undefined): T | null => (v ? (JSON.parse(v)
  */
 export class ProblemStore {
   constructor(
-    private db: Db,
+    private sql: Sql,
     private testsets: TestsetStore,
   ) {}
 
-  /** 내 풀이 상태가 있는 문제만(작성 코드·북마크·개인 폴더 중 하나라도). 카탈로그 목록과 합쳐 쓴다. */
-  mySummaries(userId: string): MyProblemSummary[] {
-    const rows = this.db
-      .prepare(
-        `SELECT p.id, s.language, s.timer, s.last_submission, b.problem_id AS bookmark_id, f.folder_id
-         FROM problems p
-         LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = @uid
-         LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = @uid
-         LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = @uid
-         WHERE s.problem_id IS NOT NULL OR b.problem_id IS NOT NULL OR f.problem_id IS NOT NULL`,
-      )
-      .all({ uid: userId }) as { id: string; language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null; folder_id: string | null }[];
+  /**
+   * 내 풀이 상태가 있는 문제만(작성 코드·북마크·개인 폴더 중 하나라도). 카탈로그 목록과 합쳐 쓴다.
+   * problems를 훑지 않고 사용자 테이블만 user_id로 읽는다(D1은 읽은 행 수로 한도를 센다).
+   */
+  async mySummaries(userId: string): Promise<MyProblemSummary[]> {
+    const rows = await this.sql.all<{ id: string; language: string | null; timer: string | null; last_submission: string | null; bookmarked: number; folder_id: string | null }>(
+      `SELECT k.id, s.language, s.timer, s.last_submission, b.problem_id IS NOT NULL AS bookmarked, f.folder_id
+       FROM (SELECT problem_id AS id FROM user_problems WHERE user_id = ?
+             UNION SELECT problem_id FROM bookmarks WHERE user_id = ?
+             UNION SELECT problem_id FROM folder_items WHERE user_id = ?) k
+       LEFT JOIN user_problems s ON s.user_id = ? AND s.problem_id = k.id
+       LEFT JOIN bookmarks b ON b.user_id = ? AND b.problem_id = k.id
+       LEFT JOIN folder_items f ON f.user_id = ? AND f.problem_id = k.id`,
+      ...Array<string>(6).fill(userId),
+    );
     return rows.map((r) => ({
       id: r.id,
-      bookmarked: r.bookmark_id !== null,
+      bookmarked: !!r.bookmarked,
       folderId: r.folder_id,
       language: r.language as Language | null,
       lastSubmission: parse<LastSubmission>(r.last_submission),
@@ -422,11 +426,11 @@ export class ProblemStore {
   }
 
   /** 문제 하나의 내 상태. 문제가 없으면 null */
-  myState(id: string, userId: string): MyProblemState | null {
-    if (!this.row(id)) return null;
-    const st = this.state(id, userId);
+  async myState(id: string, userId: string): Promise<MyProblemState | null> {
+    if (!(await this.exists(id))) return null;
+    const [st, folderId] = await Promise.all([this.state(id, userId), this.folderOf(id, userId)]);
     return {
-      folderId: this.folderOf(id, userId),
+      folderId,
       language: (st?.language ?? null) as Language | null,
       code: parse<CodeSet>(st?.code),
       myCases: parse<TestCase[]>(st?.my_cases) ?? [],
@@ -456,29 +460,28 @@ export class ProblemStore {
   }
 
   /** 공용 문제 내용(사용자 상태 없음) */
-  catalogProblem(id: string): CatalogProblem | null {
-    const row = this.row(id);
+  async catalogProblem(id: string): Promise<CatalogProblem | null> {
+    const row = await this.row(id);
     return row ? this.toCatalog(row) : null;
   }
 
   /** 모든 공용 문제(제목순). 카탈로그 게시에 쓴다. */
-  catalogProblems(): CatalogProblem[] {
-    return (this.db.prepare('SELECT * FROM problems ORDER BY title').all() as Row[]).map((r) => this.toCatalog(r));
+  async catalogProblems(): Promise<CatalogProblem[]> {
+    return (await this.sql.all<Row>('SELECT * FROM problems ORDER BY title')).map((r) => this.toCatalog(r));
   }
 
   /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
-  list(userId: string | null): ProblemSummary[] {
-    const rows = this.db
-      .prepare(
-        `SELECT p.id, p.title, CASE WHEN @uid IS NULL THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
-                s.language AS my_language, s.timer, s.last_submission, b.problem_id AS bookmark_id
-         FROM problems p
-         LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = @uid
-         LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = @uid
-         LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = @uid
-         ORDER BY p.title`,
-      )
-      .all({ uid: userId }) as (Row & { my_language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null })[];
+  async list(userId: string | null): Promise<ProblemSummary[]> {
+    const rows = await this.sql.all<Row & { my_language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null }>(
+      `SELECT p.id, p.title, CASE WHEN ? IS NULL THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
+              s.language AS my_language, s.timer, s.last_submission, b.problem_id AS bookmark_id
+       FROM problems p
+       LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = ?
+       LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = ?
+       LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = ?
+       ORDER BY p.title`,
+      ...Array<string | null>(4).fill(userId),
+    );
     return rows.map((r) => ({
       id: r.id,
       bookmarked: r.bookmark_id !== null,
@@ -492,19 +495,19 @@ export class ProblemStore {
     }));
   }
 
-  setBookmark(id: string, userId: string, bookmarked: boolean) {
-    if (!this.exists(id)) return false;
-    if (bookmarked) this.db.prepare('INSERT OR IGNORE INTO bookmarks (user_id, problem_id) VALUES (?, ?)').run(userId, id);
-    else this.db.prepare('DELETE FROM bookmarks WHERE user_id = ? AND problem_id = ?').run(userId, id);
+  async setBookmark(id: string, userId: string, bookmarked: boolean) {
+    if (!(await this.exists(id))) return false;
+    if (bookmarked) await this.sql.run('INSERT OR IGNORE INTO bookmarks (user_id, problem_id) VALUES (?, ?)', userId, id);
+    else await this.sql.run('DELETE FROM bookmarks WHERE user_id = ? AND problem_id = ?', userId, id);
     return true;
   }
 
   private row(id: string) {
-    return this.db.prepare('SELECT * FROM problems WHERE id = ?').get(id) as Row | undefined;
+    return this.sql.get<Row>('SELECT * FROM problems WHERE id = ?', id);
   }
 
-  exists(id: string) {
-    return !!this.row(id);
+  async exists(id: string) {
+    return (await this.sql.value<number>('SELECT 1 FROM problems WHERE id = ?', id)) !== undefined;
   }
 
   private body(row: Row): Body {
@@ -519,47 +522,46 @@ export class ProblemStore {
     };
   }
 
-  private state(id: string, userId: string | null) {
-    if (!userId) return undefined;
-    return this.db.prepare('SELECT language, code, my_cases, memo, timer, last_submission, updated_at FROM user_problems WHERE user_id = ? AND problem_id = ?').get(userId, id) as
-      | StateRow
-      | undefined;
+  private state(id: string, userId: string) {
+    return this.sql.get<StateRow>('SELECT language, code, my_cases, memo, timer, last_submission, updated_at FROM user_problems WHERE user_id = ? AND problem_id = ?', userId, id);
   }
 
   /** 사용자 상태의 일부를 바꾼다(없으면 만든다) */
   private upsertState(id: string, userId: string, patch: { language?: string; code?: string; my_cases?: string; memo?: string; timer?: string; last_submission?: string }, now = new Date()) {
     const cols = Object.keys(patch) as (keyof typeof patch)[];
-    this.db
-      .prepare(
-        `INSERT INTO user_problems (user_id, problem_id, ${cols.join(', ')}, updated_at) VALUES (?, ?, ${cols.map(() => '?').join(', ')}, ?)
-         ON CONFLICT (user_id, problem_id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}, updated_at = excluded.updated_at`,
-      )
-      .run(userId, id, ...cols.map((c) => patch[c]!), now.toISOString());
+    return stmt(
+      `INSERT INTO user_problems (user_id, problem_id, ${cols.join(', ')}, updated_at) VALUES (?, ?, ${cols.map(() => '?').join(', ')}, ?)
+       ON CONFLICT (user_id, problem_id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}, updated_at = excluded.updated_at`,
+      userId,
+      id,
+      ...cols.map((c) => patch[c]!),
+      now.toISOString(),
+    );
   }
 
-  get(id: string, userId: string | null): Problem | null {
+  async get(id: string, userId: string | null): Promise<Problem | null> {
     // 웹이 카탈로그와 내 상태를 합치는 것과 같은 방식으로 만든다.
-    const p = this.catalogProblem(id);
+    const p = await this.catalogProblem(id);
     if (!p) return null;
-    return Problem.parse(mergeProblem(p, userId ? this.myState(id, userId) : null));
+    return Problem.parse(mergeProblem(p, userId ? await this.myState(id, userId) : null));
   }
 
   /** 이 사용자가 문제를 넣어 둔 개인 폴더 */
-  private folderOf(id: string, userId: string | null): string | null {
+  private async folderOf(id: string, userId: string | null): Promise<string | null> {
     if (!userId) return null;
-    return (this.db.prepare('SELECT folder_id FROM folder_items WHERE user_id = ? AND problem_id = ?').pluck().get(userId, id) as string | undefined) ?? null;
+    return (await this.sql.value<string>('SELECT folder_id FROM folder_items WHERE user_id = ? AND problem_id = ?', userId, id)) ?? null;
   }
 
-  /** 문제를 이 사용자의 개인 폴더에 넣는다(null이면 폴더 없음). 남의 폴더에는 넣을 수 없다. */
-  private setFolder(id: string, userId: string, folderId: string | null) {
-    if (!folderId) {
-      this.db.prepare('DELETE FROM folder_items WHERE user_id = ? AND problem_id = ?').run(userId, id);
-      return;
-    }
-    if (!this.db.prepare('SELECT 1 FROM folders WHERE id = ? AND user_id = ?').get(folderId, userId)) throw new StoreError('folder_not_found', '없는 폴더입니다.');
-    this.db
-      .prepare('INSERT INTO folder_items (user_id, problem_id, folder_id) VALUES (?, ?, ?) ON CONFLICT (user_id, problem_id) DO UPDATE SET folder_id = excluded.folder_id')
-      .run(userId, id, folderId);
+  /** 문제를 이 사용자의 개인 폴더에 넣는 문(null이면 폴더 없음). 남의 폴더에는 넣을 수 없다. */
+  private async setFolder(id: string, userId: string, folderId: string | null): Promise<Stmt> {
+    if (!folderId) return stmt('DELETE FROM folder_items WHERE user_id = ? AND problem_id = ?', userId, id);
+    if ((await this.sql.value('SELECT 1 FROM folders WHERE id = ? AND user_id = ?', folderId, userId)) === undefined) throw new StoreError('folder_not_found', '없는 폴더입니다.');
+    return stmt(
+      'INSERT INTO folder_items (user_id, problem_id, folder_id) VALUES (?, ?, ?) ON CONFLICT (user_id, problem_id) DO UPDATE SET folder_id = excluded.folder_id',
+      userId,
+      id,
+      folderId,
+    );
   }
 
   /** 입력의 hidden 케이스는 테스트셋으로 옮기고, 없으면 기존 테스트셋을 유지한다. 시작 코드는 starterCode가 있을 때만 바꾼다. */
@@ -576,95 +578,94 @@ export class ProblemStore {
   }
 
   /** 편집 권한자만. 만든 사람의 작성 코드는 시작 코드와 같다. */
-  create(input: ProblemInput, userId: string, now = new Date()): Problem {
+  async create(input: ProblemInput, userId: string, now = new Date()): Promise<Problem> {
     const id = randomUUID();
     const ts = now.toISOString();
-    this.db.transaction(() => {
-      this.db
-        .prepare('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
-        .run(id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null)), ts, ts);
-      // 폴더는 개인 정리용: 만든 사람의 폴더에만 넣는다
-      this.setFolder(id, userId, input.folderId);
-    })();
-    return this.get(id, userId)!;
+    // 폴더는 개인 정리용: 만든 사람의 폴더에만 넣는다
+    const folder = await this.setFolder(id, userId, input.folderId);
+    await this.sql.batch([
+      stmt('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)', id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null)), ts, ts),
+      folder,
+    ]);
+    return (await this.get(id, userId))!;
   }
 
   /**
    * 자동 저장. 작성 코드·언어·내 케이스·메모는 언제나 그 사용자 것으로 저장하고, 문제 내용은 편집 권한이 있을 때만 바꾼다
    * (권한 없는 사용자가 보낸 내용 변경은 무시한다).
    */
-  update(id: string, input: ProblemInput, userId: string, editor: boolean, now = new Date()): Problem | null {
-    const row = this.row(id);
+  async update(id: string, input: ProblemInput, userId: string, editor: boolean, now = new Date()): Promise<Problem | null> {
+    const row = await this.row(id);
     if (!row) return null;
+    const writes: Stmt[] = [];
     if (editor) {
       const prev = this.body(row);
       const next = this.toBody(input, prev);
       if (row.title !== input.title || row.mode !== input.mode || JSON.stringify(prev) !== JSON.stringify(next))
-        this.db.prepare('UPDATE problems SET title = ?, mode = ?, body = ?, updated_at = ? WHERE id = ?').run(input.title, input.mode, JSON.stringify(next), now.toISOString(), id);
+        writes.push(stmt('UPDATE problems SET title = ?, mode = ?, body = ?, updated_at = ? WHERE id = ?', input.title, input.mode, JSON.stringify(next), now.toISOString(), id));
     }
     // 폴더 배치는 사용자별(누구나 자기 폴더로 정리)
-    if (input.folderId !== this.folderOf(id, userId)) this.setFolder(id, userId, input.folderId);
-    this.upsertState(id, userId, { language: input.language, code: JSON.stringify(input.code), my_cases: JSON.stringify(input.myCases.map((c) => ({ ...c, hidden: false }))), memo: input.memo }, now);
+    if (input.folderId !== (await this.folderOf(id, userId))) writes.push(await this.setFolder(id, userId, input.folderId));
+    writes.push(this.upsertState(id, userId, { language: input.language, code: JSON.stringify(input.code), my_cases: JSON.stringify(input.myCases.map((c) => ({ ...c, hidden: false }))), memo: input.memo }, now));
+    await this.sql.batch(writes);
     return this.get(id, userId);
   }
 
   /** 변경 필드만 최신 데이터에 합친다. 코드도 언어별로 합쳐 다른 언어의 풀이를 보존한다. */
-  patch(id: string, patch: ProblemPatch, userId: string, editor: boolean): Problem | null {
-    return this.db.transaction(() => {
-      const current = this.get(id, userId);
-      if (!current) return null;
-      const { timer, ...fields } = patch;
-      if (Object.keys(fields).length) {
-        this.update(id, {
-          ...current, ...fields,
-          code: { ...current.code, ...fields.code },
-          starterCode: fields.starterCode ? { ...current.starterCode, ...fields.starterCode } : undefined,
-        }, userId, editor);
-      }
-      if (timer) this.setTimer(id, timer, userId);
-      return this.get(id, userId);
-    })();
+  async patch(id: string, patch: ProblemPatch, userId: string, editor: boolean): Promise<Problem | null> {
+    const current = await this.get(id, userId);
+    if (!current) return null;
+    const { timer, ...fields } = patch;
+    if (Object.keys(fields).length) {
+      await this.update(id, {
+        ...current, ...fields,
+        code: { ...current.code, ...fields.code },
+        starterCode: fields.starterCode ? { ...current.starterCode, ...fields.starterCode } : undefined,
+      }, userId, editor);
+    }
+    if (timer) await this.setTimer(id, timer, userId);
+    return this.get(id, userId);
   }
 
   /** 시작 코드만 바꾼다(마스터·편집 권한자) */
-  setStarter(id: string, code: CodeSet, now = new Date()): boolean {
-    const row = this.row(id);
+  async setStarter(id: string, code: CodeSet, now = new Date()): Promise<boolean> {
+    const row = await this.row(id);
     if (!row) return false;
-    this.db.prepare('UPDATE problems SET body = ?, updated_at = ? WHERE id = ?').run(JSON.stringify({ ...this.body(row), code }), now.toISOString(), id);
+    await this.sql.run('UPDATE problems SET body = ?, updated_at = ? WHERE id = ?', JSON.stringify({ ...this.body(row), code }), now.toISOString(), id);
     return true;
   }
 
-  hidden(id: string): TestCase[] | null {
-    const row = this.row(id);
+  async hidden(id: string): Promise<TestCase[] | null> {
+    const row = await this.row(id);
     if (!row) return null;
     const ref = this.body(row).hiddenTestset;
     return ref ? (this.testsets.get(ref.hash) ?? []) : [];
   }
 
-  setHidden(id: string, cases: TestCase[], now = new Date()): TestsetRef | null | false {
-    const row = this.row(id);
+  async setHidden(id: string, cases: TestCase[], now = new Date()): Promise<TestsetRef | null | false> {
+    const row = await this.row(id);
     if (!row) return false;
     const ref = cases.length ? this.testsets.put(cases) : null;
-    this.db.prepare('UPDATE problems SET body = ?, updated_at = ? WHERE id = ?').run(JSON.stringify({ ...this.body(row), hiddenTestset: ref }), now.toISOString(), id);
+    await this.sql.run('UPDATE problems SET body = ?, updated_at = ? WHERE id = ?', JSON.stringify({ ...this.body(row), hiddenTestset: ref }), now.toISOString(), id);
     return ref;
   }
 
   /** 풀이 시간 저장(사용자별) */
-  setTimer(id: string, timer: ProblemTimer, userId: string): ProblemTimer | null {
-    if (!this.row(id)) return null;
-    this.upsertState(id, userId, { timer: JSON.stringify(timer) });
+  async setTimer(id: string, timer: ProblemTimer, userId: string): Promise<ProblemTimer | null> {
+    if (!(await this.exists(id))) return null;
+    await this.sql.batch([this.upsertState(id, userId, { timer: JSON.stringify(timer) })]);
     return timer;
   }
 
   /** 채점 결과로 그 사용자의 마지막 제출을 갱신한다 */
-  setLastSubmission(id: string, userId: string, sub: LastSubmission) {
-    if (!this.row(id)) return;
-    this.upsertState(id, userId, { last_submission: JSON.stringify(sub) });
+  async setLastSubmission(id: string, userId: string, sub: LastSubmission) {
+    if (!(await this.exists(id))) return;
+    await this.sql.batch([this.upsertState(id, userId, { last_submission: JSON.stringify(sub) })]);
   }
 
   /** 예전 형식(body.cases 안의 hidden 케이스)을 테스트셋으로 옮긴다. 옮긴 문제 수를 돌려준다. */
-  migrateInlineHidden(): number {
-    const rows = this.db.prepare('SELECT * FROM problems').all() as Row[];
+  async migrateInlineHidden(): Promise<number> {
+    const rows = await this.sql.all<Row>('SELECT * FROM problems');
     let moved = 0;
     for (const row of rows) {
       const raw = JSON.parse(row.body) as Partial<Body>;
@@ -673,21 +674,21 @@ export class ProblemStore {
       const b = this.body(row);
       b.cases = b.cases.filter((c) => !c.hidden);
       b.hiddenTestset = this.testsets.put(hidden);
-      this.db.prepare('UPDATE problems SET body = ? WHERE id = ?').run(JSON.stringify(b), row.id);
+      await this.sql.run('UPDATE problems SET body = ? WHERE id = ?', JSON.stringify(b), row.id);
       moved++;
     }
     return moved;
   }
 
   /** 문제들이 쓰는 테스트셋 해시 */
-  testsetHashes(): Set<string> {
-    const hashes = this.db.prepare("SELECT json_extract(body, '$.hiddenTestset.hash') FROM problems").pluck().all() as (string | null)[];
+  async testsetHashes(): Promise<Set<string>> {
+    const hashes = await this.sql.column<string | null>("SELECT json_extract(body, '$.hiddenTestset.hash') FROM problems");
     return new Set(hashes.filter((h): h is string => !!h));
   }
 
   /** 편집 권한자만. 모든 사용자의 작성 코드·풀이 시간도 함께 지워진다. */
-  delete(id: string): boolean {
-    return this.db.prepare('DELETE FROM problems WHERE id = ?').run(id).changes > 0;
+  async delete(id: string): Promise<boolean> {
+    return (await this.sql.run('DELETE FROM problems WHERE id = ?', id)).changes > 0;
   }
 }
 
@@ -695,48 +696,48 @@ type FolderRow = { id: string; name: string; position: number; created_at: strin
 
 /** 폴더: 사용자별 개인 정리. 문제는 사용자마다 폴더 하나에 들어간다(folder_items). 비회원에게는 틀 폴더를 보여 준다. */
 export class FolderStore {
-  constructor(private db: Db) {}
+  constructor(private sql: Sql) {}
 
   private toFolder(r: FolderRow): Folder {
     return { id: r.id, name: r.name, position: r.position, createdAt: r.created_at };
   }
 
   private one(id: string, userId: string) {
-    return this.db.prepare('SELECT * FROM folders WHERE id = ? AND user_id = ?').get(id, userId) as FolderRow | undefined;
+    return this.sql.get<FolderRow>('SELECT * FROM folders WHERE id = ? AND user_id = ?', id, userId);
   }
 
-  list(userId: string | null): Folder[] {
+  async list(userId: string | null): Promise<Folder[]> {
     const rows = userId
-      ? this.db.prepare('SELECT * FROM folders WHERE user_id = ? ORDER BY position, name').all(userId)
-      : this.db.prepare('SELECT * FROM folders WHERE user_id IS NULL ORDER BY position, name').all();
-    return (rows as FolderRow[]).map((r) => this.toFolder(r));
+      ? await this.sql.all<FolderRow>('SELECT * FROM folders WHERE user_id = ? ORDER BY position, name', userId)
+      : await this.sql.all<FolderRow>('SELECT * FROM folders WHERE user_id IS NULL ORDER BY position, name');
+    return rows.map((r) => this.toFolder(r));
   }
 
-  create(name: string, userId: string, now = new Date()): Folder {
+  async create(name: string, userId: string, now = new Date()): Promise<Folder> {
     const id = randomUUID();
-    const position = (this.db.prepare('SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE user_id = ?').pluck().get(userId) as number) ?? 0;
+    const position = (await this.sql.value<number>('SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE user_id = ?', userId)) ?? 0;
     try {
-      this.db.prepare('INSERT INTO folders (id, user_id, name, position, created_at) VALUES (?, ?, ?, ?, ?)').run(id, userId, name, position, now.toISOString());
+      await this.sql.run('INSERT INTO folders (id, user_id, name, position, created_at) VALUES (?, ?, ?, ?, ?)', id, userId, name, position, now.toISOString());
     } catch (e) {
       if (isUniqueViolation(e)) throw new StoreError('duplicate_name', '같은 이름의 폴더가 있습니다.');
       throw e;
     }
-    return this.toFolder(this.one(id, userId)!);
+    return this.toFolder((await this.one(id, userId))!);
   }
 
-  rename(id: string, name: string, userId: string): Folder | null {
+  async rename(id: string, name: string, userId: string): Promise<Folder | null> {
     try {
-      if (!this.db.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').run(name, id, userId).changes) return null;
+      if (!(await this.sql.run('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?', name, id, userId)).changes) return null;
     } catch (e) {
       if (isUniqueViolation(e)) throw new StoreError('duplicate_name', '같은 이름의 폴더가 있습니다.');
       throw e;
     }
-    return this.toFolder(this.one(id, userId)!);
+    return this.toFolder((await this.one(id, userId))!);
   }
 
   /** 폴더를 지워도 문제는 남는다(폴더 없음). */
-  delete(id: string, userId: string): boolean {
-    return this.db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+  async delete(id: string, userId: string): Promise<boolean> {
+    return (await this.sql.run('DELETE FROM folders WHERE id = ? AND user_id = ?', id, userId)).changes > 0;
   }
 }
 
@@ -747,20 +748,23 @@ type CollectionRow = { id: string; name: string; description: string; created_at
  * 이름의 '/'는 계층이다(예: "모의고사/1회"). 화면이 이름으로 나무를 그린다.
  */
 export class CollectionStore {
-  constructor(private db: Db) {}
+  constructor(private sql: Sql) {}
 
-  private toCollection(r: CollectionRow): Collection {
-    const problemIds = this.db.prepare('SELECT problem_id FROM collection_items WHERE collection_id = ? ORDER BY position').pluck().all(r.id) as string[];
-    return Collection.parse({ id: r.id, name: r.name, description: r.description, problemIds, createdAt: r.created_at, updatedAt: r.updated_at });
+  /** 컬렉션들의 문제 목록을 한 번에 읽는다(컬렉션마다 따로 묻지 않는다) */
+  private async withItems(rows: CollectionRow[], where = '', ...params: Param[]): Promise<Collection[]> {
+    const items = await this.sql.all<{ collection_id: string; problem_id: string }>(`SELECT collection_id, problem_id FROM collection_items ${where} ORDER BY collection_id, position`, ...params);
+    const byCollection = new Map<string, string[]>();
+    for (const i of items) byCollection.set(i.collection_id, [...(byCollection.get(i.collection_id) ?? []), i.problem_id]);
+    return rows.map((r) => Collection.parse({ id: r.id, name: r.name, description: r.description, problemIds: byCollection.get(r.id) ?? [], createdAt: r.created_at, updatedAt: r.updated_at }));
   }
 
-  list(): Collection[] {
-    return (this.db.prepare('SELECT * FROM collections ORDER BY name').all() as CollectionRow[]).map((r) => this.toCollection(r));
+  async list(): Promise<Collection[]> {
+    return this.withItems(await this.sql.all<CollectionRow>('SELECT * FROM collections ORDER BY name'));
   }
 
-  get(id: string): Collection | null {
-    const r = this.db.prepare('SELECT * FROM collections WHERE id = ?').get(id) as CollectionRow | undefined;
-    return r ? this.toCollection(r) : null;
+  async get(id: string): Promise<Collection | null> {
+    const r = await this.sql.get<CollectionRow>('SELECT * FROM collections WHERE id = ?', id);
+    return r ? (await this.withItems([r], 'WHERE collection_id = ?', id))[0]! : null;
   }
 
   /** 경로 이름 정리: 앞뒤·구분자 주변 공백과 빈 단계를 없앤다("a / /b" → "a/b") */
@@ -772,47 +776,49 @@ export class CollectionStore {
       .join('/');
   }
 
-  private assertFree(name: string, exceptId?: string) {
-    const hit = this.db.prepare('SELECT id FROM collections WHERE name = ?').pluck().get(name) as string | undefined;
+  private async assertFree(name: string, exceptId?: string) {
+    const hit = await this.sql.value<string>('SELECT id FROM collections WHERE name = ?', name);
     if (hit && hit !== exceptId) throw new StoreError('duplicate_name', '같은 이름의 컬렉션이 있습니다.');
   }
 
-  create(input: CollectionInput, now = new Date()): Collection {
+  async create(input: CollectionInput, now = new Date()): Promise<Collection> {
     const name = CollectionStore.normalize(input.name);
     if (!name) throw new StoreError('duplicate_name', '컬렉션 이름이 필요합니다.');
-    this.assertFree(name);
+    await this.assertFree(name);
     const id = randomUUID();
     const ts = now.toISOString();
-    this.db.prepare('INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?)').run(id, name, input.description, ts, ts);
-    return this.get(id)!;
+    await this.sql.run('INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?)', id, name, input.description, ts, ts);
+    return (await this.get(id))!;
   }
 
-  update(id: string, input: CollectionInput, now = new Date()): Collection | null {
+  async update(id: string, input: CollectionInput, now = new Date()): Promise<Collection | null> {
     const name = CollectionStore.normalize(input.name);
     if (!name) throw new StoreError('duplicate_name', '컬렉션 이름이 필요합니다.');
-    this.assertFree(name, id);
-    const r = this.db.prepare('UPDATE collections SET name = ?, description = ?, updated_at = ? WHERE id = ?').run(name, input.description, now.toISOString(), id);
+    await this.assertFree(name, id);
+    const r = await this.sql.run('UPDATE collections SET name = ?, description = ?, updated_at = ? WHERE id = ?', name, input.description, now.toISOString(), id);
     return r.changes ? this.get(id) : null;
   }
 
   /** 컬렉션의 문제 목록을 통째로 바꾼다(순서 포함). 중복 id는 처음 것만 남긴다. */
-  setItems(id: string, problemIds: string[], now = new Date()): Collection | null {
-    if (!this.db.prepare('SELECT 1 FROM collections WHERE id = ?').get(id)) return null;
+  async setItems(id: string, problemIds: string[], now = new Date()): Promise<Collection | null> {
+    if ((await this.sql.value('SELECT 1 FROM collections WHERE id = ?', id)) === undefined) return null;
     const unique = [...new Set(problemIds)];
-    const exists = this.db.prepare('SELECT 1 FROM problems WHERE id = ?');
-    for (const pid of unique) if (!exists.get(pid)) throw new StoreError('problem_not_found', `없는 문제입니다: ${pid}`);
-    this.db.transaction(() => {
-      this.db.prepare('DELETE FROM collection_items WHERE collection_id = ?').run(id);
-      const ins = this.db.prepare('INSERT INTO collection_items (collection_id, problem_id, position) VALUES (?, ?, ?)');
-      unique.forEach((pid, i) => ins.run(id, pid, i));
-      this.db.prepare('UPDATE collections SET updated_at = ? WHERE id = ?').run(now.toISOString(), id);
-    })();
+    if (unique.length) {
+      const found = new Set(await this.sql.column<string>(`SELECT id FROM problems WHERE id IN (${unique.map(() => '?').join(', ')})`, ...unique));
+      const missing = unique.find((pid) => !found.has(pid));
+      if (missing) throw new StoreError('problem_not_found', `없는 문제입니다: ${missing}`);
+    }
+    await this.sql.batch([
+      stmt('DELETE FROM collection_items WHERE collection_id = ?', id),
+      ...unique.map((pid, i) => stmt('INSERT INTO collection_items (collection_id, problem_id, position) VALUES (?, ?, ?)', id, pid, i)),
+      stmt('UPDATE collections SET updated_at = ? WHERE id = ?', now.toISOString(), id),
+    ]);
     return this.get(id);
   }
 
   /** 컬렉션을 지워도 문제는 남는다. */
-  delete(id: string): boolean {
-    return this.db.prepare('DELETE FROM collections WHERE id = ?').run(id).changes > 0;
+  async delete(id: string): Promise<boolean> {
+    return (await this.sql.run('DELETE FROM collections WHERE id = ?', id)).changes > 0;
   }
 }
 
@@ -834,51 +840,64 @@ export type GoogleProfile = { sub: string; email: string; name: string; picture:
 
 export type User = { id: string; email: string; name: string; picture: string; editor: boolean };
 
+/** 틀 폴더(user_id NULL)와 그 배치를 이 사용자의 개인 폴더로 복사하는 문(가입할 때) */
+async function templateFolderCopies(sql: Sql, userId: string, now: Date): Promise<Stmt[]> {
+  const templates = await sql.all<{ id: string; name: string; position: number }>('SELECT id, name, position FROM folders WHERE user_id IS NULL ORDER BY position');
+  return templates.flatMap((t) => {
+    const id = randomUUID();
+    return [
+      stmt('INSERT OR IGNORE INTO folders (id, user_id, name, position, created_at) VALUES (?, ?, ?, ?, ?)', id, userId, t.name, t.position, now.toISOString()),
+      stmt('INSERT OR IGNORE INTO folder_items (user_id, problem_id, folder_id) SELECT ?, p.id, f.id FROM problems p JOIN folders f ON f.id = ? WHERE p.folder_id = ?', userId, id, t.id),
+    ];
+  });
+}
+
 /**
  * 사용자(Google 계정 1개 = 사용자 1명). 탈퇴하면 그 사용자의 작성 코드·컬렉션·제출이 모두 지워진다(ON DELETE CASCADE).
  * 편집 권한(role=editor)은 관리자 모드(마스터)에서 준다.
  */
 export class UserStore {
-  constructor(private db: Db) {}
+  constructor(private sql: Sql) {}
 
   private toUser(r: UserRow): User {
     return { id: r.id, email: r.email, name: r.name, picture: r.picture, editor: r.role === 'editor' };
   }
 
-  byGoogleSub(sub: string) {
-    const r = this.db.prepare('SELECT * FROM users WHERE google_sub = ?').get(sub) as UserRow | undefined;
+  async byGoogleSub(sub: string) {
+    const r = await this.sql.get<UserRow>('SELECT * FROM users WHERE google_sub = ?', sub);
     return r ? this.toUser(r) : null;
   }
 
-  byId(id: string) {
-    const r = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+  async byId(id: string) {
+    const r = await this.sql.get<UserRow>('SELECT * FROM users WHERE id = ?', id);
     return r ? this.toUser(r) : null;
   }
 
   /** 동의를 받은 뒤 가입. 같은 Google 계정이 이미 있으면 그 사용자를 돌려준다. */
-  create(p: GoogleProfile, versions: { terms: string; privacy: string }, opts: { editor?: boolean } = {}, now = new Date()) {
-    const existing = this.byGoogleSub(p.sub);
+  async create(p: GoogleProfile, versions: { terms: string; privacy: string }, opts: { editor?: boolean } = {}, now = new Date()) {
+    const existing = await this.byGoogleSub(p.sub);
     if (existing) return existing;
     const id = randomUUID();
     const ts = now.toISOString();
-    this.db
-      .prepare(
+    await this.sql.batch([
+      stmt(
         `INSERT INTO users (id, google_sub, email, name, picture, role, terms_version, privacy_version, agreed_at, created_at, last_login_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(id, p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, ts);
-    // 새 사용자도 기본 폴더 구성(틀)으로 시작한다
-    copyTemplateFolders(this.db, id, now);
-    return this.byId(id)!;
+        id, p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, ts,
+      ),
+      // 새 사용자도 기본 폴더 구성(틀)으로 시작한다
+      ...(await templateFolderCopies(this.sql, id, now)),
+    ]);
+    return (await this.byId(id))!;
   }
 
   /** 로그인할 때 Google의 최신 이메일·이름·사진으로 갱신 */
-  touch(id: string, p: GoogleProfile, now = new Date()) {
-    this.db.prepare('UPDATE users SET email = ?, name = ?, picture = ?, last_login_at = ? WHERE id = ?').run(p.email, p.name, p.picture, now.toISOString(), id);
+  async touch(id: string, p: GoogleProfile, now = new Date()) {
+    await this.sql.run('UPDATE users SET email = ?, name = ?, picture = ?, last_login_at = ? WHERE id = ?', p.email, p.name, p.picture, now.toISOString(), id);
   }
 
-  setEditor(id: string, editor: boolean): User | null {
-    if (!this.db.prepare('UPDATE users SET role = ? WHERE id = ?').run(editor ? 'editor' : 'user', id).changes) return null;
+  async setEditor(id: string, editor: boolean): Promise<User | null> {
+    if (!(await this.sql.run('UPDATE users SET role = ? WHERE id = ?', editor ? 'editor' : 'user', id)).changes) return null;
     return this.byId(id);
   }
 
@@ -886,31 +905,29 @@ export class UserStore {
    * 소유자가 없는 예전 데이터(비밀번호 로그인 시절)를 이 사용자에게 넘긴다. 운영자 계정에만 쓴다.
    * 작성 코드·풀이 시간·채점 결과, 제출 기록. 넘긴 행 수를 돌려준다.
    */
-  claimLegacy(userId: string, now = new Date()): number {
-    let n = 0;
-    this.db.transaction(() => {
-      n += this.db
-        .prepare(
-          `INSERT OR IGNORE INTO user_problems (user_id, problem_id, language, code, timer, last_submission, updated_at)
-           SELECT ?, problem_id, language, code, timer, last_submission, ? FROM legacy_state`,
-        )
-        .run(userId, now.toISOString()).changes;
-      this.db.prepare('DELETE FROM legacy_state').run();
+  async claimLegacy(userId: string, now = new Date()): Promise<number> {
+    const [moved, , claimed] = await this.sql.batch([
+      stmt(
+        `INSERT OR IGNORE INTO user_problems (user_id, problem_id, language, code, timer, last_submission, updated_at)
+         SELECT ?, problem_id, language, code, timer, last_submission, ? FROM legacy_state`,
+        userId,
+        now.toISOString(),
+      ),
+      stmt('DELETE FROM legacy_state'),
       // 컬렉션은 공용(user_id NULL)이므로 넘겨받지 않는다
-      n += this.db.prepare('UPDATE submissions SET user_id = ? WHERE user_id IS NULL').run(userId).changes;
-    })();
-    return n;
+      stmt('UPDATE submissions SET user_id = ? WHERE user_id IS NULL', userId),
+    ]);
+    return moved!.changes + claimed!.changes;
   }
 
-  private summaries(where: string, ...args: unknown[]): AdminUser[] {
-    const rows = this.db
-      .prepare(
-        `SELECT u.*,
-           (SELECT COUNT(*) FROM user_problems s WHERE s.user_id = u.id AND json_extract(s.last_submission, '$.score') = 100) AS solved,
-           (SELECT COUNT(*) FROM submissions x WHERE x.user_id = u.id) AS submission_count
-         FROM users u ${where} ORDER BY u.created_at`,
-      )
-      .all(...args) as (UserRow & { solved: number; submission_count: number })[];
+  private async summaries(where: string, ...args: Param[]): Promise<AdminUser[]> {
+    const rows = await this.sql.all<UserRow & { solved: number; submission_count: number }>(
+      `SELECT u.*,
+         (SELECT COUNT(*) FROM user_problems s WHERE s.user_id = u.id AND json_extract(s.last_submission, '$.score') = 100) AS solved,
+         (SELECT COUNT(*) FROM submissions x WHERE x.user_id = u.id) AS submission_count
+       FROM users u ${where} ORDER BY u.created_at`,
+      ...args,
+    );
     return rows.map((r) => ({
       ...this.toUser(r),
       createdAt: r.created_at,
@@ -921,23 +938,28 @@ export class UserStore {
   }
 
   /** 관리자 페이지: 사용자 목록과 간단한 현황 */
-  list(): AdminUser[] {
+  list(): Promise<AdminUser[]> {
     return this.summaries('');
   }
 
   /** 관리자 페이지: 사용자 상세(문제별 풀이 현황, 최근 제출) */
-  detail(id: string): AdminUserDetail | null {
-    const [summary] = this.summaries('WHERE u.id = ?', id);
+  async detail(id: string): Promise<AdminUserDetail | null> {
+    const [summary] = await this.summaries('WHERE u.id = ?', id);
     if (!summary) return null;
-    const r = this.db.prepare('SELECT terms_version, privacy_version, agreed_at FROM users WHERE id = ?').get(id) as UserRow;
-    const problems = (
-      this.db
-        .prepare(
-          `SELECT s.problem_id, p.title, s.timer, s.last_submission, s.updated_at FROM user_problems s JOIN problems p ON p.id = s.problem_id
-           WHERE s.user_id = ? ORDER BY p.title`,
-        )
-        .all(id) as { problem_id: string; title: string; timer: string | null; last_submission: string | null; updated_at: string }[]
-    ).map((x) => {
+    const [r, problemRows, submissionRows] = await Promise.all([
+      this.sql.get<UserRow>('SELECT terms_version, privacy_version, agreed_at FROM users WHERE id = ?', id),
+      this.sql.all<{ problem_id: string; title: string; timer: string | null; last_submission: string | null; updated_at: string }>(
+        `SELECT s.problem_id, p.title, s.timer, s.last_submission, s.updated_at FROM user_problems s JOIN problems p ON p.id = s.problem_id
+         WHERE s.user_id = ? ORDER BY p.title`,
+        id,
+      ),
+      this.sql.all<{ id: string; title: string | null; kind: 'run' | 'submit'; language: Language; status: string; score: number | null; created_at: string }>(
+        `SELECT x.id, p.title, x.kind, x.language, x.status, x.score, x.created_at FROM submissions x LEFT JOIN problems p ON p.id = x.problem_id
+         WHERE x.user_id = ? ORDER BY x.created_at DESC LIMIT 30`,
+        id,
+      ),
+    ]);
+    const problems = problemRows.map((x) => {
       const timer = parse<ProblemTimer>(x.timer) ?? EMPTY_TIMER;
       return {
         problemId: x.problem_id,
@@ -948,32 +970,25 @@ export class UserStore {
         updatedAt: x.updated_at,
       };
     });
-    const recentSubmissions = (
-      this.db
-        .prepare(
-          `SELECT x.id, p.title, x.kind, x.language, x.status, x.score, x.created_at FROM submissions x LEFT JOIN problems p ON p.id = x.problem_id
-           WHERE x.user_id = ? ORDER BY x.created_at DESC LIMIT 30`,
-        )
-        .all(id) as { id: string; title: string | null; kind: 'run' | 'submit'; language: Language; status: string; score: number | null; created_at: string }[]
-    ).map((x) => ({ id: x.id, problemTitle: x.title, kind: x.kind, language: x.language, status: x.status, score: x.score, createdAt: x.created_at }));
-    return { ...summary, termsVersion: r.terms_version, privacyVersion: r.privacy_version, agreedAt: r.agreed_at, problems, recentSubmissions };
+    const recentSubmissions = submissionRows.map((x) => ({ id: x.id, problemTitle: x.title, kind: x.kind, language: x.language, status: x.status, score: x.score, createdAt: x.created_at }));
+    return { ...summary, termsVersion: r!.terms_version, privacyVersion: r!.privacy_version, agreedAt: r!.agreed_at, problems, recentSubmissions };
   }
 
   /** 탈퇴: 사용자와 그 사용자의 작성 코드·컬렉션·제출·세션을 모두 지운다. */
-  delete(id: string): boolean {
-    return this.db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
+  async delete(id: string): Promise<boolean> {
+    return (await this.sql.run('DELETE FROM users WHERE id = ?', id)).changes > 0;
   }
 }
 
 /** 전체 신규 가입 정책. 기본값은 기존처럼 가입 허용이다. */
 export class SignupSettingsStore {
-  constructor(private db: Db) {}
+  constructor(private sql: Sql) {}
 
-  enabled(): boolean {
-    return this.db.prepare('SELECT enabled FROM signup_settings WHERE id = 1').pluck().get() === 1;
+  async enabled(): Promise<boolean> {
+    return (await this.sql.value<number>('SELECT enabled FROM signup_settings WHERE id = 1')) === 1;
   }
 
-  setEnabled(enabled: boolean) {
-    this.db.prepare('UPDATE signup_settings SET enabled = ? WHERE id = 1').run(enabled ? 1 : 0);
+  async setEnabled(enabled: boolean) {
+    await this.sql.run('UPDATE signup_settings SET enabled = ? WHERE id = 1', enabled ? 1 : 0);
   }
 }

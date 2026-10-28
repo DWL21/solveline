@@ -24,7 +24,7 @@ const runners = config.runnerUrls.map((u) => new RunnerClient(u));
 const objectStore = config.r2 ? new R2ObjectStore(config.r2) : null;
 const { app, dispatcher, problems, submissions, catalog } = createApp({ config, db, runners, testsets, objectStore });
 
-const moved = problems.migrateInlineHidden();
+const moved = await problems.migrateInlineHidden();
 if (moved) log.info(`[migrate] 문제 ${moved}개의 히든 케이스를 테스트셋 파일로 옮겼습니다.`);
 dispatcher.start();
 if (catalog) {

@@ -56,7 +56,7 @@ export class BackupJob {
       const old = backupsToPrune(readdirSync(dir), KEEP_DAYS);
       for (const n of old) unlinkSync(join(dir, n));
       const pruned = this.submissions.prune(new Date(now.getTime() - SUBMISSION_DAYS * 86400_000));
-      const inUse = new Set([...this.problems.testsetHashes(), ...this.submissions.activeTestsets()]);
+      const inUse = new Set([...(await this.problems.testsetHashes()), ...this.submissions.activeTestsets()]);
       const gced = this.testsets.gc(inUse);
       log.info(`[backup] ${file} (테스트셋 +${copied}, 오래된 백업 -${old.length}, 제출 기록 -${pruned}, 안 쓰는 테스트셋 -${gced})`);
       return file;
