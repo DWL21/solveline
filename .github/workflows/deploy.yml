@@ -32,8 +32,13 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           OWNER_EMAIL: ${{ vars.OWNER_EMAIL }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          # 카탈로그 R2 게시(0006). 넷 다 있어야 켜진다. 처음 넣고 배포하면 문제·테스트셋 전체를 R2로 올린다.
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL"
+          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY"
           REQUIRED="ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET"
           for k in $REQUIRED; do
             [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }

@@ -9,7 +9,7 @@
 | 경로 | 내용 | 실행 환경 |
 |---|---|---|
 | `apps/api` | Hono REST API, Google 로그인·관리자 모드, 문제 저장(SQLite), 히든 테스트셋(해시 파일), 제출 큐·디스패처, 매일 백업 | Node 24 (Docker, pahidc) |
-| `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE | Cloudflare Pages — `/api/*`만 Tunnel로 프록시 |
+| `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE, `public/_worker.js`(카탈로그 캐시·R2 읽기, 나머지 `/api/*`는 Tunnel로) | Cloudflare Pages |
 | `runner` | 코드 실행 서버(Python 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 21.0.2, Python 3.13.13) |
 | `packages/shared` | API 계약(Zod 스키마·타입), 기본 코드 템플릿 | api·web 공용 |
 | `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 API 이미지·nginx 게이트웨이·배포 | pahidc |
@@ -63,6 +63,14 @@
 - 함수형 문제: Java는 `class Solution`의 `solution(...)`, Python은 `solution(...)`을 테스트 케이스마다 새 프로세스로 한 번 호출한다. 결과는 타입까지 비교(bool≠int, 실수 1e-9 허용)한다.
 - 입출력형 문제: Java는 `static void main`이 있는 클래스, Python은 스크립트를 표준 입력과 함께 실행하고 줄 끝 공백을 무시해 비교한다.
 - 테스트 케이스당 10초, 제출 하나당 최대 600초, 히든 케이스 최대 200개. 채점은 비동기 큐라 Cloudflare 응답 제한과 무관하다.
+
+## 카탈로그·사용자 데이터 분리 규칙 (0006)
+
+- 공용 문제 데이터(문제 내용·기본 폴더·컬렉션)는 `/api/catalog/*`, 사용자 데이터는 `/api/me/*`로 나눈다. 웹이 `mergeProblem`·`mergeSummaries`(shared)로 합치고, 예전 `/api/problems`도 같은 함수로 만든다.
+- Worker는 카탈로그만 캐시한다. 사용자 데이터·쿠키가 붙은 응답은 캐시하지 않는다(`no-store`).
+- SQLite가 쓰기 원본이고 R2는 게시 사본이다. 공용 데이터를 바꾸는 API는 성공하면 R2에 게시한 뒤 응답한다. 히든 테스트셋은 R2(비공개)에 gzip으로 두고 공개 경로를 만들지 않는다.
+- R2 키 형식을 바꾸면 `apps/api/src/catalog.ts`와 `apps/web/public/_worker.js`를 함께 고친다.
+- R2 데이터 이전(R2_* 설정)과 Worker의 R2 읽기(`CATALOG` 바인딩·`CATALOG_SOURCE=r2`)는 운영자 승인 후에만 켠다.
 
 ## 채점 파이프라인 규칙 (0003)
 

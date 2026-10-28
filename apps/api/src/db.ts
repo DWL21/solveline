@@ -7,6 +7,10 @@ import {
   EMPTY_TIMER,
   Folder,
   Problem,
+  mergeProblem,
+  type CatalogProblem,
+  type MyProblemState,
+  type MyProblemSummary,
   type AdminUser,
   type AdminUserDetail,
   type CodeSet,
@@ -395,6 +399,73 @@ export class ProblemStore {
     private testsets: TestsetStore,
   ) {}
 
+  /** 내 풀이 상태가 있는 문제만(작성 코드·북마크·개인 폴더 중 하나라도). 카탈로그 목록과 합쳐 쓴다. */
+  mySummaries(userId: string): MyProblemSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.id, s.language, s.timer, s.last_submission, b.problem_id AS bookmark_id, f.folder_id
+         FROM problems p
+         LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = @uid
+         LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = @uid
+         LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = @uid
+         WHERE s.problem_id IS NOT NULL OR b.problem_id IS NOT NULL OR f.problem_id IS NOT NULL`,
+      )
+      .all({ uid: userId }) as { id: string; language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null; folder_id: string | null }[];
+    return rows.map((r) => ({
+      id: r.id,
+      bookmarked: r.bookmark_id !== null,
+      folderId: r.folder_id,
+      language: r.language as Language | null,
+      lastSubmission: parse<LastSubmission>(r.last_submission),
+      timer: parse<ProblemTimer>(r.timer) ?? EMPTY_TIMER,
+    }));
+  }
+
+  /** 문제 하나의 내 상태. 문제가 없으면 null */
+  myState(id: string, userId: string): MyProblemState | null {
+    if (!this.row(id)) return null;
+    const st = this.state(id, userId);
+    return {
+      folderId: this.folderOf(id, userId),
+      language: (st?.language ?? null) as Language | null,
+      code: parse<CodeSet>(st?.code),
+      myCases: parse<TestCase[]>(st?.my_cases) ?? [],
+      memo: st?.memo ?? '',
+      timer: parse<ProblemTimer>(st?.timer) ?? EMPTY_TIMER,
+      lastSubmission: parse<LastSubmission>(st?.last_submission),
+    };
+  }
+
+  private toCatalog(row: Row): CatalogProblem {
+    const b = this.body(row);
+    return {
+      id: row.id,
+      title: row.title,
+      folderId: row.folder_id,
+      mode: row.mode as Problem['mode'],
+      language: row.language as Language,
+      description: b.description,
+      params: b.params,
+      timeLimitMs: b.timeLimitMs,
+      cases: b.cases,
+      hiddenTestset: b.hiddenTestset,
+      starterCode: b.code,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  /** 공용 문제 내용(사용자 상태 없음) */
+  catalogProblem(id: string): CatalogProblem | null {
+    const row = this.row(id);
+    return row ? this.toCatalog(row) : null;
+  }
+
+  /** 모든 공용 문제(제목순). 카탈로그 게시에 쓴다. */
+  catalogProblems(): CatalogProblem[] {
+    return (this.db.prepare('SELECT * FROM problems ORDER BY title').all() as Row[]).map((r) => this.toCatalog(r));
+  }
+
   /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
   list(userId: string | null): ProblemSummary[] {
     const rows = this.db
@@ -467,30 +538,10 @@ export class ProblemStore {
   }
 
   get(id: string, userId: string | null): Problem | null {
-    const row = this.row(id);
-    if (!row) return null;
-    const b = this.body(row);
-    const st = this.state(id, userId);
-    return Problem.parse({
-      description: b.description,
-      params: b.params,
-      timeLimitMs: b.timeLimitMs,
-      cases: b.cases,
-      hiddenTestset: b.hiddenTestset,
-      starterCode: b.code,
-      code: parse<CodeSet>(st?.code) ?? b.code,
-      myCases: parse<TestCase[]>(st?.my_cases) ?? [],
-      memo: st?.memo ?? '',
-      language: st?.language ?? row.language,
-      timer: parse<ProblemTimer>(st?.timer) ?? EMPTY_TIMER,
-      lastSubmission: parse<LastSubmission>(st?.last_submission),
-      id: row.id,
-      title: row.title,
-      folderId: this.folderOf(id, userId) ?? (userId ? null : row.folder_id),
-      mode: row.mode,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    });
+    // 웹이 카탈로그와 내 상태를 합치는 것과 같은 방식으로 만든다.
+    const p = this.catalogProblem(id);
+    if (!p) return null;
+    return Problem.parse(mergeProblem(p, userId ? this.myState(id, userId) : null));
   }
 
   /** 이 사용자가 문제를 넣어 둔 개인 폴더 */
