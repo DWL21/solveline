@@ -158,7 +158,12 @@ const metrics = {
   generatedAt: new Date().toISOString(),
   commit: process.env.GITHUB_SHA ?? process.env.GIT_COMMIT ?? null,
   unit: unit && { ...unit, coverage: cov && { lines: cov.lines.pct, branches: cov.branches.pct, functions: cov.functions.pct, statements: cov.statements.pct } },
-  e2e: e2e && { total: e2e.total, passed: e2e.passed, failed: e2e.failed, flaky: e2e.flaky, skipped: e2e.skipped, globalErrors: e2e.globalErrors, passRate: e2e.passRate, firstTryPassRate: e2e.firstTryPassRate, wallMs: e2e.wallMs, byProject: e2e.byProject, byRequirement: e2e.byRequirement },
+  e2e: e2e && { total: e2e.total, passed: e2e.passed, failed: e2e.failed, flaky: e2e.flaky, skipped: e2e.skipped, globalErrors: e2e.globalErrors, passRate: e2e.passRate, firstTryPassRate: e2e.firstTryPassRate, wallMs: e2e.wallMs, byProject: e2e.byProject, byRequirement: e2e.byRequirement,
+    // QA 보고서(e2e/report)가 쓰는 상세. 제목·위치만 담는다.
+    slowest: e2e.slowest.map(({ title, project, durationMs }) => ({ title, project, durationMs })),
+    failedTests: e2e.failedTests.map(({ title, file, project }) => ({ title, file, project })),
+    flakyTests: e2e.flakyTests.map(({ title, file, project, retries }) => ({ title, file, project, retries })),
+    a11y: e2e.a11y },
   sonar: sonar && { gate: sonar.gate, measures: sonar.measures, issues: sonar.issues },
 };
 

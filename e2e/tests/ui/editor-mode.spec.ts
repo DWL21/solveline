@@ -1,4 +1,5 @@
 import { test, expect } from '../../src/fixtures.ts';
+import { evidence } from '../../src/evidence.ts';
 
 /** 편집 권한: 편집 모드에서 바꾼 공용 내용은 모든 사용자에게 보인다 */
 test('편집 모드에서 제목을 바꾸면 다른 사용자에게도 적용된다', { tag: '@R5' }, async ({ page, pageSignIn, api, signIn, seedProblem, workspace }) => {
@@ -9,6 +10,7 @@ test('편집 모드에서 제목을 바꾸면 다른 사용자에게도 적용�
   await expect(page.getByText(/편집 모드 · 바꾼 내용은 모든 사용자에게/)).toBeVisible();
   const title = page.getByRole('textbox', { name: '문제 제목' });
   await title.fill(`${p.title} (수정)`);
+  await evidence(page, '편집 권한자는 편집 모드에서 공용 문제를 바꾼다');
   await signIn();
   await expect.poll(async () => (await api.problem(p.id)).title, { timeout: 45_000 }).toBe(`${p.title} (수정)`);
 });

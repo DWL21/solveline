@@ -128,3 +128,12 @@ test('요구사항별 결과를 집계한다(태그가 여럿이면 각각에 �
   assert.deepEqual(r.metrics.e2e.byRequirement.R2, { total: 2, passed: 1, failed: 1, flaky: 0, skipped: 0 });
   assert.match(r.summary, /## 요구사항별/);
 });
+
+test('보고서용 상세(느린 테스트·실패 목록)를 metrics.json에 남긴다', () => {
+  const pw = passed();
+  pw.suites[0].specs[1].tests[0].status = 'unexpected';
+  const r = run({ ...inputs(), [pwPath]: pw });
+  assert.equal(r.metrics.e2e.slowest.length, 5);
+  assert.deepEqual(r.metrics.e2e.failedTests.map((t) => t.project), ['desktop-chromium']);
+  assert.deepEqual(r.metrics.e2e.flakyTests, []);
+});

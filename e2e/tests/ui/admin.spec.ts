@@ -2,6 +2,7 @@ import { test, expect, emailFor } from '../../src/fixtures.ts';
 import { Api } from '../../src/api.ts';
 import { AdminPage } from '../../src/pages/AdminPage.ts';
 import { env } from '../../src/env.ts';
+import { evidence } from '../../src/evidence.ts';
 
 test('관리자 모드에서 편집 권한을 주면 그 사용자가 바로 편집할 수 있다', { tag: '@R6' }, async ({ page, playwright, baseURL }) => {
   const userApi = new Api(await playwright.request.newContext({ baseURL }));
@@ -13,6 +14,7 @@ test('관리자 모드에서 편집 권한을 주면 그 사용자가 바로 편
   await admin.login(env.masterPassword);
   await admin.openUser(email);
   await admin.grantEditor();
+  await evidence(page, '관리자 모드에서 사용자에게 편집 권한을 준다');
 
   expect((await userApi.session()).user?.editor).toBe(true);
   await userApi.request.dispose();

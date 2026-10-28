@@ -71,4 +71,4 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 
 ## 시연(통과한 테스트도 증거 남기기)
 
-GitHub Actions → CI → Run workflow에서 `demo`를 켜면 모든 테스트의 영상·trace·스크린샷이 `e2e` 아티팩트(`reports/html`)에 남는다. 평소 실행은 실패한 테스트만 남겨 아티팩트를 작게 유지한다.
+main 실행과, GitHub Actions → CI → Run workflow에서 `demo`를 켠 실행은 모든 테스트의 영상·trace·스크린샷을 `e2e` 아티팩트(`reports/html`)에 남긴다. 핵심 화면은 테스트가 `evidence()`로 이름을 붙여 남기고, QA 보고서가 그림으로 쓴다. PR 실행은 실패한 테스트만 남겨 아티팩트를 작게 유지한다.

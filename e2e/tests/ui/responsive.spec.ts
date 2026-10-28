@@ -1,5 +1,6 @@
 import { test, expect } from '../../src/fixtures.ts';
 import { sumSolutions } from '../../src/builders.ts';
+import { evidence } from '../../src/evidence.ts';
 
 /** 휴대폰(@mobile)·태블릿(@tablet) 배치. 프로젝트(기기)별로 같은 시나리오가 돈다. */
 test.describe('휴대폰 문제 화면 @mobile', { tag: '@R8' }, () => {
@@ -16,6 +17,7 @@ test.describe('휴대폰 문제 화면 @mobile', { tag: '@R8' }, () => {
     await expect(workspace.tabs.getByRole('button', { name: /결과/ })).toHaveAttribute('aria-pressed', 'true');
     await workspace.waitResult();
     await expect(page.getByText('2개 중 2개 성공')).toBeVisible();
+    await evidence(page, '휴대폰에서 실행하면 결과 탭으로 넘어가고 상단 메뉴를 숨긴다');
     // 결과 탭도 상단 메뉴를 숨긴다
     await expect(page.getByTitle('문제 선택 화면으로')).toBeHidden();
     await workspace.showPane('문제');
@@ -40,5 +42,6 @@ test.describe('태블릿 @tablet', { tag: '@R8' }, () => {
     await expect(workspace.tabs).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: '코드 에디터' })).toBeVisible();
     await expect(page.getByText(p.title).first()).toBeVisible();
+    await evidence(page, '태블릿은 문제와 에디터를 좌우로 나눠 보여 준다');
   });
 });

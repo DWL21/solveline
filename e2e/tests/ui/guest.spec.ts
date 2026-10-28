@@ -1,4 +1,5 @@
 import { test, expect } from '../../src/fixtures.ts';
+import { evidence } from '../../src/evidence.ts';
 
 /** 비회원: 둘러보기는 되고, 코드 작성·실행은 로그인 뒤 */
 test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
@@ -21,6 +22,7 @@ test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
     await editor.click();
     await page.keyboard.insertText('// 비회원 입력');
     await expect(editor).toHaveText(before ?? '');
+    await evidence(page, '비회원은 문제를 읽기 전용으로 보고 로그인하기 안내를 본다');
   });
 
   test('로고를 누르면 컬렉션 카드가 보이는 첫 화면 맨 위로 간다', async ({ page, home, seedProblem }) => {

@@ -49,6 +49,21 @@ Solveline의 테스트 자동화와 품질 관리를 한곳에 모은 문서입�
 | GitHub Actions | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | 모든 PR·main 푸시: 기본 검사·이미지·시크릿·단위·정적 분석·API·UI 병렬 실행 → 엄격 품질 게이트·리포트(Step Summary) |
 | GitHub Actions | [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) | main 푸시·수동: 운영 배포(self-hosted) |
 | GitHub Actions | [`.github/workflows/smoke.yml`](../../.github/workflows/smoke.yml) | 매일 09:00 KST, 수동 |
+| GitHub Actions | [`.github/workflows/qa-report.yml`](../../.github/workflows/qa-report.yml) | CI가 끝날 때: PR에 QA 테스트 보고서 댓글, main은 배포·운영 스모크 뒤 최종 보고서 |
+
+## QA 테스트 보고서
+
+CI가 끝나면 ISO/IEC/IEEE 29119-3의 테스트 완료 보고서 구성(수행한 테스트 요약 · 계획 대비 차이 · 완료 평가 · 진행을 막은 요인 · 측정치 · 결함 · 잔여 위험 · 산출물 · 재사용 자산 · 교훈)으로 보고서를 만든다.
+
+| 언제 | 어디에 | 판정 |
+|---|---|---|
+| PR의 CI가 끝날 때마다 | PR 댓글(같은 댓글 갱신) | 머지 가능 · 머지 가능(조건부) · 머지 보류 |
+| 머지 후 main CI가 끝나면 | 머지된 PR에 최종 댓글. 배포 완료를 기다려 운영 스모크까지 포함 | 출시 확인 · 출시 확인(조건부) · 출시 후 조치 필요 |
+
+- 판정은 종료 기준(단위·커버리지·자동화·불안정 0·품질 게이트·요구사항별 실패 0·CI 잡, 머지 후에는 배포·운영 스모크)으로 정한다. 열린 잔여 위험이 있으면 조건부다.
+- 같은 내용의 A4 문서(표지·문서 정보·검토·승인·개정 이력·증거 그림·테스트 케이스 부록)를 `qa-report` 아티팩트에 PDF로 남긴다. main 실행은 시연 모드로 돌아 증거 그림이 들어간다.
+- 결함·잔여 위험·교훈은 [`qa-register.json`](qa-register.json)에서, 요구사항은 [`test-cases.md`](test-cases.md)에서 읽는다. 상태가 바뀌면 같은 PR에서 고친다.
+- 생성기: `e2e/report/`(모델·출력 분리, `model.test.mjs`로 판정 로직 검증). 로컬에서는 아티팩트를 받아 `pnpm --filter @solveline/e2e qa-report --input <디렉터리>`.
 
 CI는 GitHub가 호스팅하는 runner에서만 돈다. 운영 서버·개발자 PC의 자원을 쓰지 않고, 매 실행 새 가상 머신이라 이전 실행의 흔적이 남지 않는다.
 
