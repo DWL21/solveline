@@ -103,7 +103,7 @@ function Shell() {
           onClick={(e) => {
             e.preventDefault();
             setHomeKey((k) => k + 1);
-            go({ kind: 'home', scope: { kind: 'all' } });
+            go({ kind: 'home', scope: { kind: 'collections' } });
           }}
         >
           <img src="/icon.svg" alt="" className="size-6" />

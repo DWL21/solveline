@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
-/** 페이지 객체: 첫 화면(문제 목록·컬렉션 카드). 화면 구조를 숨기고 사용자가 하는 일 단위로 메서드를 둔다. */
+/** 페이지 객체: 컬렉션과 전체 문제 화면. 화면 구조를 숨기고 사용자가 하는 일 단위로 메서드를 둔다. */
 export class HomePage {
   readonly heading: Locator;
   readonly search: Locator;
@@ -12,9 +12,19 @@ export class HomePage {
     this.collectionCards = page.getByRole('region', { name: '컬렉션' }).getByRole('listitem');
   }
 
-  async open() {
+  async openCollections() {
     await this.page.goto('/#/');
+    await expect(this.heading).toContainText('컬렉션');
+  }
+
+  async showAll() {
+    await this.page.getByRole('button', { name: '전체 보기' }).click();
     await expect(this.heading).toContainText('전체 문제');
+  }
+
+  async open() {
+    await this.openCollections();
+    await this.showAll();
   }
 
   /** 제목으로 검색해 문제를 연다 */
