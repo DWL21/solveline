@@ -16,11 +16,22 @@ function statusText(item: Pick<SubmissionHistoryItem, 'status' | 'score'>) {
   return item.score === null ? '완료' : item.score === 100 ? '✓ 100점' : `${item.score}점`;
 }
 
+const isActive = (status: string | undefined) => status === 'queued' || status === 'running';
+
+/** 채점 결과 영역: 상태별로 한 가지만 보여 준다 */
+function GradeBody({ item }: { item: SubmissionDetail }) {
+  if (isActive(item.status)) return <p className="p-4 text-[13px] text-dim">{statusText(item)}</p>;
+  if (item.status === 'error') return <p className="p-4 text-[13px] text-bad">{item.error ?? '채점 중 오류가 발생했어요'}</p>;
+  if (item.status === 'cancelled') return <p className="p-4 text-[13px] text-warn">채점을 중지했습니다.</p>;
+  if (item.result) return <ResultPanel state={{ kind: 'graded', result: item.result, score: item.score ?? 0 }} />;
+  return <p className="p-4 text-[13px] text-dim">결과가 없어요.</p>;
+}
+
 function Detail({ id, onClose, onPickProblem }: { id: string; onClose: () => void; onPickProblem: (id: string) => void }) {
   const query = useQuery({
     queryKey: qk.submissionDetail(id),
     queryFn: () => api.submissionDetail(id),
-    refetchInterval: (q) => q.state.data?.status === 'queued' || q.state.data?.status === 'running' ? 1500 : false,
+    refetchInterval: (q) => (isActive(q.state.data?.status) ? 1500 : false),
   });
   const item: SubmissionDetail | undefined = query.data;
   return (
@@ -32,9 +43,11 @@ function Detail({ id, onClose, onPickProblem }: { id: string; onClose: () => voi
         </div>
         <button type="button" className="btn-quiet touch-target shrink-0" onClick={onClose} aria-label="상세 닫기"><span className="lg:hidden">← 목록</span><span className="hidden lg:inline">닫기</span></button>
       </div>
-      {query.isPending ? <p className="p-4 text-[13px] text-dim">불러오는 중이에요…</p> : query.isError ? (
+      {query.isPending && <p className="p-4 text-[13px] text-dim">불러오는 중이에요…</p>}
+      {query.isError && (
         <div className="p-4 text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></div>
-      ) : item && (
+      )}
+      {!query.isPending && !query.isError && item && (
         <div className="space-y-5 p-4">
           {item.problemId && item.problemTitle && <button type="button" className="btn-ghost text-[12px]" onClick={() => onPickProblem(item.problemId!)}>문제 열기 →</button>}
           <div>
@@ -44,11 +57,7 @@ function Detail({ id, onClose, onPickProblem }: { id: string; onClose: () => voi
           <div>
             <h3 className="mb-2 text-[13px] font-bold">채점 결과</h3>
             <div className="rounded-md border border-line bg-base">
-              {item.status === 'queued' || item.status === 'running' ? <p className="p-4 text-[13px] text-dim">{statusText(item)}</p>
-                : item.status === 'error' ? <p className="p-4 text-[13px] text-bad">{item.error ?? '채점 중 오류가 발생했어요'}</p>
-                : item.status === 'cancelled' ? <p className="p-4 text-[13px] text-warn">채점을 중지했습니다.</p>
-                : item.result ? <ResultPanel state={{ kind: 'graded', result: item.result, score: item.score ?? 0 }} />
-                : <p className="p-4 text-[13px] text-dim">결과가 없어요.</p>}
+              <GradeBody item={item} />
             </div>
           </div>
         </div>
@@ -65,9 +74,9 @@ export function SubmissionHistoryPage({ onPickProblem }: { onPickProblem: (id: s
     queryKey: qk.submissionHistory(offset),
     queryFn: () => api.submissionHistory(offset),
     enabled: !!me,
-    refetchInterval: (q) => q.state.data?.items.some((item) => item.status === 'queued' || item.status === 'running') ? 1500 : false,
+    refetchInterval: (q) => (q.state.data?.items.some((item) => isActive(item.status)) ? 1500 : false),
   });
-  if (!me) return <div className="p-6 text-[13px]">제출 기록은 로그인 후 볼 수 있어요. <a className="text-accent underline" href={loginHref()}>로그인</a></div>;
+  if (!me) return <div className="p-6 text-[13px]">제출 기록은 로그인 후 볼 수 있어요. <a className="text-accent-text underline" href={loginHref()}>로그인</a></div>;
   return (
     <main className="pb-safe min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">

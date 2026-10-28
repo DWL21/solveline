@@ -70,7 +70,7 @@
 - Worker는 카탈로그만 캐시한다. 사용자 데이터·쿠키가 붙은 응답은 캐시하지 않는다(`no-store`).
 - SQLite가 쓰기 원본이고 R2는 게시 사본이다. 공용 데이터를 바꾸는 API는 성공하면 R2에 게시한 뒤 응답한다. 히든 테스트셋은 R2(비공개)에 gzip으로 두고 공개 경로를 만들지 않는다.
 - R2 키 형식을 바꾸면 `apps/api/src/catalog.ts`와 `apps/web/public/_worker.js`를 함께 고친다.
-- R2 데이터 이전(R2_* 설정)과 Worker의 R2 읽기(`CATALOG` 바인딩·`CATALOG_SOURCE=r2`)는 운영자 승인 후에만 켠다.
+- pahidc는 R2 API 키 없이 Worker의 `/api/internal/r2`(공유 비밀 `R2_PROXY_SECRET`)로만 R2에 쓴다. R2 바인딩·변수는 `apps/web/wrangler.toml`이 관리한다.
 
 ## 채점 파이프라인 규칙 (0003)
 

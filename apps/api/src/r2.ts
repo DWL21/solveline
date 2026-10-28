@@ -55,6 +55,44 @@ export class R2ObjectStore implements ObjectStore {
   }
 }
 
+/**
+ * Pages Worker의 R2 바인딩을 거쳐 쓰는 저장소(서버에 R2 API 키를 두지 않는다).
+ * Worker의 /api/internal/r2 경로가 공유 비밀(R2_PROXY_SECRET)을 확인하고 catalog/·testsets/ 아래만 읽고 쓴다.
+ */
+export class WorkerR2Store implements ObjectStore {
+  constructor(
+    private baseUrl: string,
+    private secret: string,
+    private fetchImpl: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+  ) {}
+
+  private send(path: string, init: RequestInit = {}) {
+    return this.fetchImpl(`${this.baseUrl}/api/internal/r2${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${this.secret}` }, signal: AbortSignal.timeout(120_000) });
+  }
+
+  private static path(key: string) {
+    return `/${key.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
+  async put(key: string, body: string | Uint8Array, meta: { contentType: string }) {
+    const res = await this.send(WorkerR2Store.path(key), { method: 'PUT', body: typeof body === 'string' ? body : Buffer.from(body), headers: { 'content-type': meta.contentType } });
+    if (!res.ok) throw new ObjectStoreError(`R2에 ${key}를 올리지 못했습니다 (${res.status})`);
+  }
+
+  async get(key: string) {
+    const res = await this.send(WorkerR2Store.path(key));
+    if (res.status === 404) return null;
+    if (!res.ok) throw new ObjectStoreError(`R2에서 ${key}를 읽지 못했습니다 (${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  async list(prefix: string) {
+    const res = await this.send(`?list=${encodeURIComponent(prefix)}`);
+    if (!res.ok) throw new ObjectStoreError(`R2 목록을 읽지 못했습니다 (${res.status})`);
+    return ((await res.json()) as { keys: string[] }).keys;
+  }
+}
+
 const unescapeXml = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
 /** 테스트용 */

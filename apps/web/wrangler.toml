@@ -1,0 +1,10 @@
+# Cloudflare Pages 프로젝트 solveline 설정. 이 파일이 있으면 대시보드의 바인딩·변수 설정 대신 이 파일을 쓴다(비밀은 대시보드/wrangler secret).
+# docs/decisions/0006-catalog-r2-worker.md
+name = "solveline"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-23"
+
+# 공용 문제 데이터·히든 테스트셋. Worker만 바인딩으로 읽고 쓴다(pahidc는 /api/internal/r2 로 Worker를 거친다).
+[[r2_buckets]]
+binding = "CATALOG"
+bucket_name = "solveline-catalog"

@@ -10,7 +10,8 @@ import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
 import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '../src/runner.ts';
 import { SubmissionStore } from '../src/dispatcher.ts';
 import { CATALOG_INDEX_KEY, catalogProblemKey, testsetKey } from '../src/catalog.ts';
-import { MemoryObjectStore, type ObjectStore } from '../src/r2.ts';
+import { MemoryObjectStore, WorkerR2Store, type ObjectStore } from '../src/r2.ts';
+import { createHash } from 'node:crypto';
 import { d1Sql, sqliteSql } from '../src/sql.ts';
 import { fakeD1 } from './fake-d1.ts';
 import { TestsetStore } from '../src/testsets.ts';
@@ -940,6 +941,12 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
     expect(detail).not.toHaveProperty('code');
     expect(detail).not.toHaveProperty('memo');
     expect((await s.app.request('/api/catalog/problems/none')).status).toBe(404);
+    // 상세는 목록의 version을 만든 바이트 그대로다(Worker가 해시가 맞을 때만 1년 캐시한다)
+    const raw = await (await s.app.request(`/api/catalog/problems/${a}`)).text();
+    expect(createHash('sha256').update(raw).digest('hex').slice(0, 16)).toBe(index.problems.find((p) => p.id === a)!.version);
+    // 목록을 막 읽은 직후에 바꿔도 다음 목록에 바로 보인다(1초 재사용분을 버린다)
+    await E('POST', '/api/collections', { name: '바로 보임', description: '' });
+    expect(CatalogIndex.parse((await (await s.app.request('/api/catalog/index')).json()).data).collections.map((x) => x.name)).toContain('바로 보임');
 
     // 내 상태는 로그인해야 하고, 상태가 있는 문제만 온다
     expect((await s.app.request('/api/me/problems')).status).toBe(401);
@@ -1030,6 +1037,63 @@ describe('카탈로그(공용 문제)와 내 풀이 상태 분리', () => {
   it('R2 설정은 넷 다 있거나 다 없어야 한다', () => {
     expect(() => loadConfig({ R2_BUCKET: 'b' })).toThrow(/함께 설정/);
     expect(loadConfig({}).r2).toBeNull();
+  });
+});
+
+describe('Worker를 거친 R2 게시', () => {
+  /** Pages Worker 모듈을 그대로 불러 가짜 R2 버킷에 붙인다 */
+  async function proxy(secret: string) {
+    const objects = new Map<string, { body: Uint8Array; contentType: string }>();
+    const bucket = {
+      put: async (key: string, body: ReadableStream | null, opts: { httpMetadata: { contentType: string } }) => {
+        objects.set(key, { body: new Uint8Array(await new Response(body).arrayBuffer()), contentType: opts.httpMetadata.contentType });
+      },
+      get: async (key: string) => {
+        const o = objects.get(key);
+        return o ? { body: o.body, httpMetadata: { contentType: o.contentType } } : null;
+      },
+      list: async ({ prefix }: { prefix: string }) => ({ objects: [...objects.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false }),
+    };
+    const workerPath = new URL('../../web/public/_worker.js', import.meta.url).href;
+    const worker = (await import(workerPath)) as { default: { fetch: (r: Request, env: unknown, ctx: unknown) => Promise<Response> } };
+    const env = { CATALOG: bucket, R2_PROXY_SECRET: secret };
+    const call = (url: string, init: RequestInit) => worker.default.fetch(new Request(url, init), env, { waitUntil() {} });
+    return { objects, call };
+  }
+
+  it('공유 비밀이 맞을 때만 catalog/·testsets/ 아래를 읽고 쓴다', async () => {
+    const secret = 'proxy-secret-0123456789abcdef0123456789';
+    const { objects, call } = await proxy(secret);
+    const store = new WorkerR2Store('https://solveline.simplyimg.com', secret, call);
+    await store.put('catalog/v1/index.json', '{"data":1}', { contentType: 'application/json' });
+    await store.put('testsets/abc.json.gz', new Uint8Array([1, 2, 3]), { contentType: 'application/gzip' });
+    expect(new TextDecoder().decode((await store.get('catalog/v1/index.json'))!)).toBe('{"data":1}');
+    expect([...(await store.get('testsets/abc.json.gz'))!]).toEqual([1, 2, 3]);
+    expect(await store.get('catalog/none.json')).toBeNull();
+    expect(await store.list('testsets/')).toEqual(['testsets/abc.json.gz']);
+    expect(objects.get('testsets/abc.json.gz')!.contentType).toBe('application/gzip');
+
+    const wrong = new WorkerR2Store('https://solveline.simplyimg.com', 'x'.repeat(secret.length), call);
+    await expect(wrong.put('catalog/a.json', '1', { contentType: 'application/json' })).rejects.toThrow(/401/);
+    await expect(store.put('users/secret.json', '1', { contentType: 'application/json' })).rejects.toThrow(/400/);
+    // 비밀이 설정되지 않은 Worker는 모두 거절한다
+    const { call: open } = await proxy('');
+    await expect(new WorkerR2Store('https://solveline.simplyimg.com', '', open).list('catalog/')).rejects.toThrow(/401/);
+  });
+
+  it('API가 Worker를 거쳐 카탈로그를 게시한다', async () => {
+    const secret = 'proxy-secret-0123456789abcdef0123456789';
+    const { objects, call } = await proxy(secret);
+    const s = setup({}, new WorkerR2Store('https://solveline.simplyimg.com', secret, call));
+    const E = as(s, await login(s));
+    await E('POST', '/api/problems', problem);
+    expect([...objects.keys()].filter((k) => k.startsWith('catalog/v1/problems/'))).toHaveLength(1);
+    expect(objects.has(CATALOG_INDEX_KEY)).toBe(true);
+  });
+
+  it('R2_PROXY_SECRET은 32자 이상이어야 한다', () => {
+    expect(() => loadConfig({ R2_PROXY_SECRET: 'short' })).toThrow(/32자/);
+    expect(loadConfig({ R2_PROXY_SECRET: 'p'.repeat(32) }).r2ProxySecret).toBe('p'.repeat(32));
   });
 });
 

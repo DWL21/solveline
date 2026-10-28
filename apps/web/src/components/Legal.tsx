@@ -51,7 +51,7 @@ function Page({ title, version, children }: { title: string; version: string; ch
   );
 }
 
-const Contact = ({ email }: { email: string | null }) => (email ? <a href={`mailto:${email}`} className="text-accent underline">{email}</a> : <span>서비스 내 안내된 연락처</span>);
+const Contact = ({ email }: { email: string | null }) => (email ? <a href={`mailto:${email}`} className="text-accent-text underline">{email}</a> : <span>서비스 내 안내된 연락처</span>);
 
 export function TermsPage() {
   const email = useContact();
