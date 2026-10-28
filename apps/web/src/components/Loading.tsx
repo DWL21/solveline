@@ -36,7 +36,7 @@ export function BootScreen() {
       {show && (
         <div className="flex animate-[fadein_200ms_ease-out] flex-col items-center gap-4">
           <img src="/icon.svg" alt="" className="size-10" />
-          <Spinner size={22} className="text-accent" />
+          <Spinner size={22} className="text-accent-text" />
         </div>
       )}
     </div>
