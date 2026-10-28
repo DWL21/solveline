@@ -10,8 +10,8 @@
 | #128 | 1단계: 저장소 비동기 `Sql`, D1 어댑터 | 머지·배포 완료 |
 | #133 | `CATALOG_SOURCE = "r2"`(Worker가 R2에서 읽기) | 머지·배포 완료(ETag 32자 hex, 문제 1,046개 확인) |
 | #135 | 2단계: `apps/judge` 분리와 배포 구성 | 머지·배포 완료(`/api/runtime`이 judge를 거쳐 runner up) |
-| #139 | 3단계: API를 Pages Worker로 묶기, D1·R2 바인딩, WebCrypto, D1 요청 제한, D1 스키마 | 열림(Ready). CI 통과 뒤 머지 |
-| #140 이슈의 PR(Draft, #139 위) | 4단계: D1 매일 암호화 백업·정리 워크플로 | #139 머지 뒤 Ready. 설정 전에는 건너뛴다 |
+| #139 | 3단계: API를 Pages Worker로 묶기, D1·R2 바인딩, WebCrypto, D1 요청 제한, D1 스키마 | 머지·배포 완료(Worker 안의 API는 5단계까지 꺼짐) |
+| #141 | 4단계: D1 매일 암호화 백업·정리 워크플로 | 열림. 설정 전에는 건너뛴다 |
 
 Cloudflare 쪽:
 - R2 버킷 `solveline-catalog`를 만들었다.
