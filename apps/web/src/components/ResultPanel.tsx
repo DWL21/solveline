@@ -46,11 +46,11 @@ function verdict(r: CaseResult, mode: ProblemMode, expected: string, limitMs: nu
 
 const show = (v: string | null, mode: ProblemMode) => (v === null ? 'null' : mode === 'stdin' ? v.trimEnd() : v);
 
-function Code({ children }: { children: React.ReactNode }) {
+function Code({ children }: Readonly<{ children: React.ReactNode }>) {
   return <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px] text-text">{children}</code>;
 }
 
-export function ResultPanel({ state }: { state: RunState }) {
+export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
   if (state.kind === 'idle')
     return <p className="p-4 text-[13px] text-faint">실행 결과가 여기에 표시됩니다. (⌘/Ctrl + Enter로 실행)</p>;
   if (state.kind === 'running')
@@ -138,7 +138,7 @@ export function ResultPanel({ state }: { state: RunState }) {
   );
 }
 
-function CompileError({ output }: { output: string }) {
+function CompileError({ output }: Readonly<{ output: string }>) {
   return (
     <div className="p-4">
       <p className="mb-2 text-[13px] font-bold text-bad">컴파일 에러</p>
@@ -157,7 +157,7 @@ const gradedLabel: Record<CaseResult['status'], string> = {
 };
 
 /** 기존 채점 결과 형식: 테스트별 통과/실패와 시간·메모리, 마지막에 점수 */
-function Graded({ result, score }: { result: RunResult; score: number }) {
+function Graded({ result, score }: Readonly<{ result: RunResult; score: number }>) {
   const passed = result.results.filter((r) => r.status === 'pass').length;
   return (
     <div className="p-4 font-mono text-[12.5px] leading-[1.9]">

@@ -11,7 +11,7 @@ const MAX_HIDDEN = 200;
 const HIDDEN_SAVE_DELAY_MS = 500;
 
 /** 매개변수 이름 입력: 쉼표로 구분. 타이핑 중 빈 칸을 지우지 않도록 로컬 텍스트를 따로 둔다. */
-function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: string[]) => void }) {
+function ParamsInput({ params, onChange }: Readonly<{ params: string[]; onChange: (p: string[]) => void }>) {
   const [text, setText] = useState(params.join(', '));
   useEffect(() => setText(params.join(', ')), [params]);
   return (
@@ -35,7 +35,7 @@ function ParamsInput({ params, onChange }: { params: string[]; onChange: (p: str
 const BIG_FIELD = 10_000;
 
 /** 큰 값(효율성 케이스)은 입력칸에 넣으면 화면이 느려지므로 읽기 전용으로 크기와 앞부분만 보여 준다. */
-function Field({ value, label, multiline, readOnly, onChange }: { value: string; label: string; multiline?: boolean; readOnly?: boolean; onChange: (v: string) => void }) {
+function Field({ value, label, multiline, readOnly, onChange }: Readonly<{ value: string; label: string; multiline?: boolean; readOnly?: boolean; onChange: (v: string) => void }>) {
   if (readOnly)
     return (
       <div className={`field cursor-default font-mono ${multiline ? 'min-h-10 whitespace-pre-wrap' : 'truncate'}`} aria-label={label} title={value.length > 200 ? `${value.length.toLocaleString()}자` : value}>
@@ -63,14 +63,14 @@ function CaseList({
   label,
   readOnly,
   onChange,
-}: {
+}: Readonly<{
   mode: ProblemMode;
   params: string[];
   cases: TestCase[];
   label: string;
   readOnly?: boolean;
   onChange: (c: TestCase[]) => void;
-}) {
+}>) {
   const narrow = useNarrow();
   const update = (id: string, patch: Partial<TestCase>) => onChange(cases.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   const remove = (id: string) => onChange(cases.filter((c) => c.id !== id));
@@ -199,7 +199,7 @@ export function CasesEditor({
   onParams,
   onCases,
   onMyCases,
-}: {
+}: Readonly<{
   problemId: string;
   /** 비회원: 내 테스트 케이스를 만들 수 없다 */
   guest?: boolean;
@@ -214,7 +214,7 @@ export function CasesEditor({
   onParams: (p: string[]) => void;
   onCases: (c: TestCase[]) => void;
   onMyCases: (c: TestCase[]) => void;
-}) {
+}>) {
   return (
     <div className="flex flex-col gap-4 p-4">
       {editing && <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />}
@@ -266,7 +266,7 @@ export function CasesEditor({
 }
 
 /** 시간 제한(초). 함수형은 solution 호출 시간, 입출력형은 실행 시간 기준. 0.1~10초. */
-function TimeLimit({ value, onChange }: { value: number; onChange: (ms: number) => void }) {
+function TimeLimit({ value, onChange }: Readonly<{ value: number; onChange: (ms: number) => void }>) {
   const [text, setText] = useState(String(value / 1000));
   useEffect(() => setText(String(value / 1000)), [value]);
   const commit = () => {
@@ -295,7 +295,7 @@ function TimeLimit({ value, onChange }: { value: number; onChange: (ms: number) 
 
 type HiddenState = 'saved' | 'dirty' | 'saving' | 'error';
 
-function HiddenCases({ problemId, mode, params, summary }: { problemId: string; mode: ProblemMode; params: string[]; summary: TestsetRef | null }) {
+function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId: string; mode: ProblemMode; params: string[]; summary: TestsetRef | null }>) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(true);
   const q = useQuery({ queryKey: qk.hidden(problemId), queryFn: () => api.hidden(problemId), enabled: open, staleTime: Infinity });

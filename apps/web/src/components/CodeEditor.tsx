@@ -126,7 +126,7 @@ export function CodeEditor({
   visible = true,
   compact = false,
   onFocusChange,
-}: {
+}: Readonly<{
   /** 에디터에 초점이 들어오고 나갈 때(휴대폰에서는 화상 키보드가 열리고 닫힐 때) */
   onFocusChange?: (focused: boolean) => void;
   readOnly?: boolean;
@@ -139,7 +139,7 @@ export function CodeEditor({
   language: Language;
   onChange: (v: string) => void;
   onRun: () => void;
-}) {
+}>) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const lang = useRef(new Compartment());
@@ -305,7 +305,7 @@ const MAX_FONT = 22;
  * 긴 코드를 빨리 오가는 손잡이(오른쪽 가장자리). 스크롤하면 잠깐 나타나고, 끌면 그 위치로 바로 이동한다.
  * 휴대폰에서는 브라우저 스크롤바가 보이지 않고 끌 수도 없어서 따로 둔다.
  */
-function FastScroll({ view }: { view: { current: EditorView | null } }) {
+function FastScroll({ view }: Readonly<{ view: { current: EditorView | null } }>) {
   const [pos, setPos] = useState({ top: 0, size: 1, show: false });
   const dragging = useRef<{ startY: number; startTop: number } | null>(null);
   const hide = useRef<ReturnType<typeof setTimeout> | null>(null);

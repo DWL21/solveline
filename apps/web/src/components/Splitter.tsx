@@ -44,14 +44,14 @@ export function Splitter({
   defaultValue,
   label,
   onChange,
-}: {
+}: Readonly<{
   direction: 'vertical' | 'horizontal';
   container: RefObject<HTMLElement | null>;
   value: number;
   defaultValue: number;
   label: string;
   onChange: (pct: number) => void;
-}) {
+}>) {
   const [dragging, setDragging] = useState(false);
   const vertical = direction === 'vertical';
 

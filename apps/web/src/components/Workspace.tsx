@@ -38,7 +38,7 @@ const toInput = (p: Problem): ProblemInput => ({
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 const languageName = (l: Language) => (l === 'java' ? 'Java' : 'Python3');
 
-export function Workspace({ problemId, onDeleted, onNext, onList }: { problemId: string; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
+export function Workspace({ problemId, onDeleted, onNext, onList }: Readonly<{ problemId: string; onDeleted: () => void; onNext?: () => void; onList: () => void }>) {
   const q = useQuery({ queryKey: qk.problem(problemId), queryFn: () => api.problem(problemId), staleTime: Infinity });
 
   if (q.isPending) return <WorkspaceSkeleton />;
@@ -260,7 +260,7 @@ function useRunner({
 }
 type Runner = ReturnType<typeof useRunner>;
 
-function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDeleted: () => void; onNext?: () => void; onList: () => void }) {
+function Editor({ problem, onDeleted, onNext, onList }: Readonly<{ problem: Problem; onDeleted: () => void; onNext?: () => void; onList: () => void }>) {
   const qc = useQueryClient();
   // 비회원: 문제를 볼 수만 있다(코드 작성·실행·저장은 로그인 후)
   const me = useMe();
@@ -382,12 +382,12 @@ function Editor({ problem, onDeleted, onNext, onList }: { problem: Problem; onDe
   );
 }
 
-function Paused({ solve }: { solve: Solve }) {
+function Paused({ solve }: Readonly<{ solve: Solve }>) {
   if (!solve.timer.paused || solve.timer.solvedMs !== null) return null;
   return <PausedOverlay elapsedMs={solve.timer.elapsedMs} onResume={solve.resume} />;
 }
 
-function GuestFooter({ narrow }: { narrow: boolean }) {
+function GuestFooter({ narrow }: Readonly<{ narrow: boolean }>) {
   return (
     <footer className="pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4">
       <a href={loginHref()} className={`btn-primary touch-target ${narrow ? 'w-full' : 'ml-auto min-w-32'}`}>
@@ -405,7 +405,7 @@ function RunFooter({
   onReset,
   onAddCase,
   onSaveStarter,
-}: {
+}: Readonly<{
   narrow: boolean;
   editing: boolean;
   runner: Runner;
@@ -413,7 +413,7 @@ function RunFooter({
   onReset: () => void;
   onAddCase: () => void;
   onSaveStarter: () => void;
-}) {
+}>) {
   const { pending, run } = runner;
   return (
     <footer className={`pb-safe flex shrink-0 items-center gap-2 border-t border-line bg-base px-3 py-2 sm:px-4 ${narrow ? 'keyboard-hide typing-hide' : 'flex-wrap'}`}>
@@ -447,7 +447,7 @@ function RunFooter({
   );
 }
 
-function StopButton({ runner }: { runner: Runner }) {
+function StopButton({ runner }: Readonly<{ runner: Runner }>) {
   return (
     <button type="button" className="btn-ghost touch-target min-w-20 text-bad" disabled={runner.stopping} onClick={() => void runner.doStop()} title="실행·채점 중지">
       {runner.stopping ? (
@@ -476,7 +476,7 @@ function TitleBar({
   onDelete,
   onToggleEditing,
   onSaveStarter,
-}: {
+}: Readonly<{
   problem: Problem;
   draft: ProblemInput;
   patch: (p: Partial<ProblemInput>) => void;
@@ -491,7 +491,7 @@ function TitleBar({
   onDelete: () => void;
   onToggleEditing: () => void;
   onSaveStarter: () => void;
-}) {
+}>) {
   const summaries = useQuery({ queryKey: qk.problems, queryFn: api.problems });
   const saveState = useDraftState(queue, problem.id);
   return (
@@ -530,7 +530,7 @@ function TitleBar({
   );
 }
 
-function LastScore({ problem }: { problem: Problem }) {
+function LastScore({ problem }: Readonly<{ problem: Problem }>) {
   const sub = problem.lastSubmission;
   if (!sub) return null;
   const solved = sub.score === 100;
@@ -549,7 +549,7 @@ function EditTools({
   onDelete,
   onToggle,
   onSaveStarter,
-}: {
+}: Readonly<{
   title: string;
   editing: boolean;
   narrow: boolean;
@@ -557,7 +557,7 @@ function EditTools({
   onDelete: () => void;
   onToggle: () => void;
   onSaveStarter: () => void;
-}) {
+}>) {
   return (
     <>
       {editing && narrow && (
@@ -583,7 +583,7 @@ function EditTools({
   );
 }
 
-function PaneTabs({ pane, onPane, compact, runner, unseen }: { pane: Pane; onPane: (p: Pane) => void; compact: boolean; runner: Runner; unseen: boolean }) {
+function PaneTabs({ pane, onPane, compact, runner, unseen }: Readonly<{ pane: Pane; onPane: (p: Pane) => void; compact: boolean; runner: Runner; unseen: boolean }>) {
   const tabs: [Pane, string][] = [
     ['problem', '문제'],
     ['code', '코드'],
@@ -607,7 +607,7 @@ function PaneTabs({ pane, onPane, compact, runner, unseen }: { pane: Pane; onPan
   );
 }
 
-function ResultDot({ pending, unseen }: { pending: boolean; unseen: boolean }) {
+function ResultDot({ pending, unseen }: Readonly<{ pending: boolean; unseen: boolean }>) {
   if (pending) return <Spinner size={11} />;
   if (!unseen) return null;
   return <span className="absolute top-3 ml-1 inline-block size-1.5 rounded-full bg-accent" aria-label="새 결과" />;
@@ -619,7 +619,7 @@ function tabLabel(t: Tab, draft: ProblemInput): string {
   return draft.memo.trim() ? '메모 •' : '메모';
 }
 
-function ProblemTabs({ tab, onTab, guest, draft }: { tab: Tab; onTab: (t: Tab) => void; guest: boolean; draft: ProblemInput }) {
+function ProblemTabs({ tab, onTab, guest, draft }: Readonly<{ tab: Tab; onTab: (t: Tab) => void; guest: boolean; draft: ProblemInput }>) {
   const tabs: readonly Tab[] = guest ? ['desc', 'cases'] : ['desc', 'cases', 'memo'];
   return (
     <div className="pane-title gap-0 px-1">
@@ -632,7 +632,7 @@ function ProblemTabs({ tab, onTab, guest, draft }: { tab: Tab; onTab: (t: Tab) =
   );
 }
 
-function ProblemBody({ tab, problem, draft, patch, guest, editing }: { tab: Tab; problem: Problem; draft: ProblemInput; patch: (p: Partial<ProblemInput>) => void; guest: boolean; editing: boolean }) {
+function ProblemBody({ tab, problem, draft, patch, guest, editing }: Readonly<{ tab: Tab; problem: Problem; draft: ProblemInput; patch: (p: Partial<ProblemInput>) => void; guest: boolean; editing: boolean }>) {
   if (tab === 'memo')
     return (
       <textarea
@@ -663,7 +663,7 @@ function ProblemBody({ tab, problem, draft, patch, guest, editing }: { tab: Tab;
   );
 }
 
-function Description({ value, editing, onChange }: { value: string; editing: boolean; onChange: (v: string) => void }) {
+function Description({ value, editing, onChange }: Readonly<{ value: string; editing: boolean; onChange: (v: string) => void }>) {
   if (editing)
     return (
       <textarea
@@ -699,7 +699,7 @@ function CodePane({
   editorPct,
   onEditorPct,
   footer,
-}: {
+}: Readonly<{
   narrow: boolean;
   pane: Pane;
   draft: ProblemInput;
@@ -711,7 +711,7 @@ function CodePane({
   editorPct: number;
   onEditorPct: (v: number) => void;
   footer: React.ReactNode;
-}) {
+}>) {
   const rightRef = useRef<HTMLElement>(null);
   const lang = draft.language;
   return (
@@ -747,7 +747,7 @@ function FolderName({ id }: { id: string | null }) {
   return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">▤ {name}</span> : null;
 }
 
-function FolderSelect({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
+function FolderSelect({ value, onChange }: Readonly<{ value: string | null; onChange: (id: string | null) => void }>) {
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   return (
     <select
@@ -768,7 +768,7 @@ function FolderSelect({ value, onChange }: { value: string | null; onChange: (id
 }
 
 /** 이 문제가 들어 있는 컬렉션을 고른다. 컬렉션은 가상 묶음이라 여러 개 고를 수 있다. */
-function CollectionsMenu({ problemId }: { problemId: string }) {
+function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
   const qc = useQueryClient();
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });
   const [open, setOpen] = useState(false);
@@ -852,7 +852,7 @@ function CollectionsMenu({ problemId }: { problemId: string }) {
   );
 }
 
-function SaveBadge({ state, onRetry }: { state: DraftState; onRetry: () => void }) {
+function SaveBadge({ state, onRetry }: Readonly<{ state: DraftState; onRetry: () => void }>) {
   if (state === 'error' || state === 'storage-error')
     return (
       <button type="button" onClick={onRetry} className="text-[12px] font-semibold text-bad underline">

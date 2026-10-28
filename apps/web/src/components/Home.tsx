@@ -43,7 +43,7 @@ export function scopeList(scope: Scope, all: ProblemSummary[], collections: Coll
 }
 
 /** 마지막 제출 결과 표시: 100점이면 초록 ✓, 아니면 점수 */
-export function SolvedMark({ p }: { p: ProblemSummary }) {
+export function SolvedMark({ p }: Readonly<{ p: ProblemSummary }>) {
   const sub = p.lastSubmission;
   if (!sub) return null;
   if (sub.score === 100)
@@ -60,7 +60,7 @@ export function SolvedMark({ p }: { p: ProblemSummary }) {
 }
 
 /** 문제 선택 화면: 왼쪽에 전체·폴더·컬렉션, 오른쪽에 그 범위의 문제 목록. */
-export function Home({ scope, onScope, onPick, onNew }: { scope: Scope; onScope: (s: Scope) => void; onPick: (id: string) => void; onNew: () => void }) {
+export function Home({ scope, onScope, onPick, onNew }: Readonly<{ scope: Scope; onScope: (s: Scope) => void; onPick: (id: string) => void; onNew: () => void }>) {
   const me = useMe();
   const editor = !!me?.editor;
   const signedIn = !!me;
@@ -183,7 +183,7 @@ function levelLabelOf(node: CollectionNode | null): string {
   return '컬렉션';
 }
 
-function CollectionPath({ node, tree, onScope }: { node: CollectionNode; tree: CollectionNode[]; onScope: (s: Scope) => void }) {
+function CollectionPath({ node, tree, onScope }: Readonly<{ node: CollectionNode; tree: CollectionNode[]; onScope: (s: Scope) => void }>) {
   return (
     <nav className="mb-1 flex flex-wrap items-center gap-1 text-[12.5px] text-dim" aria-label="컬렉션 경로">
       <span className="flex items-center gap-1">
@@ -207,7 +207,7 @@ function CollectionPath({ node, tree, onScope }: { node: CollectionNode; tree: C
   );
 }
 
-function SiblingNav({ siblings, label, onScope }: { siblings: NonNullable<ReturnType<typeof siblingNodes>>; label: string; onScope: (s: Scope) => void }) {
+function SiblingNav({ siblings, label, onScope }: Readonly<{ siblings: NonNullable<ReturnType<typeof siblingNodes>>; label: string; onScope: (s: Scope) => void }>) {
   const go = (n: CollectionNode | null | undefined) => n && onScope(scopeOfNode(n));
   return (
     <div className="ml-auto flex items-center gap-1">
@@ -217,7 +217,7 @@ function SiblingNav({ siblings, label, onScope }: { siblings: NonNullable<Return
   );
 }
 
-function CollectionCards({ cards, all, signedIn, overview, onScope }: { cards: CollectionNode[]; all: ProblemSummary[]; signedIn: boolean; overview: boolean; onScope: (s: Scope) => void }) {
+function CollectionCards({ cards, all, signedIn, overview, onScope }: Readonly<{ cards: CollectionNode[]; all: ProblemSummary[]; signedIn: boolean; overview: boolean; onScope: (s: Scope) => void }>) {
   return (
     <section className="mt-3 mb-5" aria-label={overview ? '컬렉션' : '하위 컬렉션'}>
       <ul className={overview ? "grid grid-cols-1 gap-5" : "grid grid-cols-2 gap-2 sm:gap-2.5 lg:grid-cols-3"}>
@@ -236,7 +236,7 @@ function CollectionCards({ cards, all, signedIn, overview, onScope }: { cards: C
   );
 }
 
-function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+function LoadError({ error, onRetry }: Readonly<{ error: unknown; onRetry: () => void }>) {
   return (
     <div className="p-6 text-[13px]">
       <p className="font-semibold text-bad">{errMsg(error)}</p>
@@ -277,7 +277,7 @@ function emptyMessage({ q, bookmarksOnly, kind, signedIn, inCollection, hasCards
   return '이 폴더에 문제가 없어요';
 }
 
-function ProblemRow({ p, order, folderLabel, onPick }: { p: ProblemSummary; order: number | null; folderLabel: string | undefined; onPick: (id: string) => void }) {
+function ProblemRow({ p, order, folderLabel, onPick }: Readonly<{ p: ProblemSummary; order: number | null; folderLabel: string | undefined; onPick: (id: string) => void }>) {
   const solved = p.lastSubmission?.score === 100;
   return (
     <li className="flex items-center border-b border-line last:border-b-0">
@@ -308,7 +308,7 @@ function Sidebar({
   folders,
   folderCount,
   tree,
-}: {
+}: Readonly<{
   scope: Scope;
   onScope: (s: Scope) => void;
   total: number;
@@ -317,7 +317,7 @@ function Sidebar({
   folders: Folder[];
   folderCount: (id: string) => number;
   tree: CollectionNode[];
-}) {
+}>) {
   const me = useMe();
   const [creating, setCreating] = useState(false);
   const scopes: ScopeItem[] = [
@@ -405,7 +405,7 @@ function Sidebar({
 }
 
 /** 휴대폰: 내 폴더(누구나)·공용 컬렉션(편집 권한)을 바로 만든다 */
-function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }) {
+function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () => void }>) {
   const qc = useQueryClient();
   const [kind, setKind] = useState<'collection' | 'folder'>('folder');
   const [name, setName] = useState('');
@@ -464,7 +464,7 @@ function QuickCreate({ editor, onDone }: { editor: boolean; onDone: () => void }
 }
 
 /** 섹션 제목 + 새 폴더/컬렉션 입력 */
-function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
+function SectionHeader({ kind }: Readonly<{ kind: 'folder' | 'collection' }>) {
   const qc = useQueryClient();
   // 폴더는 각자 만드는 개인 정리, 컬렉션은 공용이라 편집 권한이 있어야 만든다
   const me = useMe();
@@ -518,7 +518,7 @@ function SectionHeader({ kind }: { kind: 'folder' | 'collection' }) {
 }
 
 /** 선택한 폴더·컬렉션의 이름 바꾸기·삭제 */
-function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'; item: Folder | Collection; onDeleted: () => void }) {
+function ScopeActions({ kind, item, onDeleted }: Readonly<{ kind: 'folder' | 'collection'; item: Folder | Collection; onDeleted: () => void }>) {
   const qc = useQueryClient();
   const key = kind === 'folder' ? qk.folders : qk.collections;
   const rename = useMutation({
@@ -564,7 +564,7 @@ function ScopeActions({ kind, item, onDeleted }: { kind: 'folder' | 'collection'
 }
 
 /** 컬렉션 카드: 이름, 문제 수, (로그인 시) 맞힌 비율, 하위 컬렉션 수 */
-function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch = true }: { node: CollectionNode; all: ProblemSummary[]; signedIn: boolean; onOpen: () => void; compact?: boolean; stretch?: boolean }) {
+function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch = true }: Readonly<{ node: CollectionNode; all: ProblemSummary[]; signedIn: boolean; onOpen: () => void; compact?: boolean; stretch?: boolean }>) {
   const ids = new Set(problemIdsUnder(node));
   const total = ids.size;
   const solved = all.filter((p) => ids.has(p.id) && p.lastSubmission?.score === 100).length;
@@ -603,7 +603,7 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
 const PAGE = 80;
 
 /** 목록 끝에 닿으면 다음 묶음을 그린다(스크롤하지 못하는 환경을 위해 버튼도 둔다) */
-function MoreSentinel({ onMore, remaining }: { onMore: () => void; remaining: number }) {
+function MoreSentinel({ onMore, remaining }: Readonly<{ onMore: () => void; remaining: number }>) {
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = ref.current;

@@ -19,7 +19,7 @@ function statusText(item: Pick<SubmissionHistoryItem, 'status' | 'score'>) {
 const isActive = (status: string | undefined) => status === 'queued' || status === 'running';
 
 /** 채점 결과 영역: 상태별로 한 가지만 보여 준다 */
-function GradeBody({ item }: { item: SubmissionDetail }) {
+function GradeBody({ item }: Readonly<{ item: SubmissionDetail }>) {
   if (isActive(item.status)) return <p className="p-4 text-[13px] text-dim">{statusText(item)}</p>;
   if (item.status === 'error') return <p className="p-4 text-[13px] text-bad">{item.error ?? '채점 중 오류가 발생했어요'}</p>;
   if (item.status === 'cancelled') return <p className="p-4 text-[13px] text-warn">채점을 중지했습니다.</p>;
@@ -27,7 +27,7 @@ function GradeBody({ item }: { item: SubmissionDetail }) {
   return <p className="p-4 text-[13px] text-dim">결과가 없어요.</p>;
 }
 
-function Detail({ id, onClose, onPickProblem }: { id: string; onClose: () => void; onPickProblem: (id: string) => void }) {
+function Detail({ id, onClose, onPickProblem }: Readonly<{ id: string; onClose: () => void; onPickProblem: (id: string) => void }>) {
   const query = useQuery({
     queryKey: qk.submissionDetail(id),
     queryFn: () => api.submissionDetail(id),
@@ -66,7 +66,7 @@ function Detail({ id, onClose, onPickProblem }: { id: string; onClose: () => voi
   );
 }
 
-export function SubmissionHistoryPage({ onPickProblem }: { onPickProblem: (id: string) => void }) {
+export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProblem: (id: string) => void }>) {
   const me = useMe();
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);

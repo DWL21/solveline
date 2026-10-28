@@ -140,7 +140,7 @@ function Dashboard() {
   );
 }
 
-function UserList({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
+function UserList({ selected, onSelect }: Readonly<{ selected: string | null; onSelect: (id: string) => void }>) {
   const users = useQuery({ queryKey: qk.adminUsers, queryFn: adminApi.users });
   const [filter, setFilter] = useState('');
   if (users.isPending) return <ListSkeleton />;
@@ -181,7 +181,7 @@ function UserList({ selected, onSelect }: { selected: string | null; onSelect: (
   );
 }
 
-function Badges({ user }: { user: AdminUser }) {
+function Badges({ user }: Readonly<{ user: AdminUser }>) {
   return (
     <span className="flex shrink-0 gap-1">
       {user.editor && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-bold text-accent-text">편집</span>}
@@ -189,7 +189,7 @@ function Badges({ user }: { user: AdminUser }) {
   );
 }
 
-function UserDetail({ id, onDeleted }: { id: string; onDeleted: () => void }) {
+function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => void }>) {
   const qc = useQueryClient();
   const d = useQuery({ queryKey: qk.adminUser(id), queryFn: () => adminApi.user(id) });
   const done = (u: AdminUserDetail) => {

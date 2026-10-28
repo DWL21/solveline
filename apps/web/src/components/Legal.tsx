@@ -4,7 +4,7 @@ import { PRIVACY_VERSION, TERMS_VERSION } from '@solveline/shared';
 import { api, qk } from '../lib/api.ts';
 
 /** 화면 맨 아래 약관 링크. admin이면 관리자 모드로 가는 흐린 글자를 덧붙인다. */
-export function LegalFooter({ admin = false }: { admin?: boolean }) {
+export function LegalFooter({ admin = false }: Readonly<{ admin?: boolean }>) {
   return (
     <footer className="flex shrink-0 items-center justify-center gap-3 px-4 py-4 text-[11.5px] text-faint">
       <span>© Solveline</span>
@@ -28,7 +28,7 @@ function useContact() {
   return q.data?.contactEmail ?? null;
 }
 
-function Page({ title, version, children }: { title: string; version: string; children: ReactNode }) {
+function Page({ title, version, children }: Readonly<{ title: string; version: string; children: ReactNode }>) {
   return (
     <div className="min-h-full bg-ink">
       <header className="border-b border-line bg-[#0f1922]">

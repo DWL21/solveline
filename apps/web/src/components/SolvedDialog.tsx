@@ -7,13 +7,13 @@ export function SolvedDialog({
   onNext,
   onList,
   onClose,
-}: {
+}: Readonly<{
   solvedMs: number | null;
   /** 같은 목록의 다음 문제가 없으면 undefined */
   onNext?: () => void;
   onList: () => void;
   onClose: () => void;
-}) {
+}>) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', h);

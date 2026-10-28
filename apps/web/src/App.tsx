@@ -158,7 +158,7 @@ function Shell() {
 }
 
 /** 상단바 오른쪽: 로그인한 계정. 누르면 로그아웃. */
-function UserMenu({ onLogout }: { onLogout: () => void }) {
+function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
   const me = useMe();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -204,7 +204,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
 }
 
 /** 새 문제: 보던 폴더를 기본값으로 하고, 컬렉션을 보던 중이면 그 컬렉션 끝에 넣는다. */
-function NewProblemDialog({ scope, onClose, onCreated }: { scope: Scope; onClose: () => void; onCreated: (id: string) => void }) {
+function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope; onClose: () => void; onCreated: (id: string) => void }>) {
   const qc = useQueryClient();
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const collections = useQuery({ queryKey: qk.collections, queryFn: api.collections });

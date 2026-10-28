@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 
 /** 원형 스피너. 색은 currentColor라 버튼 안에서도 글자색을 따른다. */
-export function Spinner({ size = 16, className = '', label }: { size?: number; className?: string; label?: string }) {
+export function Spinner({ size = 16, className = '', label }: Readonly<{ size?: number; className?: string; label?: string }>) {
   return (
     <span role={label ? 'status' : undefined} aria-label={label} className={`inline-flex shrink-0 ${className}`}>
       <svg className="animate-spin motion-reduce:animate-[spin_2.4s_linear_infinite]" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -13,7 +13,7 @@ export function Spinner({ size = 16, className = '', label }: { size?: number; c
 }
 
 /** 내용 자리를 미리 보여 주는 회색 블록(반짝임) */
-export function Skeleton({ className = '', style }: { className?: string; style?: CSSProperties }) {
+export function Skeleton({ className = '', style }: Readonly<{ className?: string; style?: CSSProperties }>) {
   return <span aria-hidden="true" className={`skeleton block rounded-md ${className}`} style={style} />;
 }
 
@@ -44,7 +44,7 @@ export function BootScreen() {
 }
 
 /** 문제 목록 스켈레톤 */
-export function ListSkeleton({ rows = 8 }: { rows?: number }) {
+export function ListSkeleton({ rows = 8 }: Readonly<{ rows?: number }>) {
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row" role="status" aria-label="목록을 불러오는 중">
       <div className="hidden w-60 shrink-0 flex-col gap-2 border-r border-line bg-base px-3 py-4 md:flex">
@@ -95,7 +95,7 @@ export function WorkspaceSkeleton() {
 }
 
 /** 몇 줄짜리 작은 스켈레톤(패널 안) */
-export function LinesSkeleton({ lines = 3 }: { lines?: number }) {
+export function LinesSkeleton({ lines = 3 }: Readonly<{ lines?: number }>) {
   return (
     <div className="flex flex-col gap-2 py-2" role="status" aria-label="불러오는 중">
       {Array.from({ length: lines }, (_, i) => (

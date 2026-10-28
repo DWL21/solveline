@@ -11,7 +11,7 @@ type Agree = { age: boolean; terms: boolean; privacy: boolean };
 const apiMessage = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 const hasCode = (e: unknown, code: string) => e instanceof ApiError && e.code === code;
 
-function AgreeItem({ name, label, href, agree, onChange }: { name: keyof Agree; label: string; href?: string; agree: Agree; onChange: (a: Agree) => void }) {
+function AgreeItem({ name, label, href, agree, onChange }: Readonly<{ name: keyof Agree; label: string; href?: string; agree: Agree; onChange: (a: Agree) => void }>) {
   return (
     <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 hover:bg-raised">
       <input type="checkbox" className="size-4 accent-accent" checked={agree[name]} onChange={(e) => onChange({ ...agree, [name]: e.target.checked })} />
