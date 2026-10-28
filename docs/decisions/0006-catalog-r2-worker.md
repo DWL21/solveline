@@ -120,7 +120,7 @@ DB가 커지거나 api를 여러 대 띄워야 할 때의 Postgres·Redis 이전
    - 그 뒤의 편집(히든 테스트셋 보강 포함)은 저장할 때마다 자동으로 게시된다.
 4. **Worker의 R2 읽기**: `wrangler.toml`에 `[vars] CATALOG_SOURCE = "r2"`를 넣고 배포한다.
 5. 확인:
-   - `/api/catalog/index` 응답의 `ETag`가 R2 형식인지 본다.
+   - `curl -s -D - -o /dev/null https://solveline.simplyimg.com/api/catalog/index`의 `ETag`가 R2 형식(따옴표 안 32자 hex)인지 본다. `curl -I`(HEAD)는 Worker의 GET 분기를 거치지 않고 API로 가므로 확인에 쓰지 않는다.
    - 문제를 편집한 뒤 다른 브라우저에서 2분 안에 반영되는지 본다.
    - pahidc 로그에서 `/api/catalog/*` 요청이 줄었는지 본다.
 
