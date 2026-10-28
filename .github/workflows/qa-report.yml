@@ -1,0 +1,132 @@
+name: QA report
+# CI가 끝나면 QA 테스트 완료 보고서(ISO/IEC/IEEE 29119-3 구성)를 PR 댓글로 남긴다.
+#   PR 실행    머지 전 보고서. 같은 댓글을 갱신해 리뷰어가 머지 전에 판정과 근거를 본다.
+#   main 실행  배포가 끝나기를 기다려 운영 스모크까지 돌린 최종 보고서를 머지된 PR에 남긴다.
+# 보고서 코드는 기본 브랜치의 것만 실행하고, PR이 만든 결과 파일(아티팩트)은 읽기만 한다.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: write
+concurrency:
+  group: qa-report-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+jobs:
+  report:
+    name: QA 테스트 보고서
+    if: >-
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      (github.event.workflow_run.event == 'pull_request' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      KIND: ${{ github.event.workflow_run.event == 'push' && 'final' || 'pr' }}
+      PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
+      INPUT: ${{ github.workspace }}/qa-input
+      OUT: ${{ github.workspace }}/qa-out
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-node
+      - name: 브라우저(PDF 출력·운영 스모크)
+        uses: ./.github/actions/setup-playwright
+        with:
+          browsers: chromium
+      - name: 한글 글꼴
+        run: sudo apt-get install -y -q --no-install-recommends fonts-noto-cjk
+
+      - name: CI 결과 내려받기(품질 지표)
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: quality-report
+          path: qa-input/quality-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: CI 결과 내려받기(자동화 결과·증거)
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: e2e
+          path: qa-input/e2e
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: 대상 PR 찾기
+        run: |
+          mkdir -p "$INPUT"
+          pr="$PR_FROM_EVENT"
+          if [ -z "$pr" ]; then
+            # main 머지 커밋이나 포크 PR은 커밋으로 PR을 찾는다
+            pr=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[] | select(.base.ref == "main")][0].number // empty')
+          fi
+          echo "PR_NUMBER=$pr" >> "$GITHUB_ENV"
+          echo "대상 PR: ${pr:-없음} ($KIND)"
+
+      - name: 배포 완료 기다리기
+        if: env.KIND == 'final'
+        run: |
+          # 배포는 main 푸시로 CI와 함께 시작한다. 끝날 때까지(최대 20분) 기다린 뒤 운영을 확인한다.
+          for _ in $(seq 1 40); do
+            deploy=$(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?head_sha=$SHA&per_page=1" --jq '.workflow_runs[0] // {} | {status, conclusion, url: .html_url}')
+            if [ "$(jq -r .status <<< "$deploy")" = completed ]; then break; fi
+            sleep 30
+          done
+          echo "$deploy" > "$INPUT/deploy.json"
+          echo "배포: $(jq -r '.conclusion // .status // "없음"' "$INPUT/deploy.json")"
+
+      - name: 배포 후 운영 스모크
+        if: env.KIND == 'final'
+        working-directory: e2e
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/qa-input/smoke.json
+        run: pnpm exec playwright test --project=smoke --reporter=json || echo "운영 스모크 실패(보고서에 기록)"
+
+      - name: 보고서 맥락(PR·실행·이슈)
+        run: |
+          pr='null'
+          if [ -n "$PR_NUMBER" ]; then
+            pr=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '{number, title, url: .html_url, author: .user.login, mergedBy: .merged_by.login, mergedAt: .merged_at, updatedAt: .updated_at}')
+          fi
+          jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '[.jobs[] | {name, conclusion}]')
+          bugs=$(gh api "repos/$REPO/issues?labels=bug&state=open&per_page=50" --jq '[.[] | select(.pull_request | not) | {number, title}]')
+          deploy=$(cat "$INPUT/deploy.json" 2>/dev/null || echo null)
+          jq -n --arg kind "$KIND" --arg repo "$REPO" --arg sha "$SHA" --arg now "$(date -u +%FT%TZ)" \
+            --arg runUrl "$RUN_URL" --argjson runId "$RUN_ID" --argjson attempt "${RUN_ATTEMPT:-1}" \
+            --arg reportRunUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --argjson pr "$pr" --argjson jobs "$jobs" --argjson bugs "$bugs" --argjson deploy "$deploy" \
+            '{kind: $kind, repo: $repo, sha: $sha, generatedAt: $now, pr: $pr, deploy: $deploy, openBugs: $bugs, reportRunUrl: $reportRunUrl,
+              run: {id: $runId, url: $runUrl, attempt: $attempt, jobs: $jobs}}' > "$INPUT/context.json"
+
+      - name: 보고서 만들기(댓글·HTML·PDF)
+        working-directory: e2e
+        run: node report/build.mjs --input "$INPUT" --repo .. --out "$OUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: qa-report
+          path: qa-out/
+          retention-days: 90
+
+      - name: PR 댓글 남기기
+        if: env.PR_NUMBER != ''
+        run: |
+          marker=$(head -n 1 "$OUT/comment.md")
+          id=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@"$OUT/comment.md" --jq .html_url
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$OUT/comment.md" --jq .html_url
+          fi
+          jq -r '"\(.id): \(.verdict.label)"' "$OUT/verdict.json" >> "$GITHUB_STEP_SUMMARY"

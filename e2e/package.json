@@ -11,7 +11,8 @@
     "e2e:ui": "playwright test --project=desktop-chromium --project=desktop-webkit --project=mobile-iphone --project=mobile-pixel --project=tablet-ipad",
     "e2e:ci": "playwright test --project=api --project=desktop-chromium --project=desktop-webkit --project=mobile-iphone --project=mobile-pixel --project=tablet-ipad",
     "e2e:smoke": "playwright test --project=smoke",
-    "report": "playwright show-report reports/html"
+    "report": "playwright show-report reports/html",
+    "qa-report": "node report/build.mjs"
   },
   "dependencies": {
     "@solveline/shared": "workspace:*",
