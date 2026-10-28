@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "d1:schema": "node --import tsx scripts/d1-schema.ts",
-    "build:worker": "node scripts/build-worker.mjs"
+    "build:worker": "node scripts/build-worker.mjs",
+    "d1:export": "node --import tsx scripts/d1-export.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

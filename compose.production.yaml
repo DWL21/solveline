@@ -44,8 +44,8 @@ services:
       DATA_DIR: /data
       # 테스트셋을 Worker(/api/internal/r2)를 거쳐 R2에 올린다
       WEB_ORIGIN: https://solveline.simplyimg.com
-      # 채점 결과를 보낼 API(서명, 성공할 때까지 재시도)
-      RESULTS_URL: http://api:8787
+      # 채점 결과를 보낼 API(Worker, 서명, 성공할 때까지 재시도)
+      RESULTS_URL: https://solveline.simplyimg.com
       # runner를 늘리면 쉼표로 더한다 (예: http://runner:8000,http://runner2:8000)
       RUNNER_URLS: http://runner:8000
       RUNNER_SLOTS: "2"
@@ -54,7 +54,10 @@ services:
     depends_on:
       runner:
         condition: service_healthy
+  # 예전 Node API. 2026-10-28부터 API는 Pages Worker(D1)가 맡는다(0007 5단계). 기본으로는 띄우지 않고,
+  # 롤백할 때만 --profile legacy로 다시 띄운다. 이미지와 /var/lib/solveline/solveline.db는 남겨 둔다.
   api:
+    profiles: [legacy]
     logging: *logging
     build:
       context: .
@@ -86,7 +89,7 @@ services:
     ports:
       - "127.0.0.1:8083:80"
     depends_on:
-      api:
+      judge:
         condition: service_healthy
 networks:
   sandbox:

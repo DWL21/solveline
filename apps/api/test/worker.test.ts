@@ -8,6 +8,9 @@ import type { RunJob } from '@solveline/judge/runner';
 import { templateFor, type ProblemInput } from '@solveline/shared';
 import { SqlRateLimiter } from '../src/auth/rate-limit.ts';
 import { D1_SCHEMA_FILE, schemaSql } from '../src/d1-schema.ts';
+import { D1_TABLES, exportForD1 } from '../src/d1-export.ts';
+import { sqliteSql } from '../src/sql.ts';
+import { ProblemStore, UserStore } from '../src/db.ts';
 import { openDb } from '../src/db-node.ts';
 import { d1Sql } from '../src/sql.ts';
 import { createWorkerApi, R2BindingStore, type R2BucketLike, type WorkerEnv } from '../src/worker.ts';
@@ -224,5 +227,33 @@ describe('Pages Worker(묶은 진입점)', () => {
     expect(res.status).toBe(401); // 세션 쿠키가 없으면 Tunnel까지 가지 않고 엣지에서 답한다
     const proxied = await call({ DB: s.env.DB }, '/api/auth/logout');
     expect(((await proxied.json()) as { seen: string }).seen).toBe('https://solveline-api.simplyimg.com/api/auth/logout');
+  });
+});
+
+describe('SQLite → D1 이전', () => {
+  it('모든 표의 행을 그대로 옮기고, 100KB가 넘는 행은 조각으로 나눠 넣으며, 다시 넣어도 같다', async () => {
+    const src = openDb(':memory:');
+    const sql = sqliteSql(src);
+    const user = await new UserStore(sql).create({ sub: 's', email: 'u@example.com', name: "O'Neil", picture: '' }, { terms: 'v', privacy: 'v' });
+    const problems = new ProblemStore(sql);
+    const input: ProblemInput = {
+      title: '긴 문제', folderId: null, description: '설명 '.repeat(10), mode: 'function', params: ['a'], timeLimitMs: 1000,
+      cases: [{ id: 'c', args: ['1'], stdin: '', expected: '1', hidden: false }], language: 'python',
+      code: { java: templateFor('java', 'function'), python: templateFor('python', 'function') }, myCases: [], memo: '', lastSubmission: null,
+    };
+    const p = await problems.create(input, user.id);
+    // 한 행이 D1 한 문장 한도(100KB)를 넘는다
+    const huge = "x = '한글'\n".repeat(20_000);
+    await problems.update(p.id, { ...input, code: { java: '', python: huge }, memo: "메모 '따옴표'" }, user.id, true);
+    src.prepare("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES ('sess', ?, 9999999999999, '2026-01-01')").run(user.id);
+
+    const { sql: dump, rows } = exportForD1(src);
+    expect(rows.users).toBe(1);
+    expect(dump.split('\n').every((l) => l.length < 100_000)).toBe(true);
+    const d1 = d1FromSchemaFile();
+    d1.exec(dump);
+    d1.exec(dump); // 두 번 넣어도 같다
+    for (const t of D1_TABLES) expect(d1.prepare(`SELECT * FROM ${t} ORDER BY 1`).all(), t).toEqual(src.prepare(`SELECT * FROM ${t} ORDER BY 1`).all());
+    expect(d1.pragma('foreign_key_check')).toEqual([]);
   });
 });
