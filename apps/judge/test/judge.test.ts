@@ -3,7 +3,7 @@ import { judgeHeaders, type JudgeJob, type JudgeStatus, type TestCase } from '@s
 import { createJudge } from '../src/app.ts';
 import { JobStore, openJobsDb } from '../src/jobs.ts';
 import { TestsetMirror, testsetKey } from '../src/mirror.ts';
-import { MemoryObjectStore, R2ObjectStore } from '../src/r2.ts';
+import { MemoryObjectStore, R2ObjectStore, WorkerR2Store } from '../src/r2.ts';
 import { mask, redact, registerSecret } from '../src/redact.ts';
 import { RunnerClient, type RunJob } from '../src/runner.ts';
 import { TestsetStore } from '../src/testsets.ts';
@@ -192,6 +192,58 @@ describe('메모리 저장소', () => {
     await m.put('a/1', 'x', { contentType: 't' });
     expect(await m.list('a/')).toEqual(['a/1']);
     expect(await m.get('b')).toBeNull();
+  });
+});
+
+describe('Worker를 거친 R2 저장소', () => {
+  /** /api/internal/r2 를 흉내 내는 가짜 Worker(공유 비밀 확인, 본문은 그대로 저장) */
+  function fakeWorker(secret: string) {
+    const objects = new Map<string, Uint8Array>();
+    const seen: string[] = [];
+    const fetchImpl = async (url: string, init: RequestInit) => {
+      const u = new URL(url);
+      seen.push(`${init.method ?? 'GET'} ${u.pathname}${u.search}`);
+      if ((init.headers as Record<string, string>).authorization !== `Bearer ${secret}`) return new Response('{}', { status: 401 });
+      const prefix = u.searchParams.get('list');
+      if (prefix !== null) return Response.json({ keys: [...objects.keys()].filter((k) => k.startsWith(prefix)) });
+      const key = decodeURIComponent(u.pathname.slice('/api/internal/r2/'.length));
+      if (init.method === 'PUT') {
+        objects.set(key, new Uint8Array(await new Response(init.body).arrayBuffer()));
+        return new Response('{}');
+      }
+      const o = objects.get(key);
+      return o ? new Response(Buffer.from(o)) : new Response('{}', { status: 404 });
+    };
+    return { objects, seen, fetchImpl };
+  }
+
+  it('공유 비밀을 붙여 읽고 쓰고 나열하며, 거절되면 오류를 던진다', async () => {
+    const secret = 'p'.repeat(40);
+    const w = fakeWorker(secret);
+    const store = new WorkerR2Store('https://site.example', secret, w.fetchImpl);
+    await store.put('testsets/a b.json.gz', new Uint8Array([1, 2]), { contentType: 'application/gzip' });
+    await store.put('catalog/v1/index.json', '{}', { contentType: 'application/json' });
+    expect([...(await store.get('testsets/a b.json.gz'))!]).toEqual([1, 2]);
+    expect(await store.get('testsets/none')).toBeNull();
+    expect(await store.list('testsets/')).toEqual(['testsets/a b.json.gz']);
+    expect(w.seen[0]).toBe('PUT /api/internal/r2/testsets/a%20b.json.gz');
+
+    const wrong = new WorkerR2Store('https://site.example', 'q'.repeat(40), w.fetchImpl);
+    await expect(wrong.put('testsets/x', 'x', { contentType: 'text/plain' })).rejects.toThrow(/401/);
+    await expect(wrong.get('testsets/x')).rejects.toThrow(/401/);
+    await expect(wrong.list('testsets/')).rejects.toThrow(/401/);
+  });
+
+  it('테스트셋 미러가 Worker를 거쳐 올리고 받는다', async () => {
+    const secret = 'p'.repeat(40);
+    const w = fakeWorker(secret);
+    const local = new TestsetStore(':memory:');
+    const ref = local.put([{ id: 'h', args: ['1'], stdin: '', expected: '1', hidden: true }]);
+    expect(await new TestsetMirror(new WorkerR2Store('https://site.example', secret, w.fetchImpl), local).syncUp()).toBe(1);
+    expect(w.objects.has(testsetKey(ref.hash))).toBe(true);
+    const fresh = new TestsetStore(':memory:');
+    expect(await new TestsetMirror(new WorkerR2Store('https://site.example', secret, w.fetchImpl), fresh).load(ref.hash)).toBe(true);
+    expect(fresh.get(ref.hash)![0]!.id).toBe('h');
   });
 });
 
