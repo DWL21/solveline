@@ -17,7 +17,11 @@
 | `PUT` | `/api/admin/collections/{id}` | 컬렉션 이름·설명 바꾸기(이름의 `/`는 계층) |
 | `GET` `PUT` | `/api/admin/signup-settings` | 신규 가입 허용 여부 조회·변경 (`{ signupEnabled: boolean }`, 마스터 전용) |
 | `GET` | `/api/runtime` | runner 상태와 Java·Python 버전 |
-| `GET` `POST` | `/api/problems` | 문제 목록 / 만들기 |
+| `GET` | `/api/catalog/index` | 카탈로그 목록: 문제 요약(내용 해시 `version` 포함)·기본 폴더·컬렉션. 로그인과 무관, Worker가 엣지에 캐시([0006](decisions/0006-catalog-r2-worker.md)) |
+| `GET` | `/api/catalog/problems/{id}?v={version}` | 카탈로그 상세(공용 문제 내용). `v`가 맞으면 1년 캐시 |
+| `GET` | `/api/me/problems` | 내 풀이 상태가 있는 문제만(북마크·개인 폴더·언어·풀이 시간·마지막 제출) |
+| `GET` | `/api/me/problems/{id}` | 문제 하나의 내 상태(작성 코드·내 케이스·메모 등). 웹이 카탈로그 상세와 합친다 |
+| `GET` `POST` | `/api/problems` | 문제 목록(카탈로그+내 상태를 합친 예전 형식) / 만들기 |
 | `GET` `PUT` `PATCH` `DELETE` | `/api/problems/{id}` | 문제 조회 / 전체 저장 / 변경분 저장 / 삭제 |
 | `GET` `POST` | `/api/folders` | 폴더 목록 / 만들기 |
 | `PUT` `DELETE` | `/api/folders/{id}` | 폴더 이름 바꾸기 / 삭제 (문제는 폴더 없음으로) |

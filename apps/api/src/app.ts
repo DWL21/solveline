@@ -9,6 +9,10 @@ import { z } from 'zod';
 const TestSessionRequest = z.object({ email: z.string().trim().toLowerCase().email().max(254), name: z.string().max(100).optional(), editor: z.boolean().optional() });
 import {
   Bookmark,
+  CatalogIndex,
+  CatalogProblem,
+  MyProblemState,
+  MyProblemSummary,
   Collection,
   CollectionInput,
   CollectionItemsInput,
@@ -52,6 +56,8 @@ import { SessionStore } from './auth/sessions.ts';
 import { CaseInputError, validateCases, type RunnerClient } from './runner.ts';
 import { Dispatcher, SubmissionStore } from './dispatcher.ts';
 import { TestsetStore } from './testsets.ts';
+import { buildCatalog, CatalogPublisher } from './catalog.ts';
+import type { ObjectStore } from './r2.ts';
 import { log } from './redact.ts';
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 502 | 503;
@@ -64,6 +70,8 @@ export type AppDeps = {
   /** runner 여러 대. 디스패처가 빈 슬롯에 나눠 보낸다. */
   runners: Runner[];
   testsets?: TestsetStore;
+  /** 공용 문제 데이터·테스트셋을 게시할 R2. 없으면 게시하지 않는다(데이터는 SQLite·로컬 파일에만) */
+  objectStore?: ObjectStore | null;
   /** 테스트에서 Google 대신 끼워 넣는다. 없으면 config.google로 만든다. */
   google?: GoogleClient | null;
   now?: () => number;
@@ -132,6 +140,10 @@ export function createApp(deps: AppDeps) {
   const collections = new CollectionStore(db);
   const users = new UserStore(db);
   const signupSettings = new SignupSettingsStore(db);
+  const catalogSource = () => ({ problems: problems.catalogProblems(), folders: folders.list(null), collections: collections.list() });
+  const catalog = deps.objectStore
+    ? new CatalogPublisher(deps.objectStore, catalogSource, testsets, () => new Set([...problems.testsetHashes(), ...submissions.activeTestsets()]))
+    : null;
   const google = deps.google !== undefined ? deps.google : config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null;
   const redirectUri = `${config.webOrigin}/api/auth/google/callback`;
   // 로그인 왕복 남용 방지: IP별 분당 20회
@@ -152,6 +164,22 @@ export function createApp(deps: AppDeps) {
     return fail(c, 500, 'internal', '요청을 처리하지 못했습니다.');
   });
   app.notFound((c) => fail(c, 404, 'not_found', '없는 경로입니다.'));
+
+  // 공용 문제 데이터를 바꾸는 요청(편집 권한·관리자 모드)이 성공하면 R2에 게시한 뒤 응답한다.
+  // 그래야 편집한 사람이 바로 새로 읽을 때(?fresh=1) R2에서도 새 내용을 받는다.
+  const CATALOG_WRITE = /^\/api\/(problems|collections|admin\/collections|admin\/problems)(\/|$)/;
+  if (catalog)
+    app.use('/api/*', async (c, next) => {
+      await next();
+      if (c.req.method === 'GET' || c.res.status >= 400 || !CATALOG_WRITE.test(c.req.path)) return;
+      if (!c.req.path.startsWith('/api/admin/') && !c.get('editor')) return;
+      try {
+        await catalog.sync();
+      } catch (e) {
+        // 게시에 실패해도 SQLite에는 저장됐다. 다음 변경이나 재시작 때 다시 맞춘다.
+        log.error('[catalog] R2 게시 실패', e);
+      }
+    });
 
   // ─── 공개 ───
   app.get('/api/health', (c) => c.json({ data: { status: 'up' } }));
@@ -426,13 +454,30 @@ export function createApp(deps: AppDeps) {
     return problems.setStarter(c.req.param('id'), body) ? c.json({ data: { updated: true } }) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
+  // ─── 카탈로그(공용 문제 데이터, 로그인과 무관): Worker가 R2가 없을 때 여기서 읽어 엣지에 캐시한다 ───
+  let built: { at: number; cat: ReturnType<typeof buildCatalog> } | null = null;
+  /** 같은 순간의 요청이 몰려도 한 번만 만든다(1초) */
+  const currentCatalog = () => {
+    if (!built || now() - built.at > 1000) built = { at: now(), cat: buildCatalog(catalogSource()) };
+    return built.cat;
+  };
+  app.get('/api/catalog/index', (c) => {
+    const cat = currentCatalog();
+    c.header('ETag', `"${cat.indexVersion}"`);
+    return ok(c, CatalogIndex, cat.index);
+  });
+  app.get('/api/catalog/problems/:id', (c) => {
+    const p = problems.catalogProblem(c.req.param('id'));
+    return p ? ok(c, CatalogProblem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
+  });
+
   // ─── 이하 Google 로그인 필요. 단 문제·폴더·실행 환경 조회(GET)는 비회원도 된다(작성 코드 등은 비어 있다). ───
   const guestReadable = (method: string, p: string) =>
     method === 'GET' && (p === '/api/runtime' || p === '/api/problems' || p === '/api/folders' || p === '/api/collections' || /^\/api\/problems\/[^/]+$/.test(p));
 
   app.use('/api/*', async (c, next) => {
     const p = c.req.path;
-    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
+    if (p === '/api/health' || p.startsWith('/api/auth/') || p.startsWith('/api/public/') || p.startsWith('/api/catalog/') || p.startsWith('/api/admin/') || p.startsWith('/api/test/')) return next();
     const s = await readSession(c);
     const u = s ? users.byId(s.userId) : null;
     if (!s || !u) {
@@ -461,7 +506,14 @@ export function createApp(deps: AppDeps) {
     return ok(c, Runtime, all.find((r) => r.runner === 'up') ?? all[0] ?? { runner: 'down', versions: { java: null, python: null } });
   });
 
-  // ─── 문제(공용) + 내 풀이 상태 ───
+  // ─── 내 풀이 상태(사용자 데이터, pahidc SQLite). 웹이 카탈로그와 합친다 ───
+  app.get('/api/me/problems', (c) => ok(c, z.array(MyProblemSummary), problems.mySummaries(c.get('userId'))));
+  app.get('/api/me/problems/:id', (c) => {
+    const st = problems.myState(c.req.param('id'), c.get('userId'));
+    return st ? ok(c, MyProblemState, st) : fail(c, 404, 'not_found', '없는 문제입니다.');
+  });
+
+  // ─── 문제(공용) + 내 풀이 상태 (예전 웹 호환: 합친 결과를 한 번에) ───
   app.get('/api/problems', (c) => ok(c, z.array(ProblemSummary), problems.list(viewer(c))));
 
   app.put('/api/problems/:id/bookmark', async (c) => {
@@ -666,5 +718,5 @@ export function createApp(deps: AppDeps) {
     return ok(c, RunResult, done.result);
   });
 
-  return { app, dispatcher, problems, submissions, testsets };
+  return { app, dispatcher, problems, submissions, testsets, catalog };
 }
