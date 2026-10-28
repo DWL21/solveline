@@ -97,7 +97,7 @@ export function Splitter({
       aria-label={label}
       aria-valuenow={Math.round(value)}
       tabIndex={0}
-      title={`${label} — 끌어서 크기 조절, 더블클릭하면 기본값`}
+      title="끌어서 크기 조절 · 더블클릭하면 원래대로"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={stop}

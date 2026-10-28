@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 
-/* 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤 */
+/* 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤. 색은 모두 이 토큰으로만 쓴다. */
 @theme {
   --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: 'JetBrains Mono', 'D2Coding', 'SF Mono', Menlo, Consolas, monospace;
@@ -21,6 +21,11 @@
   --color-ok: #3ec27d;
   --color-bad: #ff6b6b;
   --color-warn: #f5b94a;
+  --color-bar: #0f1922;
+}
+
+:root {
+  color-scheme: dark;
 }
 
 /*
@@ -117,13 +122,13 @@ body {
   @apply btn bg-accent text-white hover:bg-accent-hover;
 }
 @utility btn-ghost {
-  @apply btn border border-line-strong bg-raised text-text hover:border-dim;
+  @apply btn border border-line-strong bg-panel text-text hover:border-faint hover:bg-raised;
 }
 @utility btn-quiet {
   @apply btn text-dim hover:bg-raised hover:text-text;
 }
 @utility field {
-  @apply w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[13px] text-text outline-none placeholder:text-faint focus:border-accent;
+  @apply w-full rounded-md border border-line-strong bg-base px-2.5 py-1.5 font-mono text-[13px] text-text outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/15;
 }
 @utility pane-title {
   @apply flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-[13px] font-bold text-dim;

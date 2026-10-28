@@ -40,8 +40,8 @@ function AdminLogin() {
           <img src="/icon.svg" alt="" className="size-8" />
           <span className="text-[20px] font-extrabold tracking-tight">Solveline</span>
         </a>
-        <form onSubmit={submit} className="rounded-xl border border-line bg-panel p-5 shadow-2xl shadow-black/30">
-          <h1 className="text-[17px] font-bold">관리자 모드</h1>
+        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-2xl shadow-black/30">
+          <h1 className="text-[20px] font-bold">관리자 모드</h1>
           <input type="text" name="username" autoComplete="username" value="solveline-admin" readOnly hidden />
           <label className="mt-5 flex flex-col gap-1.5">
             <span className="text-[12px] font-bold text-dim">비밀번호</span>
@@ -85,7 +85,7 @@ function Dashboard() {
   });
   return (
     <div className="flex min-h-full flex-col bg-ink">
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 border-b border-line bg-[#0f1922] px-4 sm:h-12 sm:flex-nowrap">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 border-b border-line bg-bar px-4 sm:h-12 sm:flex-nowrap">
         <a href="/" className="flex items-center gap-2">
           <img src="/icon.svg" alt="" className="size-6" />
           <span className="text-[15px] font-extrabold tracking-tight">Solveline</span>
@@ -129,7 +129,7 @@ function Dashboard() {
                 <UserDetail id={selected} onDeleted={() => setSelected(null)} />
               </div>
             ) : (
-              <p className="hidden py-16 text-center text-[13px] text-faint lg:block">사용자를 고르세요</p>
+              <p className="hidden py-16 text-center text-[13px] text-faint lg:block">왼쪽에서 사용자를 선택하세요</p>
             )}
           </div>
         ) : (
@@ -329,16 +329,16 @@ function SignupControl() {
     <section className="max-w-xl rounded-lg border border-line bg-panel p-5">
       <h1 className="text-[16px] font-bold">신규 가입</h1>
       <p role="status" className={`mt-4 font-semibold ${enabled ? 'text-ok' : 'text-warn'}`}>
-        {enabled ? '✓ 신규 가입 허용 중' : '✗ 신규 가입 중지 중'}
+        {enabled ? '✓ 신규 가입을 받고 있어요' : '✗ 신규 가입을 멈춘 상태예요'}
       </p>
-      <p className="mt-2 text-[13px] text-dim">중지하면 새 계정을 만들 수 없어요. 가입 절차를 진행 중인 계정에도 적용돼요. 기존 회원은 계속 로그인하고 이용할 수 있어요.</p>
+      <p className="mt-2 text-[13px] text-dim">중지하면 가입 절차를 밟고 있던 계정을 포함해 새 계정을 만들 수 없어요. 기존 회원은 그대로 이용할 수 있어요.</p>
       <button
         type="button"
         className="btn-primary mt-5"
         disabled={save.isPending}
         onClick={() => save.mutate(!enabled)}
       >
-        {save.isPending ? '저장 중…' : enabled ? '신규 가입 중지' : '신규 가입 허용'}
+        {save.isPending ? '저장 중…' : enabled ? '신규 가입 중지하기' : '신규 가입 다시 받기'}
       </button>
       {save.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(save.error)}</p>}
       {save.isSuccess && <p role="status" className="mt-3 text-[13px] text-dim">설정을 저장했어요.</p>}

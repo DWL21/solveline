@@ -6,7 +6,7 @@ import { api, qk } from '../lib/api.ts';
 /** 화면 맨 아래 약관 링크. admin이면 관리자 모드로 가는 흐린 글자를 덧붙인다. */
 export function LegalFooter({ admin = false }: { admin?: boolean }) {
   return (
-    <footer className="flex shrink-0 items-center justify-center gap-3 px-4 py-4 text-[11.5px] text-faint">
+    <footer className="flex shrink-0 items-center justify-center gap-4 px-4 py-5 text-[12px] text-faint">
       <span>© Solveline</span>
       <a href="/terms" className="hover:text-dim">
         이용약관
@@ -15,7 +15,7 @@ export function LegalFooter({ admin = false }: { admin?: boolean }) {
         개인정보처리방침
       </a>
       {admin && (
-        <a href="/admin" className="text-faint/50 hover:text-faint">
+        <a href="/admin" className="hover:text-dim">
           관리자 모드
         </a>
       )}
@@ -31,18 +31,18 @@ function useContact() {
 function Page({ title, version, children }: { title: string; version: string; children: ReactNode }) {
   return (
     <div className="min-h-full bg-ink">
-      <header className="border-b border-line bg-[#0f1922]">
-        <div className="mx-auto flex h-12 max-w-3xl items-center px-4">
+      <header className="border-b border-line bg-bar">
+        <div className="mx-auto flex h-13 max-w-3xl items-center px-4">
           <a href="/" className="flex items-center gap-2">
             <img src="/icon.svg" alt="" className="size-6" />
-            <span className="text-[15px] font-extrabold tracking-tight">Solveline</span>
+            <span className="text-[16px] font-extrabold tracking-tight">Solveline</span>
           </a>
         </div>
       </header>
-      <main className="mx-auto max-w-3xl px-4 py-8">
-        <h1 className="text-[22px] font-extrabold">{title}</h1>
+      <main className="mx-auto max-w-3xl px-4 py-10">
+        <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
         <p className="mt-1 text-[12.5px] text-faint">시행일 {version}</p>
-        <div className="legal mt-6 flex flex-col gap-6 text-[14px] leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-[13px] [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
+        <div className="legal mt-6 flex flex-col gap-6 text-[15px] leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-[13px] [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
           {children}
         </div>
       </main>

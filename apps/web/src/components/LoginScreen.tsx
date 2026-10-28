@@ -4,11 +4,11 @@ import { api, qk } from '../lib/api.ts';
 import { LegalFooter } from './Legal.tsx';
 
 const AUTH_ERRORS: Record<string, string> = {
-  cancelled: 'Google 로그인을 취소했어요',
-  signup_closed: '신규 가입이 중지되어 있어요. 기존 회원은 로그인할 수 있어요',
-  rate_limited: '시도가 너무 많아요. 잠시 후 다시 하세요',
-  invalid_state: '로그인 시간이 지났어요. 다시 시도하세요',
-  google_error: 'Google 로그인에 실패했어요. 다시 시도하세요',
+  cancelled: '로그인을 취소했어요',
+  signup_closed: '지금은 신규 가입을 받지 않아요',
+  rate_limited: '시도가 너무 많아요. 잠시 후 다시 시도해 주세요',
+  invalid_state: '로그인 시간이 지났어요. 다시 시도해 주세요',
+  google_error: 'Google 로그인에 실패했어요. 다시 시도해 주세요',
   auth_not_configured: 'Google 로그인이 아직 설정되지 않았어요',
 };
 
@@ -42,49 +42,51 @@ export function LoginScreen() {
       const next = new URLSearchParams(location.search).get('next');
       location.href = next && /^\/(?![\/\\])/.test(next) && next.length < 300 ? next : '/';
     } catch (e) {
-      setTemporaryError(e instanceof Error ? e.message : '임시 로그인에 실패했어요');
+      setTemporaryError(e instanceof Error ? e.message : '임시 계정을 만들지 못했어요');
       setPending(false);
     }
   };
+  const closed = config.data?.signupEnabled === false;
   return (
-    <div className="relative flex min-h-full flex-col bg-ink">
-      <a href="/" className="absolute top-3 left-4 text-[12px] text-faint hover:text-dim">
-        ← 문제 둘러보기
-      </a>
-      <div className="flex flex-1 items-center justify-center px-4 py-10">
-        <main className="w-full max-w-sm">
-          <div className="mb-6 flex items-center gap-2.5">
-            <img src="/icon.svg" alt="" className="size-8" />
-            <span className="text-[20px] font-extrabold tracking-tight">Solveline</span>
-          </div>
-          <div className="rounded-xl border border-line bg-panel p-5 shadow-2xl shadow-black/30">
-            <h1 className="text-[17px] font-bold">로그인</h1>
-            <button
-              type="button"
-              onClick={startGoogleLogin}
-              className="mt-5 flex min-h-11 w-full items-center justify-center gap-2.5 rounded-md bg-white text-[14px] font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2]"
-            >
-              <GoogleMark /> Google로 로그인
-            </button>
-            {config.data?.signupEnabled === false ? (
-              <p className="mt-4 text-center text-[12.5px] text-dim">신규 가입이 중지되어 있어요. 기존 회원은 로그인할 수 있어요.</p>
-            ) : (
-              <p className="mt-4 text-center text-[12.5px] text-dim">
-                처음이신가요?{' '}
-                <button type="button" className="font-semibold text-accent-text hover:underline" onClick={startGoogleLogin}>Google로 회원가입</button>
-              </p>
-            )}
-            <p className="mt-4 text-center">
-              <button type="button" disabled={pending || config.data?.signupEnabled === false} onClick={temporaryLogin} className="btn-ghost min-h-11 w-full text-[14px]">{pending ? '로그인 중…' : '임시 로그인'}</button>
+    <div className="flex min-h-full flex-col bg-ink">
+      <header className="flex h-13 shrink-0 items-center px-4 sm:px-5">
+        <a href="/" className="flex items-center gap-2">
+          <img src="/icon.svg" alt="" className="size-6" />
+          <span className="text-[16px] font-extrabold tracking-tight">Solveline</span>
+        </a>
+        <a href="/" className="ml-auto text-[13px] font-semibold text-dim hover:text-text">
+          문제 둘러보기
+        </a>
+      </header>
+      <div className="flex flex-1 items-center justify-center px-4 pt-6 pb-16">
+        <main className="w-full max-w-[400px] rounded-xl border border-line bg-panel px-6 py-8 shadow-2xl shadow-black/30 sm:px-8">
+          <h1 className="text-[22px] font-bold tracking-tight">로그인</h1>
+          <p className="mt-1.5 text-[14px] text-dim">로그인하면 작성한 코드와 풀이 기록이 저장돼요.</p>
+          {error && (
+            <p role="alert" className="mt-5 rounded-md bg-bad/10 px-3 py-2.5 text-[13px] font-semibold text-bad">
+              {AUTH_ERRORS[error] ?? '로그인하지 못했어요'}
             </p>
-            <p className="mt-1 text-center text-[12px] text-faint">임시 계정은 로그아웃하거나 최대 24시간이 지나면 사용할 수 없어요.</p>
-            {temporaryError && <p role="alert" className="mt-4 text-[13px] text-bad">{temporaryError}</p>}
-            {error && (
-              <p role="alert" className="mt-4 rounded-md border border-bad/40 bg-bad/10 p-3 text-[13px] font-semibold text-bad">
-                {AUTH_ERRORS[error] ?? '로그인하지 못했어요'}
-              </p>
-            )}
+          )}
+          <button
+            type="button"
+            onClick={startGoogleLogin}
+            className="mt-6 flex min-h-12 w-full items-center justify-center gap-2.5 rounded-md bg-white text-[15px] font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2]"
+          >
+            <GoogleMark /> Google 계정으로 계속하기
+          </button>
+          <p className="mt-3 text-center text-[12.5px] text-faint">
+            {closed ? '지금은 신규 가입을 받지 않아요. 기존 회원은 로그인할 수 있어요.' : '처음이면 약관 동의 후 바로 가입돼요.'}
+          </p>
+          <div className="my-6 flex items-center gap-3 text-[12px] text-faint" aria-hidden>
+            <span className="h-px flex-1 bg-line" />
+            또는
+            <span className="h-px flex-1 bg-line" />
           </div>
+          <button type="button" disabled={pending || closed} onClick={temporaryLogin} className="btn-ghost min-h-12 w-full text-[15px]">
+            {pending ? '시작하는 중…' : '임시 계정으로 둘러보기'}
+          </button>
+          <p className="mt-3 text-center text-[12.5px] text-faint">임시 계정은 로그아웃하거나 24시간이 지나면 사라져요.</p>
+          {temporaryError && <p role="alert" className="mt-4 text-[13px] text-bad">{temporaryError}</p>}
         </main>
       </div>
       <LegalFooter />

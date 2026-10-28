@@ -13,13 +13,13 @@ const hasCode = (e: unknown, code: string) => e instanceof ApiError && e.code ==
 
 function AgreeItem({ name, label, href, agree, onChange }: { name: keyof Agree; label: string; href?: string; agree: Agree; onChange: (a: Agree) => void }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 hover:bg-raised">
+    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2.5 hover:bg-raised">
       <input type="checkbox" className="size-4 accent-accent" checked={agree[name]} onChange={(e) => onChange({ ...agree, [name]: e.target.checked })} />
       <span className="flex-1 text-[13.5px]">
-        <span className="font-semibold text-accent-text">[필수]</span> {label}
+        {label} <span className="text-faint">(필수)</span>
       </span>
       {href && (
-        <a href={href} target="_blank" rel="noreferrer" className="text-[12px] text-faint underline hover:text-dim" onClick={(e) => e.stopPropagation()}>
+        <a href={href} target="_blank" rel="noreferrer" className="text-[12.5px] text-faint underline underline-offset-2 hover:text-dim" onClick={(e) => e.stopPropagation()}>
           보기
         </a>
       )}
@@ -48,24 +48,27 @@ export function SignupScreen() {
 
   return (
     <div className="flex min-h-full flex-col bg-ink">
-      <div className="flex flex-1 items-center justify-center px-4 py-10">
-        <main className="w-full max-w-md">
-          <div className="mb-6 flex items-center gap-2.5">
-            <img src="/icon.svg" alt="" className="size-8" />
-            <span className="text-[20px] font-extrabold tracking-tight">Solveline</span>
-          </div>
-          <div className="rounded-xl border border-line bg-panel p-5 shadow-2xl shadow-black/30">
-            <h1 className="text-[17px] font-bold">회원가입</h1>
+      <header className="flex h-13 shrink-0 items-center px-4 sm:px-5">
+        <a href="/" className="flex items-center gap-2">
+          <img src="/icon.svg" alt="" className="size-6" />
+          <span className="text-[16px] font-extrabold tracking-tight">Solveline</span>
+        </a>
+      </header>
+      <div className="flex flex-1 items-center justify-center px-4 pt-6 pb-16">
+        <main className="w-full max-w-[440px]">
+          <div className="rounded-xl border border-line bg-panel px-6 py-8 shadow-2xl shadow-black/30 sm:px-8">
+            <h1 className="text-[22px] font-bold tracking-tight">회원가입</h1>
+            {!pending.isError && <p className="mt-1.5 text-[14px] text-dim">아래 계정으로 가입해요. 약관을 확인하고 동의해 주세요.</p>}
             {pending.isError ? (
               <>
                 <p className="mt-3 text-[13px] text-dim">{apiMessage(pending.error, '가입 정보를 불러오지 못했어요.')}</p>
-                <button type="button" className="btn-primary mt-4 min-h-11 w-full" onClick={closed ? () => location.assign('/') : startGoogleLogin}>
-                  {closed ? '문제 둘러보기' : 'Google로 다시 시작'}
+                <button type="button" className="btn-primary mt-5 min-h-12 w-full text-[15px]" onClick={closed ? () => location.assign('/') : startGoogleLogin}>
+                  {closed ? '문제 둘러보기' : 'Google로 다시 로그인'}
                 </button>
               </>
             ) : (
               <>
-                <div className="mt-4 flex items-center gap-3 rounded-lg border border-line bg-base/60 p-3">
+                <div className="mt-5 flex items-center gap-3 rounded-lg bg-raised p-3">
                   <Avatar picture={pending.data.picture} email={pending.data.email} size={36} />
                   <div className="min-w-0">
                     <p className="truncate text-[14px] font-semibold">{pending.data.name || pending.data.email}</p>
@@ -90,7 +93,7 @@ export function SignupScreen() {
                   </div>
                 </div>
 
-                <table className="mt-3 w-full text-left text-[12px] text-dim">
+                <table className="mt-3 w-full text-left text-[12.5px] text-dim">
                   <tbody className="[&_th]:w-20 [&_th]:py-1 [&_th]:pr-2 [&_th]:align-top [&_th]:font-semibold [&_td]:py-1">
                     <tr>
                       <th>수집 항목</th>
@@ -112,8 +115,8 @@ export function SignupScreen() {
                     {apiMessage(signup.error, '가입하지 못했어요')}
                   </p>
                 )}
-                <button type="button" className="btn-primary mt-4 min-h-11 w-full text-[14px]" disabled={!all || signup.isPending || hasCode(signup.error, 'signup_closed')} onClick={() => signup.mutate()}>
-                  {signup.isPending ? <Spinner size={16} label="가입하는 중" /> : '동의하고 가입하기'}
+                <button type="button" className="btn-primary mt-5 min-h-12 w-full text-[15px]" disabled={!all || signup.isPending || hasCode(signup.error, 'signup_closed')} onClick={() => signup.mutate()}>
+                  {signup.isPending ? <Spinner size={16} label="가입하는 중" /> : '동의하고 가입'}
                 </button>
                 <button type="button" className="btn-quiet mt-2 w-full" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
                   취소

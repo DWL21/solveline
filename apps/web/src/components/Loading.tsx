@@ -47,17 +47,17 @@ export function BootScreen() {
 export function ListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row" role="status" aria-label="목록을 불러오는 중">
-      <div className="hidden w-60 shrink-0 flex-col gap-2 border-r border-line bg-base px-3 py-4 md:flex">
+      <div className="hidden w-60 shrink-0 flex-col gap-2 border-r border-line bg-base px-3 py-5 md:flex">
         {Array.from({ length: 7 }, (_, i) => (
           <Skeleton key={i} className="h-7" style={{ width: `${70 + ((i * 13) % 25)}%` }} />
         ))}
       </div>
-      <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
-        <Skeleton className="mb-4 h-7 w-40" />
-        <Skeleton className="mb-4 h-9 w-full sm:w-72" />
+      <div className="mx-auto w-full max-w-4xl px-4 pt-6 sm:px-8 sm:pt-8">
+        <Skeleton className="mb-6 h-8 w-40" />
+        <Skeleton className="mb-3 h-10 w-full sm:w-72" />
         <div className="overflow-hidden rounded-lg border border-line bg-panel">
           {Array.from({ length: rows }, (_, i) => (
-            <div key={i} className="flex items-center gap-3 border-b border-line px-4 py-3.5 last:border-b-0">
+            <div key={i} className="flex items-center gap-3 border-b border-line px-5 py-4 last:border-b-0">
               <Skeleton className="h-4" style={{ width: `${45 + ((i * 17) % 35)}%` }} />
               <Skeleton className="ml-auto h-4 w-14" />
             </div>
