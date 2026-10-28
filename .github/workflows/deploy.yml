@@ -132,7 +132,8 @@ jobs:
           # 가져오기가 끝난 뒤에도 0이 아닌 코드로 끝나는 경우가 있어(2026-10-28 첫 전환), 결과는 아래 행 수 비교로 판단한다
           npx --yes wrangler@4.151.0 d1 execute solveline --remote --yes --file "$RUNNER_TEMP/d1-import.sql" 2>&1 | tail -n 20 || echo "d1 execute 종료 코드 ${PIPESTATUS[0]}(행 수로 확인)"
           # 내보낸 행 수와 D1의 행 수가 표마다 같은지 본다
-          Q="SELECT 'users' t, COUNT(*) n FROM users UNION ALL SELECT 'problems', COUNT(*) FROM problems UNION ALL SELECT 'user_problems', COUNT(*) FROM user_problems UNION ALL SELECT 'submissions', COUNT(*) FROM submissions UNION ALL SELECT 'sessions', COUNT(*) FROM sessions UNION ALL SELECT 'collections', COUNT(*) FROM collections UNION ALL SELECT 'folders', COUNT(*) FROM folders"
+          # D1은 UNION 항이 많으면 거절한다(too many terms in compound SELECT) → 한 행에 표마다 열 하나
+          Q="SELECT (SELECT COUNT(*) FROM users) users, (SELECT COUNT(*) FROM problems) problems, (SELECT COUNT(*) FROM user_problems) user_problems, (SELECT COUNT(*) FROM submissions) submissions, (SELECT COUNT(*) FROM sessions) sessions, (SELECT COUNT(*) FROM collections) collections, (SELECT COUNT(*) FROM folders) folders"
           for i in 1 2 3; do
             if npx --yes wrangler@4.151.0 d1 execute solveline --remote --json --command "$Q" > "$RUNNER_TEMP/d1-counts.json"; then break; fi
             [ "$i" = 3 ] && { cat "$RUNNER_TEMP/d1-counts.json" >&2; exit 1; }
@@ -143,7 +144,7 @@ jobs:
           exported = dict((t, int(n)) for t, n in re.findall(r'(\w+) (\d+)', open(sys.argv[1]).read().split(':', 1)[1].split('(')[0]))
           raw = open(sys.argv[2]).read()
           # wrangler가 JSON 앞뒤에 안내 문구를 섞어 쓰기도 하므로 배열 부분만 읽는다
-          d1 = {r['t']: r['n'] for r in json.loads(raw[raw.index('['):raw.rindex(']') + 1])[0]['results']}
+          d1 = json.loads(raw[raw.index('['):raw.rindex(']') + 1])[0]['results'][0]
           bad = {t: (exported.get(t), n) for t, n in d1.items() if exported.get(t) != n}
           print('D1 행 수:', d1)
           sys.exit(f'행 수가 다릅니다: {bad}' if bad else 0)
