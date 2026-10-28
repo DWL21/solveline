@@ -1,9 +1,9 @@
 import { serve } from '@hono/node-server';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import { createApp } from './app.ts';
 import { BackupJob } from './backup.ts';
 import { loadConfig } from './config.ts';
-import { openDb } from './db.ts';
+import { openDb } from './db-node.ts';
 import { HttpJudge } from './judge.ts';
 import { R2ObjectStore, WorkerR2Store } from '@solveline/judge/r2';
 import { log, registerSecret } from './redact.ts';
@@ -19,6 +19,7 @@ if (!config.adminPassword) log.warn('[config] ACCESS_PASSWORD가 없어 관리�
 if (!config.google) log.warn('[config] GOOGLE_CLIENT_ID·GOOGLE_CLIENT_SECRET이 없어 로그인할 수 없습니다.');
 if (!config.ownerEmail) log.warn('[config] OWNER_EMAIL이 없어 예전 데이터를 넘겨받을 계정이 없습니다.');
 
+config.dataDir = resolve(config.dataDir);
 const db = openDb(config.dataDir);
 const judge = new HttpJudge(config.judgeUrl, config.judgeSecret);
 const objectStore = config.r2 ? new R2ObjectStore(config.r2) : config.r2ProxySecret ? new WorkerR2Store(config.webOrigin, config.r2ProxySecret) : null;

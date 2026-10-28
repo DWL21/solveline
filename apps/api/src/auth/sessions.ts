@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomToken } from '../crypto.ts';
 import { stmt, type Sql } from '../sql.ts';
 
 /** 서버 측 세션 저장소. 쿠키에는 서명된 세션 ID만 담고, 로그아웃·탈퇴 시 행을 지워 무효화한다. */
@@ -9,7 +9,7 @@ export class SessionStore {
   ) {}
 
   async create(userId: string, now = Date.now()) {
-    const id = randomBytes(32).toString('base64url');
+    const id = randomToken(32);
     const expiresAt = now + this.ttlMs;
     await this.sql.batch([
       stmt('DELETE FROM sessions WHERE expires_at < ?', now),

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './crypto.ts';
 import type { CatalogIndex, CatalogProblem, Collection, Folder } from '@solveline/shared';
 import type { ObjectStore } from '@solveline/judge/r2';
 
@@ -9,7 +9,7 @@ export const catalogProblemKey = (id: string, version: string) => `catalog/v1/pr
 const JSON_TYPE = 'application/json; charset=utf-8';
 /** 응답 봉투 그대로 저장한다. Worker가 R2 본문을 그대로 돌려줄 수 있다. */
 const envelope = (data: unknown) => JSON.stringify({ data });
-const versionOf = (json: string) => createHash('sha256').update(json).digest('hex').slice(0, 16);
+const versionOf = async (json: string) => (await sha256Hex(json)).slice(0, 16);
 
 export type CatalogSource = { problems: CatalogProblem[]; folders: Folder[]; collections: Collection[] };
 
@@ -21,18 +21,20 @@ export type BuiltCatalog = {
 };
 
 /** 공용 문제 데이터를 R2·캐시에 올릴 모양으로 만든다. 상세의 version은 내용 해시라 내용이 같으면 키도 같다. */
-export function buildCatalog(src: CatalogSource): BuiltCatalog {
-  const details = src.problems.map((p) => {
-    const json = envelope(p);
-    return { id: p.id, version: versionOf(json), json };
-  });
+export async function buildCatalog(src: CatalogSource): Promise<BuiltCatalog> {
+  const details = await Promise.all(
+    src.problems.map(async (p) => {
+      const json = envelope(p);
+      return { id: p.id, version: await versionOf(json), json };
+    }),
+  );
   const index: CatalogIndex = {
     problems: src.problems.map((p, i) => ({ id: p.id, title: p.title, folderId: p.folderId, mode: p.mode, language: p.language, updatedAt: p.updatedAt, version: details[i]!.version })),
     folders: src.folders,
     collections: src.collections,
   };
   const indexJson = envelope(index);
-  return { index, indexJson, indexVersion: versionOf(indexJson), details };
+  return { index, indexJson, indexVersion: await versionOf(indexJson), details };
 }
 
 export type SyncResult = { problems: number; index: boolean };
@@ -71,11 +73,11 @@ export class CatalogPublisher {
     if (!raw) return { index: null, problems: new Map<string, string>() };
     const json = new TextDecoder().decode(raw);
     const { data } = JSON.parse(json) as { data: CatalogIndex };
-    return { index: versionOf(json), problems: new Map(data.problems.map((p) => [p.id, p.version])) };
+    return { index: await versionOf(json), problems: new Map(data.problems.map((p) => [p.id, p.version])) };
   }
 
   private async run(): Promise<SyncResult> {
-    const cat = buildCatalog(await this.source());
+    const cat = await buildCatalog(await this.source());
     this.published ??= await this.loadPublished();
     const published = this.published;
 
