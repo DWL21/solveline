@@ -26,7 +26,6 @@ import {
   templateFor,
   type TestsetRef,
 } from '@solveline/shared';
-import type { TestsetStore } from './testsets.ts';
 import { isUniqueViolation, stmt, type Param, type Sql, type Stmt } from './sql.ts';
 
 export type Db = Database.Database;
@@ -392,13 +391,10 @@ const parse = <T>(v: string | null | undefined): T | null => (v ? (JSON.parse(v)
 
 /**
  * 문제 저장소. 문제 내용은 모두가 같이 보는 공용이고(관리자만 바꾼다), 작성 코드·언어·풀이 시간·마지막 제출은 user_problems에 사용자별로 둔다.
- * 히든 케이스는 body가 아니라 TestsetStore(해시 파일)에 두고 body에는 해시·개수만 남긴다.
+ * 히든 케이스는 body가 아니라 judge(해시 파일·R2)에 두고 body에는 해시·개수만 남긴다.
  */
 export class ProblemStore {
-  constructor(
-    private sql: Sql,
-    private testsets: TestsetStore,
-  ) {}
+  constructor(private sql: Sql) {}
 
   /**
    * 내 풀이 상태가 있는 문제만(작성 코드·북마크·개인 폴더 중 하나라도). 카탈로그 목록과 합쳐 쓴다.
@@ -564,27 +560,29 @@ export class ProblemStore {
     );
   }
 
-  /** 입력의 hidden 케이스는 테스트셋으로 옮기고, 없으면 기존 테스트셋을 유지한다. 시작 코드는 starterCode가 있을 때만 바꾼다. */
-  private toBody(input: ProblemInput, prev: Body | null): Body {
-    const hidden = input.cases.filter((c) => c.hidden);
+  /**
+   * hiddenRef: 입력에 hidden 케이스가 있어 judge에 새로 저장한 테스트셋(없으면 기존 테스트셋 유지).
+   * 시작 코드는 starterCode가 있을 때만 바꾼다.
+   */
+  private toBody(input: ProblemInput, prev: Body | null, hiddenRef?: TestsetRef | null): Body {
     return {
       description: input.description,
       params: input.params,
       timeLimitMs: input.timeLimitMs,
       cases: input.cases.filter((c) => !c.hidden),
       code: input.starterCode ?? prev?.code ?? input.code,
-      hiddenTestset: hidden.length ? this.testsets.put(hidden) : (prev?.hiddenTestset ?? null),
+      hiddenTestset: hiddenRef !== undefined ? hiddenRef : (prev?.hiddenTestset ?? null),
     };
   }
 
   /** 편집 권한자만. 만든 사람의 작성 코드는 시작 코드와 같다. */
-  async create(input: ProblemInput, userId: string, now = new Date()): Promise<Problem> {
+  async create(input: ProblemInput, userId: string, hiddenRef?: TestsetRef | null, now = new Date()): Promise<Problem> {
     const id = randomUUID();
     const ts = now.toISOString();
     // 폴더는 개인 정리용: 만든 사람의 폴더에만 넣는다
     const folder = await this.setFolder(id, userId, input.folderId);
     await this.sql.batch([
-      stmt('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)', id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null)), ts, ts),
+      stmt('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)', id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null, hiddenRef)), ts, ts),
       folder,
     ]);
     return (await this.get(id, userId))!;
@@ -594,13 +592,13 @@ export class ProblemStore {
    * 자동 저장. 작성 코드·언어·내 케이스·메모는 언제나 그 사용자 것으로 저장하고, 문제 내용은 편집 권한이 있을 때만 바꾼다
    * (권한 없는 사용자가 보낸 내용 변경은 무시한다).
    */
-  async update(id: string, input: ProblemInput, userId: string, editor: boolean, now = new Date()): Promise<Problem | null> {
+  async update(id: string, input: ProblemInput, userId: string, editor: boolean, hiddenRef?: TestsetRef | null, now = new Date()): Promise<Problem | null> {
     const row = await this.row(id);
     if (!row) return null;
     const writes: Stmt[] = [];
     if (editor) {
       const prev = this.body(row);
-      const next = this.toBody(input, prev);
+      const next = this.toBody(input, prev, hiddenRef);
       if (row.title !== input.title || row.mode !== input.mode || JSON.stringify(prev) !== JSON.stringify(next))
         writes.push(stmt('UPDATE problems SET title = ?, mode = ?, body = ?, updated_at = ? WHERE id = ?', input.title, input.mode, JSON.stringify(next), now.toISOString(), id));
     }
@@ -612,7 +610,7 @@ export class ProblemStore {
   }
 
   /** 변경 필드만 최신 데이터에 합친다. 코드도 언어별로 합쳐 다른 언어의 풀이를 보존한다. */
-  async patch(id: string, patch: ProblemPatch, userId: string, editor: boolean): Promise<Problem | null> {
+  async patch(id: string, patch: ProblemPatch, userId: string, editor: boolean, hiddenRef?: TestsetRef | null): Promise<Problem | null> {
     const current = await this.get(id, userId);
     if (!current) return null;
     const { timer, ...fields } = patch;
@@ -621,7 +619,7 @@ export class ProblemStore {
         ...current, ...fields,
         code: { ...current.code, ...fields.code },
         starterCode: fields.starterCode ? { ...current.starterCode, ...fields.starterCode } : undefined,
-      }, userId, editor);
+      }, userId, editor, hiddenRef);
     }
     if (timer) await this.setTimer(id, timer, userId);
     return this.get(id, userId);
@@ -635,19 +633,18 @@ export class ProblemStore {
     return true;
   }
 
-  async hidden(id: string): Promise<TestCase[] | null> {
+  /** 히든 테스트셋 참조. 문제가 없으면 false */
+  async hiddenRef(id: string): Promise<TestsetRef | null | false> {
     const row = await this.row(id);
-    if (!row) return null;
-    const ref = this.body(row).hiddenTestset;
-    return ref ? (this.testsets.get(ref.hash) ?? []) : [];
+    return row ? this.body(row).hiddenTestset : false;
   }
 
-  async setHidden(id: string, cases: TestCase[], now = new Date()): Promise<TestsetRef | null | false> {
+  /** 히든 테스트셋을 바꾼다(judge에 저장한 참조). 문제가 없으면 false */
+  async setHidden(id: string, ref: TestsetRef | null, now = new Date()): Promise<boolean> {
     const row = await this.row(id);
     if (!row) return false;
-    const ref = cases.length ? this.testsets.put(cases) : null;
     await this.sql.run('UPDATE problems SET body = ?, updated_at = ? WHERE id = ?', JSON.stringify({ ...this.body(row), hiddenTestset: ref }), now.toISOString(), id);
-    return ref;
+    return true;
   }
 
   /** 풀이 시간 저장(사용자별) */
@@ -661,29 +658,6 @@ export class ProblemStore {
   async setLastSubmission(id: string, userId: string, sub: LastSubmission) {
     if (!(await this.exists(id))) return;
     await this.sql.batch([this.upsertState(id, userId, { last_submission: JSON.stringify(sub) })]);
-  }
-
-  /** 예전 형식(body.cases 안의 hidden 케이스)을 테스트셋으로 옮긴다. 옮긴 문제 수를 돌려준다. */
-  async migrateInlineHidden(): Promise<number> {
-    const rows = await this.sql.all<Row>('SELECT * FROM problems');
-    let moved = 0;
-    for (const row of rows) {
-      const raw = JSON.parse(row.body) as Partial<Body>;
-      const hidden = (raw.cases ?? []).filter((c) => c.hidden);
-      if (!hidden.length) continue;
-      const b = this.body(row);
-      b.cases = b.cases.filter((c) => !c.hidden);
-      b.hiddenTestset = this.testsets.put(hidden);
-      await this.sql.run('UPDATE problems SET body = ? WHERE id = ?', JSON.stringify(b), row.id);
-      moved++;
-    }
-    return moved;
-  }
-
-  /** 문제들이 쓰는 테스트셋 해시 */
-  async testsetHashes(): Promise<Set<string>> {
-    const hashes = await this.sql.column<string | null>("SELECT json_extract(body, '$.hiddenTestset.hash') FROM problems");
-    return new Set(hashes.filter((h): h is string => !!h));
   }
 
   /** 편집 권한자만. 모든 사용자의 작성 코드·풀이 시간도 함께 지워진다. */

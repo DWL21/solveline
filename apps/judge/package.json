@@ -1,0 +1,40 @@
+{
+  "name": "@solveline/judge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./app": "./src/app.ts",
+    "./r2": "./src/r2.ts",
+    "./runner": "./src/runner.ts",
+    "./testsets": "./src/testsets.ts",
+    "./jobs": "./src/jobs.ts",
+    "./mirror": "./src/mirror.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "start": "node --import tsx src/main.ts",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@solveline/shared": "workspace:*",
+    "aws4fetch": "1.0.20",
+    "better-sqlite3": "^12.11.1",
+    "hono": "^4.13.13",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "4.1.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
