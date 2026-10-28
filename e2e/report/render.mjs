@@ -1,22 +1,28 @@
 // QA 보고서 출력: PR 댓글(Markdown)과 A4 문서(HTML → PDF). 같은 모델에서 만든다.
+// 소제목·표 머리글·상태 같은 짧은 항목은 영어, 설명 문장은 한국어로 쓴다.
 import { fmt } from './model.mjs';
 
-export const MARKER = { pr: '<!-- solveline-qa-report:pr -->', final: '<!-- solveline-qa-report:final -->' };
+/** PR 하나에 댓글 하나. PR 단계에서 쓰고, 머지 후 배포 확인 때 같은 댓글을 갱신한다. */
+export const MARKER = '<!-- solveline-qa-report -->';
 
-const STATUS = { expected: '통과', unexpected: '실패', flaky: '불안정', skipped: '건너뜀' };
-const REQ = { passed: '통과', failed: '실패', partial: '일부', notRun: '미실행' };
+const STATUS = { expected: 'Pass', unexpected: 'Fail', flaky: 'Flaky', skipped: 'Skipped' };
+const REQ = { passed: 'Pass', failed: 'Fail', partial: 'Partial', notRun: 'Not run' };
+const STATE = { 해결: 'Resolved', 열림: 'Open', 수용: 'Accepted' };
+const FOUND = { '정적 분석': 'Static analysis', '비밀 값 검사': 'Secret scan', '결함 주입': 'Fault injection', 리뷰: 'Review', '절차 점검': 'Process review', '수동 탐색': 'Exploratory (device)', 이슈: 'Issue' };
+const RISK = { 매우큼: 'Very high', '매우 큼': 'Very high', 큼: 'High', 중간: 'Medium', 낮음: 'Low' };
 const PROJECTS = {
-  api: ['API', '브라우저 없음'],
-  'desktop-chromium': ['데스크톱 Chrome', 'Chromium'],
-  'desktop-webkit': ['데스크톱 Safari 계열', 'WebKit'],
-  'mobile-iphone': ['iPhone 15', 'WebKit 모바일'],
-  'mobile-pixel': ['Pixel 7', 'Chromium 모바일'],
-  'tablet-ipad': ['iPad (7세대)', 'WebKit 태블릿'],
+  api: ['API', 'No browser'],
+  'desktop-chromium': ['Desktop Chrome', 'Chromium'],
+  'desktop-webkit': ['Desktop Safari', 'WebKit'],
+  'mobile-iphone': ['iPhone 15', 'WebKit (mobile)'],
+  'mobile-pixel': ['Pixel 7', 'Chromium (mobile)'],
+  'tablet-ipad': ['iPad (7th gen)', 'WebKit (tablet)'],
 };
+const en = (map, v) => map[v] ?? v;
 const rating = (v) => (v ? 'ABCDE'[Math.round(Number(v)) - 1] : '—');
 const sec = (ms) => `${(ms / 1000).toFixed(1)}s`;
-const date = (iso) => (iso ? new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' }) : '—');
-const stageName = (m) => (m.kind === 'pr' ? 'PR 단계(머지 전)' : '머지 후 최종');
+const date = (iso) => (iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16) + ' KST' : '—');
+const stage = (m) => (m.kind === 'pr' ? 'PR stage (pre-merge)' : 'Post-merge (deployment verified)');
 
 // Markdown 표 안전: 파이프·꺾쇠·멘션을 무력화한다(PR 제목 등 외부 입력)
 const md = (s) => String(s ?? '').replaceAll('|', '\\|').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('@', '@​').replaceAll('\n', ' ');
@@ -25,210 +31,216 @@ const h = (s) => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;'
 function measures(m) {
   const rows = [];
   if (m.unit) {
-    rows.push(['단위', '통과', `${m.unit.tests - m.unit.failed}/${m.unit.tests}`]);
-    if (m.unit.coverage) rows.push(['단위', '커버리지 줄·분기·함수', `${fmt(m.unit.coverage.lines)} · ${fmt(m.unit.coverage.branches)} · ${fmt(m.unit.coverage.functions)}`]);
+    rows.push(['Unit', 'Passed', `${m.unit.tests - m.unit.failed}/${m.unit.tests}`]);
+    if (m.unit.coverage) rows.push(['Unit', 'Coverage (lines · branches · functions)', `${fmt(m.unit.coverage.lines)} · ${fmt(m.unit.coverage.branches)} · ${fmt(m.unit.coverage.functions)}`]);
   }
   if (m.e2e) {
-    rows.push(['API·UI', '통과', `${m.e2e.passed}/${m.e2e.total}`]);
-    rows.push(['API·UI', '첫 시도 통과율 · 불안정', `${fmt(m.e2e.firstTryPassRate)} · ${m.e2e.flaky}건`]);
-    if (m.e2e.wallMs) rows.push(['API·UI', '실행 시간', sec(m.e2e.wallMs)]);
+    rows.push(['API/UI', 'Passed', `${m.e2e.passed}/${m.e2e.total}`]);
+    rows.push(['API/UI', 'First-try pass rate · Flaky', `${fmt(m.e2e.firstTryPassRate)} · ${m.e2e.flaky}`]);
+    if (m.e2e.wallMs) rows.push(['API/UI', 'Duration', sec(m.e2e.wallMs)]);
   }
-  if (m.smoke) rows.push(['운영 스모크', '통과', `${m.smoke.passed}/${m.smoke.total}`]);
+  if (m.smoke) rows.push(['Production smoke', 'Passed', `${m.smoke.passed}/${m.smoke.total}`]);
   if (m.sonar) {
     const s = m.sonar.measures ?? {};
-    rows.push(['정적 분석', '품질 게이트', m.sonar.gate]);
-    rows.push(['정적 분석', '신뢰성 · 보안 · 유지보수 등급', `${rating(s.reliability_rating)} · ${rating(s.security_rating)} · ${rating(s.sqale_rating)}`]);
-    rows.push(['정적 분석', '버그 · 취약점 · 코드 스멜', `${s.bugs ?? '—'} · ${s.vulnerabilities ?? '—'} · ${s.code_smells ?? '—'}`]);
-    rows.push(['정적 분석', '중복 · 기술 부채', `${fmt(s.duplicated_lines_density)} · ${s.sqale_index ? `${Math.round(s.sqale_index / 60)}시간` : '—'}`]);
+    rows.push(['Static analysis', 'Quality gate', m.sonar.gate]);
+    rows.push(['Static analysis', 'Reliability · Security · Maintainability', `${rating(s.reliability_rating)} · ${rating(s.security_rating)} · ${rating(s.sqale_rating)}`]);
+    rows.push(['Static analysis', 'Bugs · Vulnerabilities · Code smells', `${s.bugs ?? '—'} · ${s.vulnerabilities ?? '—'} · ${s.code_smells ?? '—'}`]);
+    rows.push(['Static analysis', 'Duplication · Technical debt', `${fmt(s.duplicated_lines_density)} · ${s.sqale_index ? `${Math.round(s.sqale_index / 60)}h` : '—'}`]);
   }
-  for (const a of m.e2e?.a11y ?? []) rows.push(['접근성', a.title.replace(/^접근성: /, ''), a.violations]);
+  for (const a of m.e2e?.a11y ?? []) rows.push(['Accessibility', a.title.replace(/^접근성: /, ''), a.violations]);
   return rows;
 }
 
-const deliverables = (m, links) => [
-  ['CI 실행', links.run ? `[#${m.run?.id}](${links.run})` : '—', '잡별 로그와 Step Summary'],
-  ['e2e 아티팩트', links.run ? `[CI 실행의 Artifacts](${links.run}#artifacts)` : '—', `HTML 리포트, trace${m.kind === 'final' ? ', 영상·스크린샷(전체)' : '(실패 시)'}`],
-  ['quality-report 아티팩트', links.run ? `[CI 실행의 Artifacts](${links.run}#artifacts)` : '—', 'metrics.json, summary.md'],
-  ['A4 보고서(PDF)', links.report ? `[qa-report 아티팩트](${links.report}#artifacts)` : '—', '이 댓글과 같은 내용 + 증거 그림'],
-];
-
 const reusable = [
-  ['테스트 환경', '`compose.test.yaml`, `scripts/test-env.sh`', '운영 이미지로 띄우는 Docker 테스트 환경'],
-  ['API 클라이언트', '`e2e/src/api.ts`', '모든 응답을 공유 계약(Zod)으로 검증'],
-  ['데이터 빌더·픽스처', '`e2e/src/builders.ts`, `e2e/src/fixtures.ts`', '테스트마다 새 사용자·데이터'],
-  ['페이지 객체', '`e2e/src/pages/*`', '화면 조작을 사용자 동작 단위로'],
-  ['추적표·대장', '`docs/quality/test-cases.md`, `docs/quality/qa-register.json`', '요구사항·결함·잔여 위험'],
-  ['결함 보고 양식', '`.github/ISSUE_TEMPLATE/bug_report.yml`', '재현 절차·심각도·발견 위치'],
+  ['Test environment', 'compose.test.yaml, scripts/test-env.sh', 'Docker environment built from production images'],
+  ['API client', 'e2e/src/api.ts', 'Validates every response against the shared Zod contract'],
+  ['Data builders · fixtures', 'e2e/src/builders.ts, e2e/src/fixtures.ts', 'Fresh user and data per test'],
+  ['Page objects', 'e2e/src/pages/*', 'UI actions expressed as user tasks'],
+  ['Traceability · register', 'docs/quality/test-cases.md, docs/quality/qa-register.json', 'Requirements, defects, residual risks'],
+  ['Bug report template', '.github/ISSUE_TEMPLATE/bug_report.yml', 'Steps, severity, where found'],
 ];
 
-/** PR 댓글. 판단에 필요한 1~5장은 펼쳐 두고, 나머지는 접는다. */
+const foundSummary = (m) => Object.entries(m.foundIn).map(([k, v]) => `${en(FOUND, k)} ${v}`).join(', ') || '—';
+const byRequirement = (a, b) => (Number(a.requirements[0]?.slice(1) ?? 99) - Number(b.requirements[0]?.slice(1) ?? 99)) || a.title.localeCompare(b.title, 'ko');
+
+/** PR 댓글. 판단에 필요한 1~5장은 펼치고 나머지는 접는다. PDF 표지를 보여 주고 PDF로 연결한다. */
 export function toMarkdown(m, links = {}) {
   const L = [];
-  L.push(MARKER[m.kind]);
-  L.push(`## QA 테스트 보고서 (${stageName(m)})`);
+  const pdf = m.links.pdf;
+  L.push(MARKER);
+  L.push(`## QA Test Completion Report · ${stage(m)}`);
   L.push('');
-  L.push(`**판정: ${m.verdict.label}**  `);
+  L.push(`**Verdict: ${m.verdict.label}**  `);
   L.push(md(m.verdict.reason));
   L.push('');
-  L.push('| 문서 번호 | 버전 | 대상 | 커밋 | 근거 실행 | 작성 |');
+  L.push('| Document ID | Version | Test item | Commit | Evidence run | Prepared |');
   L.push('|---|---|---|---|---|---|');
-  L.push(`| ${m.id} | ${m.version} | ${m.pr ? `#${m.pr.number} ${md(m.pr.title)}` : '—'} | \`${(m.sha ?? '').slice(0, 7)}\` | ${links.run ? `[CI #${m.run?.id}](${links.run})` : '—'} | GitHub Actions(자동) ${date(m.generatedAt)} |`);
+  L.push(`| ${m.id} | ${m.version} | ${m.pr ? `#${m.pr.number}` : '—'} | \`${(m.sha ?? '').slice(0, 7)}\` | ${links.run ? `[CI #${m.run?.id}](${links.run})` : '—'} | GitHub Actions · ${date(m.generatedAt)} |`);
   L.push('');
-  L.push('### 1. 수행한 테스트 요약');
+  if (pdf) {
+    L.push(`**PDF:** [${m.id} v${m.version}.pdf](${pdf})${links.report ? ` · [workflow run](${links.report})` : ''}`);
+    if (m.links.cover) L.push('', `<a href="${pdf}"><img src="${m.links.cover}" width="320" alt="${m.id} v${m.version} cover"></a>`);
+    L.push('');
+  }
+  L.push('### 1. Summary of Testing Performed');
   const total = (m.unit?.tests ?? 0) + (m.e2e?.total ?? 0) + (m.smoke?.total ?? 0);
-  L.push(`단위 ${m.unit?.tests ?? 0} · API·UI ${m.e2e?.total ?? 0}${m.smoke ? ` · 운영 스모크 ${m.smoke.total}` : ''}, 모두 ${total}개 실행. 요구사항 ${m.requirements.length}개를 ${Object.keys(m.projects).length}개 기기 프로젝트에서 확인했다. GitHub-hosted runner(ubuntu-24.04)에서 운영과 같은 이미지로 띄운 Docker 테스트 환경을 썼다.`);
+  L.push(`단위 ${m.unit?.tests ?? 0} · API/UI ${m.e2e?.total ?? 0}${m.smoke ? ` · 운영 스모크 ${m.smoke.total}` : ''}, 모두 ${total}개를 실행했다. 요구사항 ${m.requirements.length}개를 ${Object.keys(m.projects).length}개 기기 프로젝트에서 확인했다. GitHub-hosted runner(ubuntu-24.04)에서 운영과 같은 이미지로 띄운 Docker 테스트 환경을 썼다.`);
   L.push('');
-  L.push('### 2. 계획 대비 차이');
-  L.push(m.deviations.length ? m.deviations.map((d) => `- ${md(d)}`).join('\n') : '- 없음');
+  L.push('### 2. Deviations from Planned Testing');
+  L.push(m.deviations.length ? m.deviations.map((d) => `- ${md(d)}`).join('\n') : '- None');
   L.push('');
-  L.push('### 3. 완료 평가(종료 기준)');
-  L.push('| 기준 | 목표 | 결과 | 충족 |', '|---|---|---|---|');
-  for (const c of m.criteria) L.push(`| ${c.name} | ${md(c.target)} | ${md(c.actual)} | ${c.met ? '충족' : '**미충족**'} |`);
+  L.push('### 3. Test Completion Evaluation');
+  L.push('| Exit criterion | Target | Actual | Status |', '|---|---|---|---|');
+  for (const c of m.criteria) L.push(`| ${c.name} | ${md(c.target)} | ${md(c.actual)} | ${c.met ? 'Met' : '**Not met**'} |`);
   L.push('');
-  L.push('### 4. 진행을 막은 요인');
-  L.push(m.blockers.length ? m.blockers.slice(0, 15).map((b) => `- ${md(b)}`).join('\n') : '- 없음');
+  L.push('### 4. Factors that Blocked Progress');
+  L.push(m.blockers.length ? m.blockers.slice(0, 15).map((b) => `- ${md(b)}`).join('\n') : '- None');
   L.push('');
-  L.push('### 5. 테스트 측정치');
-  L.push('| 영역 | 지표 | 값 |', '|---|---|---|');
+  L.push('### 5. Test Measures');
+  L.push('| Area | Metric | Value |', '|---|---|---|');
   for (const [a, b, c] of measures(m)) L.push(`| ${a} | ${md(b)} | ${md(c)} |`);
   L.push('');
-  L.push('**요구사항별**', '', '| 번호 | 요구사항 | 확인 | 통과 | 판정 |', '|---|---|---|---|---|');
+  L.push('**Results by requirement**', '', '| ID | Requirement | Verified by | Passed | Status |', '|---|---|---|---|---|');
   for (const r of m.requirements) L.push(`| ${r.id} | ${md(r.name)} | ${r.via} | ${r.passed}/${r.total} | ${REQ[r.status]} |`);
   L.push('');
-  L.push('**기기별**', '', '| 프로젝트 | 엔진 | 통과 | 실패 | 불안정 | 누적 시간 |', '|---|---|---|---|---|---|');
+  L.push('**Results by device**', '', '| Project | Engine | Passed | Failed | Flaky | Duration |', '|---|---|---|---|---|---|');
   for (const [key, s] of Object.entries(m.projects)) L.push(`| ${PROJECTS[key]?.[0] ?? key} | ${PROJECTS[key]?.[1] ?? '—'} | ${s.passed} | ${s.failed} | ${s.flaky} | ${sec(s.durationMs)} |`);
   L.push('');
-  L.push('<details><summary><b>6. 결함 현황 · 7. 잔여 위험 · 8. 산출물 · 9. 재사용 자산 · 10. 교훈</b></summary>', '');
-  L.push('### 6. 결함 현황');
-  L.push(`대장 ${m.defects.length}건(해결 ${m.defects.filter((d) => d.status === '해결').length}) · 열린 버그 이슈 ${m.openBugs.length}건. 발견 위치: ${Object.entries(m.foundIn).map(([k, v]) => `${k} ${v}`).join(', ') || '—'}`, '');
-  L.push('| ID | 내용 | 심각도 | 발견 위치 | 상태 |', '|---|---|---|---|---|');
-  for (const d of m.defects) L.push(`| ${d.id} | ${md(d.summary)} | ${d.severity} | ${d.foundIn} | ${d.status} ${d.ref ?? ''} |`);
-  for (const b of m.openBugs) L.push(`| #${b.number} | ${md(b.title)} | — | 이슈 | 열림 |`);
+  L.push('<details><summary><b>6. Defects · 7. Residual Risks · 8. Test Deliverables · 9. Reusable Test Assets · 10. Lessons Learned</b></summary>', '');
+  L.push('### 6. Defects');
+  L.push(`Register ${m.defects.length} (resolved ${m.defects.filter((d) => d.status === '해결').length}) · Open bug issues ${m.openBugs.length} · Found in: ${foundSummary(m)}`, '');
+  L.push('| ID | Description | Severity | Found in | Status |', '|---|---|---|---|---|');
+  for (const d of m.defects) L.push(`| ${d.id} | ${md(d.summary)} | ${d.severity} | ${en(FOUND, d.foundIn)} | ${en(STATE, d.status)} ${d.ref ?? ''} |`);
+  for (const b of m.openBugs) L.push(`| #${b.number} | ${md(b.title)} | — | Issue | Open |`);
   L.push('');
-  L.push('### 7. 잔여 위험');
-  L.push('| ID | 위험 | 심각도 | 대응 | 상태 |', '|---|---|---|---|---|');
-  for (const r of m.risks) L.push(`| ${r.id} | ${md(r.risk)} | ${r.severity} | ${md(r.mitigation)} | ${r.status} |`);
+  L.push('### 7. Residual Risks');
+  L.push('| ID | Risk | Severity | Mitigation | Status |', '|---|---|---|---|---|');
+  for (const r of m.risks) L.push(`| ${r.id} | ${md(r.risk)} | ${r.severity} | ${md(r.mitigation)} | ${en(STATE, r.status)} |`);
   L.push('');
-  L.push('### 8. 산출물');
-  L.push('| 산출물 | 위치 | 내용 |', '|---|---|---|');
-  for (const [a, b, c] of deliverables(m, links)) L.push(`| ${a} | ${b} | ${c} |`);
+  L.push('### 8. Test Deliverables');
+  L.push('| Deliverable | Location | Contents |', '|---|---|---|');
+  L.push(`| CI run | ${links.run ? `[#${m.run?.id}](${links.run})` : '—'} | Job logs, Step Summary |`);
+  L.push(`| e2e artifact | ${links.run ? `[Artifacts](${links.run}#artifacts)` : '—'} | HTML report, traces${m.kind === 'final' ? ', videos, screenshots' : ' (failures only)'} |`);
+  L.push(`| quality-report artifact | ${links.run ? `[Artifacts](${links.run}#artifacts)` : '—'} | metrics.json, summary.md |`);
+  L.push(`| QA report (PDF) | ${pdf ? `[${m.id} v${m.version}](${pdf})` : '—'} | Cover, approvals, revision history, evidence, test case appendix |`);
   L.push('');
-  L.push('### 9. 재사용 가능한 테스트 자산');
-  L.push('| 자산 | 위치 | 쓰임 |', '|---|---|---|');
-  for (const [a, b, c] of reusable) L.push(`| ${a} | ${b} | ${c} |`);
+  L.push('### 9. Reusable Test Assets');
+  L.push('| Asset | Location | Purpose |', '|---|---|---|');
+  for (const [a, b, c] of reusable) L.push(`| ${a} | \`${b}\` | ${c} |`);
   L.push('');
-  L.push('### 10. 교훈');
-  L.push(m.lessons.map((x) => `- ${md(x)}`).join('\n') || '- 없음');
+  L.push('### 10. Lessons Learned');
+  L.push(m.lessons.map((x) => `- ${md(x)}`).join('\n') || '- None');
   L.push('', '</details>', '');
-  L.push(`<details><summary><b>부록 A. 테스트 케이스 실행 결과 (${m.cases.length})</b></summary>`, '');
-  L.push('| 요구사항 | 테스트 | 기기 | 결과 | 시간 |', '|---|---|---|---|---|');
+  L.push(`<details><summary><b>Appendix A. Test Case Results (${m.cases.length})</b></summary>`, '');
+  L.push('| Req. | Test | Project | Result | Time |', '|---|---|---|---|---|');
   for (const c of [...m.cases].sort(byRequirement)) L.push(`| ${c.requirements.join(' ')} | ${md(c.title)} | ${c.project} | ${STATUS[c.status] ?? c.status} | ${sec(c.durationMs)} |`);
   L.push('', '</details>', '');
-  L.push(`<sub>ISO/IEC/IEEE 29119-3 테스트 완료 보고서 구성 · 요구사항 추적표 \`docs/quality/test-cases.md\` · ${m.kind === 'pr' ? 'CI가 다시 돌면 이 댓글을 갱신합니다. 머지 후 배포·운영 스모크까지 확인한 최종 보고서가 따로 달립니다.' : '배포 완료 뒤 운영 스모크까지 확인한 최종본입니다.'}</sub>`);
+  L.push(`<sub>Structure: ISO/IEC/IEEE 29119-3 Test Completion Report · Traceability: \`docs/quality/test-cases.md\` · ${m.kind === 'pr' ? 'PR CI가 다시 돌면 이 댓글을 갱신하고, 머지 후 배포·운영 스모크 결과로 v1.0을 덧붙인다. 이 보고서는 필수 체크가 아니어서 머지를 막지 않는다.' : '머지 후 배포와 운영 스모크까지 확인한 v1.0이다.'}</sub>`);
   return L.join('\n');
 }
 
-const byRequirement = (a, b) => (Number(a.requirements[0]?.slice(1) ?? 99) - Number(b.requirements[0]?.slice(1) ?? 99)) || a.title.localeCompare(b.title, 'ko');
-
 /** A4 문서. image(path)는 증거 그림을 data URI로 바꾼다(없으면 null). */
 export function toHtml(m, links = {}, image = () => null) {
-  const chip = (ok, yes = '충족', no = '미충족') => `<span class="chip ${ok ? 'ok' : 'bad'}">${ok ? yes : no}</span>`;
+  const ok = (yes, text) => `<span class="chip${yes ? '' : ' bad'}">${text}</span>`;
   const table = (head, rows, numeric = []) => `<table><thead><tr>${head.map((x, i) => `<th${numeric.includes(i) ? ' class="n"' : ''}>${h(x)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td${numeric.includes(i) ? ' class="n"' : ''}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   const figures = m.evidence.map((e) => ({ ...e, src: image(e.path) })).filter((e) => e.src);
   const total = (m.unit?.tests ?? 0) + (m.e2e?.total ?? 0) + (m.smoke?.total ?? 0);
-  const linkText = (url) => (url ? `<a href="${h(url)}">${h(url)}</a>` : '—');
+  const link = (url) => (url ? `<a href="${h(url)}">${h(url)}</a>` : '—');
+  // 저장된 이전 판(qa-reports 브랜치의 history.json) + 이번 판
+  const history = [...m.history.filter((x) => x.version !== m.version), { version: m.version, date: m.generatedAt, note: m.kind === 'pr' ? `PR stage report (CI #${m.run?.id ?? '—'})` : `Post-merge: deployment and production smoke (CI #${m.run?.id ?? '—'})` }];
 
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${h(m.id)} QA 테스트 완료 보고서</title>
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${h(m.id)} Test Completion Report</title>
 <style>${CSS}</style></head><body>
 <section class="cover">
   <div class="org">${h(m.id)} · v${h(m.version)}</div>
   <div class="titleblock">
-    <h1>테스트 완료 보고서</h1>
-    <p class="sub">Solveline · ${h(m.pr ? `PR #${m.pr.number} ${m.pr.title}` : '배포 커밋')}<br>${stageName(m)}</p>
+    <h1>Test Completion Report</h1>
+    <p class="sub">Solveline · ${h(m.pr ? `PR #${m.pr.number} ${m.pr.title}` : 'Deployment commit')}<br>${stage(m)}</p>
   </div>
-  <div class="verdict"><b>판정: ${h(m.verdict.label)}</b>${h(m.verdict.reason)}</div>
-  <h3>문서 정보</h3>
-  ${table(['항목', '내용'], [
-    ['문서 번호', h(m.id)],
-    ['문서 종류', 'ISO/IEC/IEEE 29119-3 테스트 완료 보고서(Test Completion Report)'],
-    ['버전', h(m.version)],
-    ['시험 대상', h(m.pr ? `${m.repo ?? ''} PR #${m.pr.number} · 커밋 ${(m.sha ?? '').slice(0, 7)}` : (m.sha ?? '').slice(0, 7))],
-    ['근거 실행', linkText(links.run)],
-    ['생성', `${h(date(m.generatedAt))} · GitHub Actions 자동 생성`],
+  <div class="verdict"><b>Verdict: ${h(m.verdict.label)}</b>${h(m.verdict.reason)}</div>
+  <h3>Document Information</h3>
+  ${table(['Field', 'Value'], [
+    ['Document ID', h(m.id)],
+    ['Document type', 'Test Completion Report (ISO/IEC/IEEE 29119-3)'],
+    ['Version', h(m.version)],
+    ['Test item', h(m.pr ? `${m.repo ?? ''} PR #${m.pr.number} · commit ${(m.sha ?? '').slice(0, 7)}` : (m.sha ?? '').slice(0, 7))],
+    ['Evidence run', link(links.run)],
+    ['Generated', `${h(date(m.generatedAt))} · GitHub Actions`],
   ])}
-  <h3>검토·승인</h3>
-  ${table(['역할', '이름', '일자', '비고'], [
-    ['작성', 'QA 보고서 워크플로', h(date(m.generatedAt)), '자동 생성'],
-    ['검토', h(m.pr?.author ?? '—'), h(date(m.pr?.updatedAt)), 'PR 작성자'],
-    ['승인', h(m.pr?.mergedBy ?? (m.kind === 'pr' ? '머지 시 승인' : '—')), h(date(m.pr?.mergedAt)), m.kind === 'pr' ? '머지 전' : '머지'],
+  <h3>Review and Approval</h3>
+  ${table(['Role', 'Name', 'Date', 'Note'], [
+    ['Prepared', 'QA report workflow', h(date(m.generatedAt)), 'Generated'],
+    ['Reviewed', h(m.pr?.author ?? '—'), h(date(m.pr?.updatedAt)), 'PR author'],
+    ['Approved', h(m.pr?.mergedBy ?? '—'), h(date(m.pr?.mergedAt)), m.pr?.mergedBy ? 'Merged' : 'Pending merge'],
   ])}
-  <h3>개정 이력</h3>
-  ${table(['버전', '일자', '내용'], [[h(m.version), h(date(m.generatedAt)), m.kind === 'pr' ? 'PR 단계 보고서(CI 결과 기준)' : '머지 후 최종 보고서(배포·운영 스모크 포함)']])}
+  <h3>Revision History</h3>
+  ${table(['Version', 'Date', 'Description'], history.map((x) => [h(x.version), h(date(x.date)), h(x.note)]))}
 </section>
 
 <section class="pb">
-  <h2>1. 개요</h2>
-  <p><b>목적.</b> 변경이 요구사항 R1~R${m.requirements.length}을 지키는지 확인하고 ${m.kind === 'pr' ? '머지 여부를 판단하는' : '배포된 결과를 확인하는'} 근거를 남긴다.</p>
-  <p><b>범위.</b> REST API(계약·권한·채점·데이터 분리·입력 검증), UI(둘러보기·풀이·자동 저장·편집 모드·관리자), 기기 5종(데스크톱 Chrome·Safari 계열, iPhone, Pixel, iPad), 접근성, 정적 분석${m.kind === 'final' ? ', 운영 스모크' : ''}. 실제 Google 로그인·실기기 키보드·부하는 범위 밖이다(잔여 위험 RR-04·05).</p>
-  <p><b>참조.</b> docs/quality/strategy.md(테스트 전략), docs/quality/test-cases.md(요구사항·테스트 케이스), docs/quality/qa-register.json(결함·위험 대장)</p>
+  <h2>1. Introduction</h2>
+  <p><b>Purpose.</b> 변경이 요구사항 R1~R${m.requirements.length}을 지키는지 확인하고, 머지 판단과 배포 확인의 근거를 남긴다.</p>
+  <p><b>Scope.</b> REST API(계약·권한·채점·데이터 분리·입력 검증), UI(둘러보기·풀이·자동 저장·편집 모드·관리자), 기기 5종(데스크톱 Chrome·Safari, iPhone, Pixel, iPad), 접근성, 정적 분석, 운영 스모크. 실제 Google 로그인·실기기 키보드·부하는 범위 밖이다(RR-04, RR-05).</p>
+  <p><b>References.</b> docs/quality/strategy.md, docs/quality/test-cases.md, docs/quality/qa-register.json</p>
 
-  <h2>2. 수행한 테스트 요약</h2>
-  <p>단위 ${m.unit?.tests ?? 0} · API·UI ${m.e2e?.total ?? 0}${m.smoke ? ` · 운영 스모크 ${m.smoke.total}` : ''}, 모두 <b>${total}개</b>를 실행했다. GitHub-hosted runner(ubuntu-24.04)에서 운영과 같은 이미지로 Docker 테스트 환경을 띄우고, 테스트마다 새 사용자·데이터를 만들었다.</p>
-  ${table(['층', '도구', '확인 내용', '실행 수'], [
-    ['단위', 'Vitest', '설정·저장소·마이그레이션·권한 규칙', m.unit?.tests ?? '—'],
+  <h2>2. Summary of Testing Performed</h2>
+  <p>단위 ${m.unit?.tests ?? 0} · API/UI ${m.e2e?.total ?? 0}${m.smoke ? ` · 운영 스모크 ${m.smoke.total}` : ''}, 모두 <b>${total}개</b>를 실행했다. GitHub-hosted runner(ubuntu-24.04)에서 운영과 같은 이미지로 Docker 테스트 환경을 띄우고, 테스트마다 새 사용자와 데이터를 만들었다.</p>
+  ${table(['Level', 'Tool', 'Scope', 'Executed'], [
+    ['Unit', 'Vitest', '설정·저장소·마이그레이션·권한 규칙', m.unit?.tests ?? '—'],
     ['API', 'Playwright request', '계약·권한 결정표·채점 상태 전이·경계값·데이터 분리', m.projects.api?.total ?? '—'],
-    ['UI', 'Playwright 브라우저', '사용자 여정·반응형·접근성', m.e2e ? m.e2e.total - (m.projects.api?.total ?? 0) : '—'],
-    ['운영 스모크', 'Playwright', '배포 후 핵심 경로(읽기 전용)', m.smoke?.total ?? (m.kind === 'pr' ? '머지 후' : '—')],
-    ['정적 분석', 'SonarQube', '버그·취약점·중복·커버리지 게이트', '—'],
+    ['UI', 'Playwright browser', '사용자 여정·반응형·접근성', m.e2e ? m.e2e.total - (m.projects.api?.total ?? 0) : '—'],
+    ['Production smoke', 'Playwright', '배포 후 핵심 경로(읽기 전용)', m.smoke?.total ?? (m.kind === 'pr' ? 'After merge' : '—')],
+    ['Static analysis', 'SonarQube', '버그·취약점·중복·커버리지 게이트', '—'],
   ], [3])}
 
-  <h2>3. 계획 대비 차이</h2>
-  ${m.deviations.length ? `<ul>${m.deviations.map((d) => `<li>${h(d)}</li>`).join('')}</ul>` : '<p>없음</p>'}
+  <h2>3. Deviations from Planned Testing</h2>
+  ${m.deviations.length ? `<ul>${m.deviations.map((d) => `<li>${h(d)}</li>`).join('')}</ul>` : '<p>None</p>'}
 
-  <h2>4. 완료 평가(종료 기준)</h2>
-  ${table(['기준', '목표', '결과', '충족'], m.criteria.map((c) => [h(c.name), h(c.target), h(c.actual), chip(c.met)]))}
+  <h2>4. Test Completion Evaluation</h2>
+  ${table(['Exit criterion', 'Target', 'Actual', 'Status'], m.criteria.map((c) => [h(c.name), h(c.target), h(c.actual), ok(c.met, c.met ? 'Met' : 'Not met')]))}
 
-  <h2>5. 진행을 막은 요인</h2>
-  ${m.blockers.length ? `<ul>${m.blockers.map((b) => `<li>${h(b)}</li>`).join('')}</ul>` : '<p>없음</p>'}
+  <h2>5. Factors that Blocked Progress</h2>
+  ${m.blockers.length ? `<ul>${m.blockers.map((b) => `<li>${h(b)}</li>`).join('')}</ul>` : '<p>None</p>'}
 </section>
 
 <section>
-  <h2>6. 테스트 측정치</h2>
-  ${table(['영역', '지표', '값'], measures(m).map(([a, b, c]) => [h(a), h(b), h(c)]))}
-  <h3>6.1 요구사항별 결과</h3>
-  ${table(['번호', '요구사항', '위험', '확인', '통과', '판정'], m.requirements.map((r) => [r.id, h(r.name), h(r.risk), r.via, `${r.passed}/${r.total}`, `<span class="chip ${r.status === 'passed' ? 'ok' : r.status === 'notRun' ? 'warn' : 'bad'}">${REQ[r.status]}</span>`]), [4])}
-  <h3>6.2 기기별 결과</h3>
-  ${table(['프로젝트', '엔진', '통과', '실패', '불안정', '누적 시간'], Object.entries(m.projects).map(([k, s]) => [h(PROJECTS[k]?.[0] ?? k), h(PROJECTS[k]?.[1] ?? '—'), s.passed, s.failed, s.flaky, sec(s.durationMs)]), [2, 3, 4, 5])}
-  ${m.e2e?.slowest?.length ? `<h3>6.3 가장 느린 테스트</h3><ul>${m.e2e.slowest.map((t) => `<li>${sec(t.durationMs)} · ${h(t.project)} · ${h(t.title)}</li>`).join('')}</ul>` : ''}
+  <h2>6. Test Measures</h2>
+  ${table(['Area', 'Metric', 'Value'], measures(m).map(([a, b, c]) => [h(a), h(b), h(c)]))}
+  <h3>6.1 Results by Requirement</h3>
+  ${table(['ID', 'Requirement', 'Risk', 'Verified by', 'Passed', 'Status'], m.requirements.map((r) => [r.id, h(r.name), h(en(RISK, r.risk)), r.via, `${r.passed}/${r.total}`, ok(r.status !== 'failed', REQ[r.status])]), [4])}
+  <h3>6.2 Results by Device</h3>
+  ${table(['Project', 'Engine', 'Passed', 'Failed', 'Flaky', 'Duration'], Object.entries(m.projects).map(([k, s]) => [h(PROJECTS[k]?.[0] ?? k), h(PROJECTS[k]?.[1] ?? '—'), s.passed, s.failed, s.flaky, sec(s.durationMs)]), [2, 3, 4, 5])}
+  ${m.e2e?.slowest?.length ? `<h3>6.3 Slowest Tests</h3><ul>${m.e2e.slowest.map((t) => `<li>${sec(t.durationMs)} · ${h(t.project)} · ${h(t.title)}</li>`).join('')}</ul>` : ''}
 </section>
 
 <section>
-  <h2>7. 결함 현황</h2>
-  <p>대장 ${m.defects.length}건(해결 ${m.defects.filter((d) => d.status === '해결').length}) · 열린 버그 이슈 ${m.openBugs.length}건. 발견 위치: ${h(Object.entries(m.foundIn).map(([k, v]) => `${k} ${v}`).join(', ') || '—')}</p>
-  ${table(['ID', '내용', '심각도', '발견 위치', '조치', '상태'], [
-    ...m.defects.map((d) => [d.id, h(d.summary), d.severity, h(d.foundIn), h(d.fix), `<span class="chip ${d.status === '해결' ? 'ok' : 'warn'}">${h(d.status)}</span> ${h(d.ref ?? '')}`]),
-    ...m.openBugs.map((b) => [`#${b.number}`, h(b.title), '—', '이슈', '—', '<span class="chip warn">열림</span>']),
+  <h2>7. Defects</h2>
+  <p>Register ${m.defects.length} (resolved ${m.defects.filter((d) => d.status === '해결').length}) · Open bug issues ${m.openBugs.length} · Found in: ${h(foundSummary(m))}</p>
+  ${table(['ID', 'Description', 'Severity', 'Found in', 'Fix', 'Status'], [
+    ...m.defects.map((d) => [d.id, h(d.summary), d.severity, h(en(FOUND, d.foundIn)), h(d.fix), `${ok(d.status === '해결', en(STATE, d.status))} ${h(d.ref ?? '')}`]),
+    ...m.openBugs.map((b) => [`#${b.number}`, h(b.title), '—', 'Issue', '—', ok(false, 'Open')]),
   ])}
-  <h2>8. 잔여 위험</h2>
-  ${table(['ID', '위험', '심각도', '대응', '상태'], m.risks.map((r) => [r.id, h(r.risk), r.severity, h(r.mitigation), `<span class="chip ${r.status === '열림' ? 'warn' : 'ok'}">${h(r.status)}</span>`]))}
-  <h2>9. 산출물</h2>
-  ${table(['산출물', '위치', '내용'], [
-    ['CI 실행', linkText(links.run), '잡별 로그와 Step Summary'],
-    ['e2e · quality-report 아티팩트', links.run ? linkText(`${links.run}#artifacts`) : '—', `HTML 리포트·trace${m.kind === 'final' ? '·영상·스크린샷' : ''}, 지표 JSON`],
-    ['PR 댓글', m.pr?.url ? linkText(m.pr.url) : '—', '이 문서와 같은 판정·측정치'],
+  <h2>8. Residual Risks</h2>
+  ${table(['ID', 'Risk', 'Severity', 'Mitigation', 'Status'], m.risks.map((r) => [r.id, h(r.risk), r.severity, h(r.mitigation), h(en(STATE, r.status))]))}
+  <h2>9. Test Deliverables</h2>
+  ${table(['Deliverable', 'Location', 'Contents'], [
+    ['CI run', link(links.run), 'Job logs, Step Summary'],
+    ['e2e · quality-report artifacts', links.run ? link(`${links.run}#artifacts`) : '—', `HTML report, traces${m.kind === 'final' ? ', videos, screenshots' : ''}, metrics JSON`],
+    ['PR comment', m.pr?.url ? link(m.pr.url) : '—', 'Same verdict and measures as this document'],
+    ['This document (PDF)', link(m.links.pdf), 'Versioned on the qa-reports branch'],
   ])}
-  <h2>10. 재사용 가능한 테스트 자산</h2>
-  ${table(['자산', '위치', '쓰임'], reusable.map(([a, b, c]) => [h(a), h(b.replaceAll('`', '')), h(c)]))}
-  <h2>11. 교훈</h2>
+  <h2>10. Reusable Test Assets</h2>
+  ${table(['Asset', 'Location', 'Purpose'], reusable.map(([a, b, c]) => [h(a), h(b), h(c)]))}
+  <h2>11. Lessons Learned</h2>
   <ul>${m.lessons.map((x) => `<li>${h(x)}</li>`).join('')}</ul>
 </section>
 
-${figures.length ? `<section class="pb"><h2>부록 A. 실행 증거</h2><p>근거 실행의 시연 모드 아티팩트에서 테스트가 남긴 화면이다. 그림 설명은 테스트 코드의 증거 이름이다.</p>
-<div class="figs">${figures.map((f, i) => `<figure><img src="${f.src}" alt=""><figcaption><b>그림 ${i + 1}.</b> ${h(f.caption)} <span class="muted">(${h(f.project)})</span></figcaption></figure>`).join('')}</div></section>` : ''}
+${figures.length ? `<section class="pb"><h2>Appendix A. Execution Evidence</h2><p>근거 실행에서 테스트가 남긴 화면이다. 그림 설명은 테스트 코드의 증거 이름이다.</p>
+<div class="figs">${figures.map((f, i) => `<figure><img src="${f.src}" alt=""><figcaption><b>Figure ${i + 1}.</b> ${h(f.caption)} <span class="muted">(${h(f.project)})</span></figcaption></figure>`).join('')}</div></section>` : ''}
 
 <section class="pb">
-  <h2>부록 ${figures.length ? 'B' : 'A'}. 테스트 케이스 실행 결과</h2>
-  ${table(['요구사항', '테스트', '기기', '결과', '시간'], [...m.cases].sort(byRequirement).map((c) => [c.requirements.join(' '), h(c.title), h(c.project), `<span class="chip ${c.status === 'expected' ? 'ok' : c.status === 'skipped' ? 'warn' : 'bad'}">${STATUS[c.status] ?? h(c.status)}</span>`, sec(c.durationMs)]), [4])}
+  <h2>Appendix ${figures.length ? 'B' : 'A'}. Test Case Results</h2>
+  ${table(['Req.', 'Test', 'Project', 'Result', 'Time'], [...m.cases].sort(byRequirement).map((c) => [c.requirements.join(' '), h(c.title), h(c.project), ok(c.status === 'expected', STATUS[c.status] ?? h(c.status)), sec(c.durationMs)]), [4])}
 </section>
 </body></html>`;
 }

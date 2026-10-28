@@ -102,24 +102,24 @@ export function buildModel({ context, metrics, results, smoke, register, require
     // 운영 스모크만으로 확인하는 요구사항(R11)은 머지 후 보고서에서 스모크 결과로 채운다
     const stats = own.length ? count(own) : r.id === 'R11' && smokeResult ? smokeResult : count([]);
     const status = stats.total === 0 ? 'notRun' : stats.failed || stats.flaky ? 'failed' : stats.passed === stats.total ? 'passed' : 'partial';
-    return { ...r, ...stats, via: own.length ? 'CI 자동화' : r.id === 'R11' ? '운영 스모크' : '—', status };
+    return { ...r, ...stats, via: own.length ? 'CI automation' : r.id === 'R11' ? 'Production smoke' : '—', status };
   });
 
   const cov = unit?.coverage;
   const covOk = cov && Object.entries(thresholds).every(([k, v]) => (cov[k] ?? -1) >= v);
   const criteria = [
-    { name: '단위 테스트 전부 통과', target: '실패 0', actual: unit ? `${unit.tests - unit.failed}/${unit.tests}` : '자료 없음', met: !!unit && unit.failed === 0 && unit.tests > 0 },
-    { name: '커버리지 기준 이상', target: Object.entries(thresholds).map(([k, v]) => `${label(k)} ${v}%`).join(' · ') || '—', actual: cov ? `줄 ${fmt(cov.lines)} · 분기 ${fmt(cov.branches)} · 함수 ${fmt(cov.functions)} · 문장 ${fmt(cov.statements)}` : '자료 없음', met: !!covOk },
-    { name: 'API·UI 자동화 전부 통과', target: '실패 0', actual: e2e ? `${e2e.passed}/${e2e.total}` : '자료 없음', met: !!e2e && e2e.failed === 0 && e2e.total - e2e.skipped > 0 },
-    { name: '불안정 테스트 없음', target: '0건', actual: e2e ? `${e2e.flaky}건` : '자료 없음', met: !!e2e && e2e.flaky === 0 },
-    { name: '정적 분석 품질 게이트', target: 'OK', actual: sonar?.gate ?? '자료 없음', met: sonar?.gate === 'OK' },
-    { name: '요구사항별 실패 없음', target: '실패 0', actual: `${reqRows.filter((r) => r.status === 'failed').length}개 실패`, met: reqRows.length > 0 && reqRows.every((r) => r.status !== 'failed') },
-    { name: 'CI 잡 전부 성공', target: '전부 success', actual: jobs.length ? `${jobs.filter((j) => j.conclusion === 'success').length}/${jobs.length}` : '자료 없음', met: jobs.length > 0 && jobs.every((j) => j.conclusion === 'success') },
+    { name: 'Unit tests all pass', target: '0 failed', actual: unit ? `${unit.tests - unit.failed}/${unit.tests}` : NO_DATA, met: !!unit && unit.failed === 0 && unit.tests > 0 },
+    { name: 'Coverage thresholds met', target: Object.entries(thresholds).map(([k, v]) => `${label(k)} ${v}%`).join(' · ') || '—', actual: cov ? `lines ${fmt(cov.lines)} · branches ${fmt(cov.branches)} · functions ${fmt(cov.functions)} · statements ${fmt(cov.statements)}` : NO_DATA, met: !!covOk },
+    { name: 'API/UI automation all pass', target: '0 failed', actual: e2e ? `${e2e.passed}/${e2e.total}` : NO_DATA, met: !!e2e && e2e.failed === 0 && e2e.total - e2e.skipped > 0 },
+    { name: 'No flaky tests', target: '0', actual: e2e ? `${e2e.flaky}` : NO_DATA, met: !!e2e && e2e.flaky === 0 },
+    { name: 'Static analysis quality gate', target: 'OK', actual: sonar?.gate ?? NO_DATA, met: sonar?.gate === 'OK' },
+    { name: 'No failing requirement', target: '0 failed', actual: `${reqRows.filter((r) => r.status === 'failed').length} failed`, met: reqRows.length > 0 && reqRows.every((r) => r.status !== 'failed') },
+    { name: 'All CI jobs succeeded', target: 'all success', actual: jobs.length ? `${jobs.filter((j) => j.conclusion === 'success').length}/${jobs.length}` : NO_DATA, met: jobs.length > 0 && jobs.every((j) => j.conclusion === 'success') },
   ];
   if (kind === 'final') {
     criteria.push(
-      { name: '운영 배포 성공', target: 'success', actual: context.deploy?.conclusion ?? '자료 없음', met: context.deploy?.conclusion === 'success' },
-      { name: '배포 후 운영 스모크 통과', target: '실패 0', actual: smokeResult ? `${smokeResult.passed}/${smokeResult.total}` : '자료 없음', met: !!smokeResult && smokeResult.failed === 0 && smokeResult.total > 0 },
+      { name: 'Production deployment succeeded', target: 'success', actual: context.deploy?.conclusion ?? NO_DATA, met: context.deploy?.conclusion === 'success' },
+      { name: 'Post-deploy production smoke passed', target: '0 failed', actual: smokeResult ? `${smokeResult.passed}/${smokeResult.total}` : NO_DATA, met: !!smokeResult && smokeResult.failed === 0 && smokeResult.total > 0 },
     );
   }
 
@@ -133,19 +133,19 @@ export function buildModel({ context, metrics, results, smoke, register, require
   if (kind === 'final' && !smokeResult) deviations.push('배포 후 운영 스모크 결과가 없다');
 
   const blockers = [
-    ...jobs.filter((j) => j.conclusion !== 'success').map((j) => `CI 잡 실패: ${j.name} (${j.conclusion ?? '진행 중'})`),
-    ...(e2e?.failedTests ?? []).map((t) => `실패: [${t.project}] ${t.file} › ${t.title}`),
-    ...(e2e?.flakyTests ?? []).map((t) => `불안정: [${t.project}] ${t.file} › ${t.title} (재시도 ${t.retries}회)`),
-    ...(kind === 'final' && context.deploy && context.deploy.conclusion !== 'success' ? [`운영 배포: ${context.deploy.conclusion ?? '끝나지 않음'}`] : []),
+    ...jobs.filter((j) => j.conclusion !== 'success').map((j) => `CI job ${j.conclusion ?? 'in progress'}: ${j.name}`),
+    ...(e2e?.failedTests ?? []).map((t) => `Failed: [${t.project}] ${t.file} › ${t.title}`),
+    ...(e2e?.flakyTests ?? []).map((t) => `Flaky: [${t.project}] ${t.file} › ${t.title} (retries ${t.retries})`),
+    ...(kind === 'final' && context.deploy && context.deploy.conclusion !== 'success' ? [`Production deployment: ${context.deploy.conclusion ?? 'not finished'}`] : []),
   ];
 
   const openRisks = (register.risks ?? []).filter((r) => r.status === '열림');
   const failed = criteria.some((c) => !c.met);
   const verdict = failed
-    ? { status: 'fail', label: kind === 'pr' ? '머지 보류' : '출시 후 조치 필요' }
+    ? { status: 'fail', label: kind === 'pr' ? 'Merge Blocked' : 'Action Required' }
     : openRisks.length
-      ? { status: 'conditional', label: kind === 'pr' ? '머지 가능(조건부)' : '출시 확인(조건부)' }
-      : { status: 'pass', label: kind === 'pr' ? '머지 가능' : '출시 확인' };
+      ? { status: 'conditional', label: kind === 'pr' ? 'Ready to Merge (Conditional)' : 'Release Verified (Conditional)' }
+      : { status: 'pass', label: kind === 'pr' ? 'Ready to Merge' : 'Release Verified' };
   verdict.reason = failed
     ? `종료 기준 ${criteria.filter((c) => !c.met).length}개를 충족하지 못했다: ${criteria.filter((c) => !c.met).map((c) => c.name).join(', ')}`
     : `종료 기준 ${criteria.length}개를 모두 충족했다.${openRisks.length ? ` 열린 잔여 위험 ${openRisks.length}건은 출시를 막지 않는 수준이며 개선 일정으로 관리한다.` : ''}`;
@@ -157,8 +157,11 @@ export function buildModel({ context, metrics, results, smoke, register, require
   const pr = context.pr ?? null;
   return {
     kind,
-    id: `QA-TCR-${pr ? `PR${pr.number}` : (context.sha ?? 'local').slice(0, 7)}-${kind === 'final' ? 'F' : 'P'}`,
-    version: kind === 'final' ? '1.0' : `0.${context.run?.attempt ?? 1}`,
+    // PR 하나에 보고서 하나: PR 단계는 0.x(커밋마다 올림), 머지 후 배포 확인은 1.0
+    id: `QA-TCR-${pr ? `PR${pr.number}` : (context.sha ?? 'local').slice(0, 7)}`,
+    version: context.version ?? (kind === 'final' ? '1.0' : '0.1'),
+    history: context.history ?? [],
+    links: context.links ?? {},
     generatedAt: context.generatedAt ?? new Date().toISOString(),
     repo: context.repo ?? null,
     sha: context.sha ?? null,
@@ -185,5 +188,6 @@ export function buildModel({ context, metrics, results, smoke, register, require
   };
 }
 
-const label = (k) => ({ lines: '줄', branches: '분기', functions: '함수', statements: '문장' })[k] ?? k;
+const label = (k) => k;
+const NO_DATA = 'no data';
 export const fmt = (v) => (v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`);
