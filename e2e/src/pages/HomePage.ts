@@ -38,7 +38,7 @@ export class HomePage {
   }
 
   card(name: string) {
-    return this.collectionCards.filter({ hasText: name });
+    return this.collectionCards.filter({ hasText: name }).getByRole('button').first();
   }
 
   logo() {
