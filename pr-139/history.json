@@ -10,5 +10,11 @@
     "date": "2026-10-28T09:35:45Z",
     "runId": 40664819300,
     "note": "PR stage report (CI #40664819300)"
+  },
+  {
+    "version": "1.0",
+    "date": "2026-10-28T09:45:20Z",
+    "runId": 40665775589,
+    "note": "Post-merge: deployment and production smoke (CI #40665775589)"
   }
 ]
