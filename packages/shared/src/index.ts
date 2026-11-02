@@ -422,6 +422,47 @@ export const RoleInput = z.object({ editor: z.boolean() });
 export const SignupSettings = z.object({ signupEnabled: z.boolean() });
 export type SignupSettings = z.infer<typeof SignupSettings>;
 
+// ─── 일일 메일 ───
+export const DailySubscribeInput = z.object({ email: z.email().max(254), consent: z.literal(true) });
+export const DailySubscribeResult = z.object({ status: z.literal('pending') });
+export const DailyIssueInput = z.object({
+  problemId: z.string().regex(/^[\w-]+$/).max(200),
+  title: z.string().trim().min(1).max(120),
+  body: z.string().trim().min(1).max(5000),
+  difficulty: z.string().trim().min(1).max(20),
+  minutes: z.number().int().min(1).max(120),
+  note: z.string().trim().max(1000),
+  status: z.enum(['draft', 'ready']),
+});
+export type DailyIssueInput = z.infer<typeof DailyIssueInput>;
+export const DailyIssue = DailyIssueInput.extend({
+  issueDate: z.string(),
+  delivery: z.object({ pending: z.number(), sent: z.number(), failed: z.number(), skipped: z.number() }),
+});
+export type DailyIssue = z.infer<typeof DailyIssue>;
+export const DailySubscriber = z.object({
+  id: z.string(),
+  email: z.string(),
+  status: z.enum(['pending', 'active', 'unsubscribed', 'bounced', 'complained']),
+  createdAt: z.string(),
+  confirmedAt: z.string().nullable(),
+  endedAt: z.string().nullable(),
+});
+export type DailySubscriber = z.infer<typeof DailySubscriber>;
+export const DailyAdminOverview = z.object({
+  configured: z.boolean(),
+  paused: z.boolean(),
+  maxSubscribers: z.number(),
+  today: z.string(),
+  subscribers: z.array(DailySubscriber),
+  issues: z.array(DailyIssue),
+});
+export type DailyAdminOverview = z.infer<typeof DailyAdminOverview>;
+export const DailyPauseInput = z.object({ paused: z.boolean() });
+export const DailyTestInput = z.object({ emails: z.array(z.email().max(254)).min(1).max(5) });
+export const DailySendResult = z.object({ outcome: z.string(), sent: z.number(), failed: z.number(), remaining: z.number() });
+export type DailySendResult = z.infer<typeof DailySendResult>;
+
 // ─── judge(채점 서비스) 계약: API(Worker) ↔ judge(pahidc) ───
 
 /** API가 judge에 맡기는 실행. id는 API가 정한 제출 id. cases와 testsetHash 중 하나만 쓴다. */

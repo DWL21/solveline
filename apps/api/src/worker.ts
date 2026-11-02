@@ -60,6 +60,8 @@ export function createWorkerApi(env: WorkerEnv, opts: { judgeFetch?: Fetch } = {
   registerSecret(config.google?.clientSecret);
   registerSecret(config.adminPassword);
   registerSecret(config.judgeSecret);
+  registerSecret(config.daily?.resendApiKey);
+  registerSecret(config.daily?.webhookSecret ?? undefined);
   const sql = d1Sql(env.DB);
   return createApp({
     config,

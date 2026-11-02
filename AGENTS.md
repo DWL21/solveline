@@ -12,6 +12,7 @@
 | `apps/judge` | 채점 서비스: 제출 대기열·디스패처, 히든 테스트셋(해시 파일, R2 미러), runner 호출 | Node 24 (Docker, pahidc) |
 | `apps/web` | React 19 + Vite + Tailwind v4 + CodeMirror 6 웹 IDE, `public/_worker.js`(카탈로그 캐시·R2 읽기, 나머지 `/api/*`는 Tunnel로) | Cloudflare Pages |
 | `runner` | 코드 실행 서버(Python 표준 라이브러리) + Java/Python 실행기 | 인터넷 차단 컨테이너 (OpenJDK 21.0.2, Python 3.13.13) |
+| `apps/mailer` | 일일 메일 발송 Worker 설정(cron). 코드는 `apps/api/src/mailer-entry.ts` | Cloudflare Workers |
 | `packages/shared` | API 계약(Zod 스키마·타입), api↔judge 계약·서명, 기본 코드 템플릿 | api·judge·web 공용 |
 | `docker`, `deploy`, `compose.production.yaml`, `scripts/deploy-production.sh` | 운영 API·judge 이미지·nginx 게이트웨이·배포 | pahidc |
 | `.github/workflows` | 통합 CI(`ci.yml`), 배포(`deploy.yml`), 운영 스모크(`smoke.yml`) | GitHub-hosted / self-hosted(pahidc) |
@@ -36,6 +37,8 @@
 | `JUDGE_SECRET` (api↔judge 서명) | 개발은 비워 두면 임의 값(judge에도 같은 값을 줘야 한다) | GitHub Environment `production` **secrets** → Pages 비밀·`judge.env` |
 | `CLOUDFLARE_BACKUP_TOKEN` (D1 백업, 4단계) | — | GitHub Environment `production` **secret**. age 비공개 키는 어디에도 올리지 않는다 |
 | `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
+| `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` (일일 메일) | `apps/api/.env` | GitHub Environment `production` **secrets** → Pages 비밀, `RESEND_API_KEY`는 발송 Worker 비밀에도 넣는다 |
+| `DAILY_FROM`, `DAILY_MAX_SUBSCRIBERS` (일일 메일) | `apps/api/.env` | GitHub Environment `production` **variables**. `DAILY_FROM`이 없으면 구독·발송이 꺼진다 |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 
 - 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 꺼낸다.
