@@ -124,8 +124,20 @@ npx wrangler d1 execute <새 D1> --remote --file d1.sql
 
 점검 시간은 4~5단계 사이의 1~2분이다. 이 동안 API가 응답하지 않는다.
 
-## 롤백
+## 롤백(기간 하루, 끝남)
 
-1. `wrangler.toml`에서 `API_MODE`를 지운다. 그러면 Worker가 다시 Tunnel로 넘긴다.
-2. compose에서 `api` 서비스의 `profiles: [legacy]`를 지우고 `JUDGE_URL`·`RESULTS_URL`을 예전 값으로 되돌려 배포한다.
-3. 전환 뒤 D1에 쌓인 변경은 `wrangler d1 export`로 받아 SQLite에 되돌린다. 예전 DB 파일 `/var/lib/solveline/solveline.db`는 지우지 않았다.
+전환 뒤 하루 동안은 예전 api를 compose `legacy` 프로필로 다시 띄워 되돌릴 수 있었다.
+
+롤백 기간이 지나서 예전 api를 없앴다(#150).
+- compose의 `api` 서비스, `api.env` 기록, 한 번만 하는 이전 단계를 지웠다.
+- 배포의 "Remove legacy user data" 단계가 `.d1-migrated`가 24시간 지난 뒤 처음 배포할 때 pahidc에서 다음을 지우고 `.legacy-removed`를 남긴다.
+  - 예전 SQLite(`solveline.db`)와 `backups/` 아래 DB 스냅숏
+  - `/etc/solveline/api.env`(로그인 비밀)
+  - `solveline-production-api` 이미지
+- 테스트셋 파일(`testsets/`, `backups/**/testsets`)·커리큘럼 JSON·judge 대기열(`judge/`)은 남긴다.
+
+이제 사용자 데이터의 원본과 복구 수단은 D1뿐이다.
+- D1 Time Travel로 시점 복구를 한다.
+- 매일 암호화 백업(4단계)을 R2 `solveline-backup`에 올린다. `CLOUDFLARE_BACKUP_TOKEN`을 넣어야 시작된다.
+
+Worker 쪽 문제는 Pages 배포를 이전 배포로 되돌려 해결한다.

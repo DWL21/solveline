@@ -21,47 +21,32 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Write /etc/solveline/api.env and judge.env from GitHub Environment
+      - name: Write /etc/solveline/judge.env from GitHub Environment
         # 공개 저장소: 서버에 필요한 값만 이름으로 넘긴다(비밀 전체를 꺼내지 않는다). 값은 출력하지 않는다.
-        # 새 환경 변수는 apps/api/.env.example, 여기 env, 아래 KEYS(judge가 쓰면 JUDGE_KEYS도)에 함께 추가한다.
+        # pahidc에는 judge만 있으므로 서명 비밀과 테스트셋을 올릴 R2 설정만 쓴다(사용자 데이터·로그인 비밀은 주지 않는다).
+        # Worker API가 쓰는 값은 아래 "Sync Pages secrets"에서 Pages 비밀로 넣는다.
         env:
-          SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS }}
-          ACCESS_PASSWORD: ${{ secrets.ACCESS_PASSWORD }}
-          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          OWNER_EMAIL: ${{ vars.OWNER_EMAIL }}
-          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
-          # 카탈로그 R2 게시(0006). 넷 다 있어야 켜진다. 처음 넣고 배포하면 문제·테스트셋 전체를 R2로 올린다.
+          # 카탈로그 R2 게시(0006). R2 키 넷이 다 있을 때만 키로 직접 올리고, 없으면 Worker를 거친다.
           R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           # R2 키 대신 Pages Worker를 거쳐 게시(Pages 비밀 R2_PROXY_SECRET과 같은 값)
           R2_PROXY_SECRET: ${{ secrets.R2_PROXY_SECRET }}
-          # API와 judge가 서로의 요청에 붙이는 HMAC 서명 비밀(0007). api.env와 judge.env에 같은 값을 쓴다.
+          # Worker API와 judge가 서로의 요청에 붙이는 HMAC 서명 비밀(0007). Pages 비밀과 같은 값이다.
           JUDGE_SECRET: ${{ secrets.JUDGE_SECRET }}
         run: |
-          KEYS="ACCESS_PASSWORD SESSION_SECRET SESSION_TTL_DAYS GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PROXY_SECRET JUDGE_SECRET"
-          # judge는 서명 비밀과 테스트셋을 올릴 R2 설정만 받는다(사용자 데이터·로그인 비밀은 주지 않는다)
           JUDGE_KEYS="JUDGE_SECRET R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_PROXY_SECRET"
-          REQUIRED="ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET JUDGE_SECRET"
-          for k in $REQUIRED; do
-            [ -n "${!k}" ] || { echo "production 환경에 $k 가 없습니다." >&2; exit 1; }
-          done
+          [ -n "$JUDGE_SECRET" ] || { echo "production 환경에 JUDGE_SECRET 이 없습니다." >&2; exit 1; }
           sudo install -d -m 700 -o root -g root /etc/solveline
-          write_env() {
-            local file=$1 k v
-            for k in $2; do
-              v="${!k}"
-              if [ -n "$v" ]; then printf '%s=%s\n' "$k" "${v//$'\n'/}"; fi
-            done | sudo tee "$file.new" >/dev/null
-            sudo chmod 600 "$file.new"
-            sudo mv "$file.new" "$file"
-            echo "$(basename "$file") keys: $(sudo cut -d= -f1 "$file" | tr '\n' ' ')"
-          }
-          write_env /etc/solveline/api.env "$KEYS"
-          write_env /etc/solveline/judge.env "$JUDGE_KEYS"
+          f=/etc/solveline/judge.env
+          for k in $JUDGE_KEYS; do
+            v="${!k}"
+            if [ -n "$v" ]; then printf '%s=%s\n' "$k" "${v//$'\n'/}"; fi
+          done | sudo tee "$f.new" >/dev/null
+          sudo chmod 600 "$f.new"
+          sudo mv "$f.new" "$f"
+          echo "judge.env keys: $(sudo cut -d= -f1 "$f" | tr '\n' ' ')"
       - name: Build web (Cloudflare Pages)
         env:
           PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
@@ -106,56 +91,29 @@ jobs:
           CI: "true"
         working-directory: apps/web
         run: npx --yes wrangler@4.151.0 d1 migrations apply solveline --remote
-      - name: One-time move of user data from SQLite to D1
-        # 0007 5단계. 한 번만 한다(/var/lib/solveline/.d1-migrated). 예전 api를 멈춰 쓰기를 막고, SQLite를 SQL로 내보내 D1에 넣은 뒤
-        # 표마다 행 수를 맞춰 본다. 어느 단계든 실패하면 예전 api를 다시 띄우고 실패로 끝낸다(Pages는 바뀌지 않는다).
-        env:
-          PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
-          CI: "true"
-        working-directory: apps/web
+      - name: Remove legacy user data after the rollback window
+        # 0007 5단계 전환(.d1-migrated, 2026-10-28)에서 롤백용으로 남긴 예전 사용자 데이터와 로그인 비밀을 지운다.
+        # 전환 뒤 24시간이 지나지 않았으면 건너뛴다(다음 배포에서 지운다). 한 번 지우면 .legacy-removed를 남긴다.
+        # 테스트셋 파일(testsets/, backups/**/testsets)·커리큘럼 JSON·judge 대기열(judge/)은 남긴다.
         run: |
           set -euo pipefail
-          MARK=/var/lib/solveline/.d1-migrated
-          if sudo test -f "$MARK"; then echo "이미 D1로 옮겼습니다."; exit 0; fi
-          COMPOSE=(sudo docker compose -f ../../compose.production.yaml)
-          restore() { echo "D1 이전 실패: 예전 api를 다시 띄웁니다." >&2; "${COMPOSE[@]}" --profile legacy up -d api || true; }
-          trap restore ERR
-          # 내보내기 도구가 든 api 이미지를 먼저 만든다(멈추는 시간을 줄인다)
-          "${COMPOSE[@]}" --profile legacy build api
-          # 쓰기를 멈춘다(점검 시작). Pages가 Worker API로 바뀔 때까지 API가 잠시 응답하지 않는다.
-          "${COMPOSE[@]}" --profile legacy stop api
-          "${COMPOSE[@]}" --profile legacy run --rm --no-deps -T api node --import tsx scripts/d1-export.ts /data/solveline.db /data/d1-import.sql | tee "$RUNNER_TEMP/d1-export.log"
-          umask 077
-          # 복사본은 runner 사용자 것이어야 wrangler가 읽는다(그래서 redirect는 sudo 밖에서)
-          # shellcheck disable=SC2024
-          sudo cat /var/lib/solveline/d1-import.sql > "$RUNNER_TEMP/d1-import.sql"
-          # 가져오기가 끝난 뒤에도 0이 아닌 코드로 끝나는 경우가 있어(2026-10-28 첫 전환), 결과는 아래 행 수 비교로 판단한다
-          npx --yes wrangler@4.151.0 d1 execute solveline --remote --yes --file "$RUNNER_TEMP/d1-import.sql" 2>&1 | tail -n 20 || echo "d1 execute 종료 코드 ${PIPESTATUS[0]}(행 수로 확인)"
-          # 내보낸 행 수와 D1의 행 수가 표마다 같은지 본다
-          # D1은 UNION 항이 많으면 거절한다(too many terms in compound SELECT) → 한 행에 표마다 열 하나
-          Q="SELECT (SELECT COUNT(*) FROM users) users, (SELECT COUNT(*) FROM problems) problems, (SELECT COUNT(*) FROM user_problems) user_problems, (SELECT COUNT(*) FROM submissions) submissions, (SELECT COUNT(*) FROM sessions) sessions, (SELECT COUNT(*) FROM collections) collections, (SELECT COUNT(*) FROM folders) folders"
-          for i in 1 2 3; do
-            if npx --yes wrangler@4.151.0 d1 execute solveline --remote --json --command "$Q" > "$RUNNER_TEMP/d1-counts.json"; then break; fi
-            [ "$i" = 3 ] && { cat "$RUNNER_TEMP/d1-counts.json" >&2; exit 1; }
-            sleep 10
-          done
-          python3 - "$RUNNER_TEMP/d1-export.log" "$RUNNER_TEMP/d1-counts.json" <<'PY'
-          import json, re, sys
-          exported = dict((t, int(n)) for t, n in re.findall(r'(\w+) (\d+)', open(sys.argv[1]).read().split(':', 1)[1].split('(')[0]))
-          raw = open(sys.argv[2]).read()
-          # wrangler가 JSON 앞뒤에 안내 문구를 섞어 쓰기도 하므로 배열 부분만 읽는다
-          d1 = json.loads(raw[raw.index('['):raw.rindex(']') + 1])[0]['results'][0]
-          bad = {t: (exported.get(t), n) for t, n in d1.items() if exported.get(t) != n}
-          print('D1 행 수:', d1)
-          sys.exit(f'행 수가 다릅니다: {bad}' if bad else 0)
-          PY
-          rm -f "$RUNNER_TEMP/d1-import.sql" "$RUNNER_TEMP/d1-counts.json"
-          sudo rm -f /var/lib/solveline/d1-import.sql
-          # 예전 api 컨테이너는 지우고(이미지·DB 파일은 남긴다) 표시를 남긴다
-          "${COMPOSE[@]}" --profile legacy rm -f api
-          sudo touch "$MARK"
-          trap - ERR
-          echo "D1로 옮겼습니다."
+          DATA=/var/lib/solveline
+          if sudo test -f "$DATA/.legacy-removed"; then echo "예전 데이터는 이미 지웠습니다."; exit 0; fi
+          if ! sudo test -f "$DATA/.d1-migrated"; then echo "D1 전환 표시가 없습니다. 지우지 않습니다." >&2; exit 1; fi
+          if [ -z "$(sudo find "$DATA/.d1-migrated" -mmin +1440)" ]; then
+            echo "전환 뒤 24시간이 지나지 않았습니다(롤백 기간). 다음 배포에서 지웁니다."
+            exit 0
+          fi
+          # 예전 SQLite와 DB 스냅숏(사용자 데이터). judge/ 아래(judge.db)는 건드리지 않는다.
+          # (-delete는 -depth를 켜서 -prune이 듣지 않으므로 경로 조건으로 뺀다)
+          sudo find "$DATA" -type f ! -path "$DATA/judge/*" \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db-journal' \) -print -delete
+          # 꺼진 예전 api의 로그인 비밀(SESSION_SECRET·GOOGLE_CLIENT_SECRET·ACCESS_PASSWORD)
+          sudo rm -fv /etc/solveline/api.env /etc/solveline/api.env.new
+          # 예전 api 컨테이너(남아 있다면)와 이미지
+          sudo docker ps -aq --filter label=com.docker.compose.project=solveline-production --filter label=com.docker.compose.service=api | xargs -r sudo docker rm -f
+          sudo docker image rm solveline-production-api:latest 2>/dev/null || echo "예전 api 이미지가 없습니다."
+          sudo touch "$DATA/.legacy-removed"
+          echo "남은 데이터: $(sudo du -sh "$DATA" | cut -f1)"
       - name: Deploy web and Worker API (Cloudflare Pages)
         env:
           PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin

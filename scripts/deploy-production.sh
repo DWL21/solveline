@@ -23,10 +23,8 @@ if sudo test -d /var/lib/codetest; then
 fi
 sudo rm -rf /etc/codetest
 
-# /etc/solveline은 root 700, api.env·judge.env는 root 600 → 확인과 compose(env_file 읽기)는 root로 실행한다.
-for f in api.env judge.env; do
-  sudo test -f "/etc/solveline/$f" || { echo "/etc/solveline/$f 없음" >&2; exit 1; }
-done
+# /etc/solveline은 root 700, judge.env는 root 600 → 확인과 compose(env_file 읽기)는 root로 실행한다.
+sudo test -f /etc/solveline/judge.env || { echo "/etc/solveline/judge.env 없음" >&2; exit 1; }
 sudo install -d -o 1000 -g 1000 -m 700 /var/lib/solveline
 sudo docker compose -f compose.production.yaml config --quiet
 sudo docker compose -f compose.production.yaml up -d --build --force-recreate --wait --wait-timeout 300

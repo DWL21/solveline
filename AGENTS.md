@@ -33,13 +33,18 @@
 | 비밀 | 로컬 | 운영 |
 |---|---|---|
 | `ACCESS_PASSWORD` (관리자 모드 마스터 비밀번호), `GOOGLE_CLIENT_SECRET` | `apps/api/.env` (gitignore, 권한 600) | GitHub Environment `production` **secrets** |
-| `JUDGE_SECRET` (api↔judge 서명) | 개발은 비워 두면 임의 값(judge에도 같은 값을 줘야 한다) | GitHub Environment `production` **secrets** → `api.env`·`judge.env` |
+| `JUDGE_SECRET` (api↔judge 서명) | 개발은 비워 두면 임의 값(judge에도 같은 값을 줘야 한다) | GitHub Environment `production` **secrets** → Pages 비밀·`judge.env` |
 | `CLOUDFLARE_BACKUP_TOKEN` (D1 백업, 4단계) | — | GitHub Environment `production` **secret**. age 비공개 키는 어디에도 올리지 않는다 |
 | `SESSION_SECRET` | `apps/api/.env` | GitHub Environment `production` **secrets** |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
 
-- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 서버 `/etc/solveline/api.env`·`judge.env`(root, 600)로 기록한다. judge.env에는 judge가 쓰는 값(`JUDGE_SECRET`, R2 설정)만 넣는다. 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
-- 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`의 `env:`와 `KEYS`(judge가 쓰면 `JUDGE_KEYS`, 필수면 `REQUIRED`도)에 함께 추가해야 반영된다.
+- 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 꺼낸다.
+  - Worker API가 쓰는 값은 Pages 비밀로 넣는다("Sync Pages secrets").
+  - judge가 쓰는 값(`JUDGE_SECRET`, R2 설정)만 서버 `/etc/solveline/judge.env`(root, 600)에 쓴다. pahidc에는 로그인 비밀을 두지 않는다.
+  - 공개 저장소이므로 비밀 전체를 한꺼번에 꺼내는 코드(`toJSON(secrets)` 등)를 쓰지 않는다 — GitHub가 악성 워크플로로 분류해 실행을 막는다.
+- 새 환경 변수는 ① GitHub Environment ② `apps/api/.env.example` ③ `deploy.yml`에 함께 추가해야 반영된다.
+  - Worker API가 쓰면 "Sync Pages secrets"의 `env:`와 `keys`에 더한다.
+  - judge가 쓰면 judge.env 단계의 `env:`와 `JUDGE_KEYS`에 더한다.
 - `production` 환경은 `main` 브랜치에서만 쓸 수 있다(deployment branch policy).
 - `.env.example`은 커밋 대상이다. 실제 값을 넣지 않는다.
 - 키·토큰·비밀번호·쿠키·`.env` 내용을 **커밋·PR 본문·이슈·로그·출력에 남기지 않는다.**
@@ -80,7 +85,7 @@
 
 - api 코드(`apps/api/src`)는 Node·Workers 둘 다에서 돈다. `node:*`·`Buffer`·better-sqlite3는 `main.ts`·`db-node.ts`·`backup.ts`에서만 쓰고, 암호 기능은 `crypto.ts`(WebCrypto)를 쓴다. 어기면 `pnpm build`의 Worker 묶기가 실패한다.
 - 마이그레이션(`db-node.ts`)을 더하면 `pnpm --filter @solveline/api d1:schema`로 D1 스키마 파일을 다시 만든다(테스트가 어긋나면 실패한다). 기본 행을 넣는 마이그레이션은 `d1-schema.ts`의 SEED에도 더한다.
-- 2026-10-28부터 운영 API는 Worker 안의 API(`API_MODE = "worker"`, D1 `solveline`)다. pahidc는 judge·runner와 게이트웨이(`/judge/`)만 맡고, 예전 api 컨테이너는 compose `legacy` 프로필로 내려 두었다(롤백용).
+- 2026-10-28부터 운영 API는 Worker 안의 API(`API_MODE = "worker"`, D1 `solveline`)다. pahidc는 judge·runner와 게이트웨이(`/judge/`)만 맡는다. 예전 api와 pahidc의 사용자 데이터·로그인 비밀은 롤백 기간(하루) 뒤 지웠다(0007 롤백).
 - Workers Free CPU 10ms: 요청 하나에서 문제 전체를 훑거나 큰 JSON을 해석하지 않는다. 카탈로그는 편집한 문제만 부분 게시한다(`CatalogPublisher.publish`).
 
 ## 채점 파이프라인 규칙 (0003, 0007)
@@ -90,7 +95,7 @@
 - 히든 케이스는 문제 본문에 넣지 않는다. judge가 `DATA_DIR/testsets/<sha256>.json`(바뀌지 않는 파일)에 두고 R2 `testsets/`에 올린다. 본문에는 `hiddenTestset {hash, count}`만 둔다.
 - runner는 상태가 없다. 테스트셋은 해시로 캐시하고, 없으면 409를 돌려 디스패처가 올리게 한다. runner를 늘릴 때는 `RUNNER_URLS`에 더한다.
 - 디스패처는 judge 프로세스 안에 있으므로 judge는 1대만 띄운다(대기열은 `DATA_DIR/judge/judge.db`).
-- 백업: api가 매일 `DATA_DIR/backups`에 DB 스냅숏(7일)과 테스트셋 사본을 남긴다. 30일 지난 제출 기록과 안 쓰는 테스트셋은 정리한다.
+- 백업: 사용자 데이터는 D1 Time Travel과 매일 암호화 백업(R2 `solveline-backup`, 7일)으로 지킨다. pahidc에는 사용자 데이터를 두지 않는다. 테스트셋 원본은 R2 `testsets/`다.
 
 ## 접근 제어
 
