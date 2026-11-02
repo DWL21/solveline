@@ -7,12 +7,19 @@
   <img src="https://img.shields.io/badge/login-Google-4285f4" alt="Google login">
 </p>
 
+<p align="center">
+  한국어 | <a href="README.en.md">English</a>
+</p>
+
 ---
 
 **서비스**: <a href="https://solveline.simplyimg.com">https://solveline.simplyimg.com</a>
 
-
 ---
+
+<p align="center">
+  <img src="docs/assets/demo-poster.jpg" alt="Solveline 30초 데모 영상 표지" width="270">
+</p>
 
 실제 코딩 테스트 화면처럼 문제 설명·코드 에디터·실행 결과를 한 화면에 두고, Java·Python 코드를 실행·채점하는 웹 IDE입니다.
 누구나 문제를 둘러볼 수 있고, Google 계정으로 가입하면 코드를 작성·실행·채점하고 풀이 기록을 남길 수 있습니다.
