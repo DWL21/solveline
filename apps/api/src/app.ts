@@ -43,6 +43,9 @@ import {
   AdminUserDetail,
   SignupSettings,
   DailyAdminOverview,
+  DailyInbox,
+  DailySettings,
+  DailySettingsInput,
   DailyIssueInput,
   DailyPauseInput,
   DailySendResult,
@@ -68,7 +71,7 @@ import { isTerminal, SubmissionStore } from './submissions.ts';
 import { buildCatalog, CatalogPublisher } from './catalog.ts';
 import { sqliteSql, type Sql } from './sql.ts';
 import type { ObjectStore } from '@solveline/judge/r2';
-import { confirmMail, DailyStore, issueMail, normalizeEmail, runDailyTick, verifyWebhook } from './daily.ts';
+import { confirmMail, DailyStore, escapeHtml, issueMail, normalizeEmail, runDailyTick, verifyWebhook } from './daily.ts';
 import { MailSendError, ResendSender, type MailSender } from './mail-sender.ts';
 import { log } from './redact.ts';
 import { decodeJson, encodeJson, randomInt, sha256Hex } from './crypto.ts';
@@ -264,6 +267,13 @@ export function createApp(deps: AppDeps) {
   app.post('/api/public/daily/unsubscribe', async (c) => {
     await daily.unsubscribe(c.req.query('token') ?? '', now());
     return c.html(dailyPage('수신거부했어요', '앞으로 일일 메일을 보내지 않아요.'));
+  });
+
+  // 읽기 전용이라 메일 스캐너가 먼저 열어도 바뀌는 것이 없다
+  app.get('/api/public/daily/hint', async (c) => {
+    const issue = await daily.issueByHintToken(c.req.query('token') ?? '');
+    if (!issue?.hint) return c.html(dailyPage('문제 힌트', '볼 수 있는 내용이 없어요.'), 404);
+    return c.html(dailyPage(`${escapeHtml(issue.title)} 힌트`, escapeHtml(issue.hint).replace(/\n/g, '<br>')));
   });
 
   app.post('/api/public/daily/webhook/resend', async (c) => {
@@ -673,6 +683,28 @@ export function createApp(deps: AppDeps) {
   };
 
   // ─── 내 풀이 상태(사용자 데이터, pahidc SQLite). 웹이 카탈로그와 합친다 ───
+  // ─── 일일 메일: 내 인박스·수신 설정 ───
+  const dailyUser = async (c: Context<Env>) => (await users.byId(c.get('userId')))!;
+
+  app.get('/api/me/daily/settings', async (c) => ok(c, DailySettings, await daily.settings(await dailyUser(c), dailyConfig)));
+
+  app.put('/api/me/daily/settings', async (c) => {
+    const input = await readJson(c, DailySettingsInput);
+    if (!input) return fail(c, 400, 'invalid_request', '수신 설정을 확인해 주세요.');
+    const user = await dailyUser(c);
+    const result = await daily.saveSettings(user, input, dailyConfig, now());
+    if (result === 'full') return fail(c, 409, 'daily_full', '메일 구독 인원이 다 찼어요. 인박스로는 계속 받을 수 있어요.');
+    if (result === 'blocked') return fail(c, 409, 'daily_mail_blocked', '반송이나 스팸 신고가 있었던 주소라 메일을 보낼 수 없어요. 인박스로는 계속 받을 수 있어요.');
+    return ok(c, DailySettings, await daily.settings(user, dailyConfig));
+  });
+
+  app.get('/api/me/daily/inbox', async (c) => ok(c, DailyInbox, await daily.inbox(c.get('userId'), now())));
+
+  app.post('/api/me/daily/inbox/:date/read', async (c) => {
+    await daily.markRead(c.get('userId'), c.req.param('date'), now());
+    return ok(c, DailyInbox, await daily.inbox(c.get('userId'), now()));
+  });
+
   app.get('/api/me/problems', async (c) => ok(c, z.array(MyProblemSummary), await problems.mySummaries(c.get('userId'))));
   app.get('/api/me/problems/:id', async (c) => {
     const st = await problems.myState(c.req.param('id'), c.get('userId'));

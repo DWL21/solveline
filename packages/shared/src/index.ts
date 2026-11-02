@@ -430,8 +430,7 @@ export const DailyIssueInput = z.object({
   title: z.string().trim().min(1).max(120),
   body: z.string().trim().min(1).max(5000),
   difficulty: z.string().trim().min(1).max(20),
-  minutes: z.number().int().min(1).max(120),
-  note: z.string().trim().max(1000),
+  hint: z.string().trim().max(1000),
   status: z.enum(['draft', 'ready']),
 });
 export type DailyIssueInput = z.infer<typeof DailyIssueInput>;
@@ -462,6 +461,32 @@ export const DailyPauseInput = z.object({ paused: z.boolean() });
 export const DailyTestInput = z.object({ emails: z.array(z.email().max(254)).min(1).max(5) });
 export const DailySendResult = z.object({ outcome: z.string(), sent: z.number(), failed: z.number(), remaining: z.number() });
 export type DailySendResult = z.infer<typeof DailySendResult>;
+/** 받을 요일. 1(월)~5(금) */
+export const DailySettingsInput = z.object({
+  subscribed: z.boolean(),
+  mail: z.boolean(),
+  weekdays: z.array(z.number().int().min(1).max(5)).min(1).max(5),
+});
+export type DailySettingsInput = z.infer<typeof DailySettingsInput>;
+export const DailySettings = DailySettingsInput.extend({
+  /** 받는 주소. 로그인 계정의 이메일이며 따로 바꾸지 않는다 */
+  email: z.string(),
+  mailAvailable: z.boolean(),
+  mailBlocked: z.boolean(),
+});
+export type DailySettings = z.infer<typeof DailySettings>;
+export const DailyInboxItem = z.object({
+  issueDate: z.string(),
+  problemId: z.string(),
+  title: z.string(),
+  body: z.string(),
+  difficulty: z.string(),
+  hint: z.string(),
+  read: z.boolean(),
+});
+export type DailyInboxItem = z.infer<typeof DailyInboxItem>;
+export const DailyInbox = z.object({ items: z.array(DailyInboxItem), unread: z.number() });
+export type DailyInbox = z.infer<typeof DailyInbox>;
 
 // ─── judge(채점 서비스) 계약: API(Worker) ↔ judge(pahidc) ───
 

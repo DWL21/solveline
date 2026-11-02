@@ -10,10 +10,12 @@ import { useEffect, useState } from 'react';
  *   #/cg/<경로>   컬렉션 묶음(이름의 '/' 계층에서 실제 컬렉션이 없는 상위 단계. 하위 컬렉션의 문제를 모아 보여 준다)
  *   #/p/<id>      문제 풀기
  *   #/submissions 제출 기록
+ *   #/inbox       일일 문제 인박스·수신 설정
  */
 export type Route =
   | { kind: 'home'; scope: Scope }
   | { kind: 'submissions' }
+  | { kind: 'inbox' }
   | { kind: 'problem'; id: string };
 
 export type Scope = { kind: 'collections' } | { kind: 'all' } | { kind: 'bookmarks' } | { kind: 'folder'; id: string | null } | { kind: 'collection'; id: string } | { kind: 'group'; path: string };
@@ -22,6 +24,7 @@ export function parseRoute(hash: string): Route {
   if (hash === '#/all') return { kind: 'home', scope: { kind: 'all' } };
   if (hash === '#/bookmarks') return { kind: 'home', scope: { kind: 'bookmarks' } };
   if (hash === '#/submissions') return { kind: 'submissions' };
+  if (hash === '#/inbox') return { kind: 'inbox' };
   const g = /^#\/cg\/(.+)$/.exec(hash);
   if (g) {
     try {
@@ -40,6 +43,7 @@ export function parseRoute(hash: string): Route {
 
 export function hrefOf(r: Route): string {
   if (r.kind === 'submissions') return '#/submissions';
+  if (r.kind === 'inbox') return '#/inbox';
   if (r.kind === 'problem') return `#/p/${r.id}`;
   const s = r.scope;
   if (s.kind === 'all') return '#/all';

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
-import { dailyConfigFrom, kstDate, runDailyTick, verifyWebhook } from '../src/daily.ts';
+import { DailyStore, dailyConfigFrom, kstDate, runDailyTick, verifyWebhook } from '../src/daily.ts';
 import { openDb, type Db } from '../src/db-node.ts';
 import { MailSendError, ResendSender, type MailSender, type OutgoingMail } from '../src/mail-sender.ts';
 import { sqliteSql } from '../src/sql.ts';
@@ -26,7 +26,7 @@ class FakeSender implements MailSender {
   }
 }
 
-const ISSUE = { problemId: 'daily-1', title: '두 수의 합', body: '정수 배열에서\n두 수를 찾으세요.', difficulty: '쉬움', minutes: 10, note: '', status: 'ready' as const };
+const ISSUE = { problemId: 'daily-1', title: '두 수의 합', body: '정수 배열에서\n두 수를 찾으세요.', difficulty: '쉬움', hint: '', status: 'ready' as const };
 
 let db: Db;
 let sender: FakeSender;
@@ -157,6 +157,36 @@ describe('일일 메일 발송', () => {
     expect(mail.to).toBe('a@example.com');
     expect(mail.headers!['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
     expect(mail.html).toContain(`${ORIGIN}/#/p/daily-1`);
+  });
+
+  it('문제 힌트은 메일 본문에 넣지 않고 링크로 연다', async () => {
+    const app = build();
+    await subscribe(app, 'a@example.com');
+    await adminLogin(app);
+    await saveIssue(app, { ...ISSUE, hint: '해시맵으로 <O(n)>\n둘째 줄' });
+    sender.sent = [];
+    await tick();
+    const mail = sender.sent[0]!;
+    expect(mail.html).toContain('힌트 확인');
+    expect(mail.html + mail.text).not.toContain('해시맵');
+    expect(mail.html).not.toMatch(/약 \d+분/);
+
+    const url = /api\/public\/daily\/hint\?token=[^\s]+/.exec(mail.text)![0];
+    await saveIssue(app, { ...ISSUE, hint: '해시맵으로 <O(n)>\n둘째 줄' }); // 다시 저장해도 보낸 링크는 그대로 열린다
+    const page = await app.request(`/${url}`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('해시맵으로 &lt;O(n)&gt;<br>둘째 줄');
+    expect((await app.request('/api/public/daily/hint?token=nope')).status).toBe(404);
+  });
+
+  it('힌트가 없는 회차에는 보기 링크를 넣지 않는다', async () => {
+    const app = build();
+    await subscribe(app, 'a@example.com');
+    await adminLogin(app);
+    await saveIssue(app);
+    sender.sent = [];
+    await tick();
+    expect(sender.sent[0]!.html).not.toContain('힌트 확인');
   });
 
   it('메일 내용의 HTML을 이스케이프한다', async () => {
@@ -345,5 +375,151 @@ describe('발송 설정과 Resend', () => {
     await expect(resend.sendBatch([mail], 'k2')).rejects.toMatchObject({ retryable: true });
     status = 422;
     await expect(resend.sendBatch([mail], 'k3')).rejects.toMatchObject({ retryable: false });
+  });
+});
+
+describe('로그인 사용자의 구독·인박스', () => {
+  const TEST_TOKEN = 't'.repeat(24);
+  const MAIL_ON = { subscribed: true, mail: true, weekdays: [1, 2, 3, 4, 5] };
+  const buildUser = (env: Record<string, string> = {}) => build({ TEST_AUTH_TOKEN: TEST_TOKEN, ...env });
+
+  async function login(app: ReturnType<typeof build>, email: string) {
+    const res = await app.request('/api/test/session', { method: 'POST', headers: { 'content-type': 'application/json', 'x-test-auth': TEST_TOKEN }, body: JSON.stringify({ email }) });
+    expect(res.status).toBe(200);
+    return res.headers.get('set-cookie')!.split(';')[0]!;
+  }
+  const me = (cookie: string, method = 'GET', body?: unknown) => ({ method, headers: { cookie, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const put = (app: ReturnType<typeof build>, cookie: string, body: unknown) => app.request('/api/me/daily/settings', me(cookie, 'PUT', body));
+  const settings = async (app: ReturnType<typeof build>, cookie: string) => ((await (await app.request('/api/me/daily/settings', me(cookie))).json()) as { data: Record<string, unknown> }).data;
+  const inbox = async (app: ReturnType<typeof build>, cookie: string) => ((await (await app.request('/api/me/daily/inbox', me(cookie))).json()) as { data: { items: { issueDate: string; read: boolean }[]; unread: number } }).data;
+  const saveAt = (app: ReturnType<typeof build>, date: string, issue: object = ISSUE) => app.request(`/api/admin/daily/issues/${date}`, admin('PUT', issue));
+
+  it('비회원은 인박스와 수신 설정을 쓸 수 없다', async () => {
+    const app = buildUser();
+    expect((await app.request('/api/me/daily/inbox')).status).toBe(401);
+    expect((await app.request('/api/me/daily/settings')).status).toBe(401);
+  });
+
+  it('계정 이메일로 확인 메일 없이 바로 구독한다. 도메인은 제한하지 않는다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'user@company.example');
+    await adminLogin(app);
+    await saveIssue(app);
+    expect((await put(app, cookie, MAIL_ON)).status).toBe(200);
+    expect(sender.sent).toHaveLength(0);
+    expect(await settings(app, cookie)).toMatchObject({ email: 'user@company.example', subscribed: true, mail: true });
+    expect(await tick()).toMatchObject({ sent: 1 });
+    expect(sender.sent[0]!.to).toBe('user@company.example');
+    expect(sender.sent[0]!.html).toContain(`${ORIGIN}/#/inbox`);
+  });
+
+  it('입력으로 받는 주소를 바꿀 수 없다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'a@example.com');
+    await put(app, cookie, { ...MAIL_ON, email: 'other@example.com' });
+    expect(status('other@example.com')).toBeUndefined();
+    expect(status('a@example.com')).toBe('active');
+  });
+
+  it('메일을 꺼도 인박스는 받고, 고른 요일에만 메일을 보낸다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'a@example.com');
+    await adminLogin(app);
+    await saveIssue(app);
+    await put(app, cookie, { ...MAIL_ON, weekdays: [1] }); // 2026-11-03은 화요일
+    expect(await tick()).toMatchObject({ sent: 0 });
+    expect(sender.sent).toHaveLength(0);
+    await saveAt(app, '2026-11-02');
+    expect(await tick('2026-11-02')).toMatchObject({ sent: 1 });
+
+    await put(app, cookie, { ...MAIL_ON, mail: false });
+    expect(status('a@example.com')).toBe('unsubscribed');
+    expect((await inbox(app, cookie)).items.map((i) => i.issueDate)).toEqual([DATE]);
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: true, mail: false });
+  });
+
+  it('메일의 수신거부는 메일만 끄고 구독은 남긴다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'a@example.com');
+    await adminLogin(app);
+    await saveIssue(app);
+    await put(app, cookie, MAIL_ON);
+    await tick();
+    const url = /api\/public\/daily\/unsubscribe\?token=[^\s]+/.exec(sender.sent[0]!.text)![0];
+    await app.request(`/${url}`, { method: 'POST' });
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: true, mail: false });
+    expect((await inbox(app, cookie)).items).toHaveLength(1);
+  });
+
+  it('인박스에는 구독 시작일부터 열린 회차만 보이고 읽음을 기억한다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'a@example.com');
+    await adminLogin(app);
+    await saveAt(app, '2026-11-02'); // 구독 전
+    await saveAt(app, DATE);
+    await saveAt(app, '2026-11-04'); // 아직 안 열림
+    expect((await inbox(app, cookie)).items).toEqual([]);
+    await put(app, cookie, MAIL_ON);
+    const before = await inbox(app, cookie);
+    expect(before.items.map((i) => i.issueDate)).toEqual([DATE]);
+    expect(before.unread).toBe(1);
+
+    const userId = db.prepare('SELECT id FROM users WHERE email = ?').pluck().get('a@example.com') as string;
+    expect((await new DailyStore(sqliteSql(db)).inbox(userId, NOW - 1)).items).toEqual([]); // 07시 전
+
+    await app.request(`/api/me/daily/inbox/${DATE}/read`, me(cookie, 'POST'));
+    await app.request('/api/me/daily/inbox/2026-11-04/read', me(cookie, 'POST')); // 안 열린 회차는 남기지 않는다
+    expect(db.prepare('SELECT COUNT(*) FROM daily_inbox_reads').pluck().get()).toBe(1);
+    expect(await inbox(app, cookie)).toMatchObject({ unread: 0, items: [{ read: true }] });
+
+    await saveAt(app, DATE, { ...ISSUE, status: 'draft' });
+    expect((await inbox(app, cookie)).items).toEqual([]);
+  });
+
+  it('구독을 그만두면 메일도 끄고, 다시 구독할 수 있다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'a@example.com');
+    await put(app, cookie, MAIL_ON);
+    await put(app, cookie, { ...MAIL_ON, subscribed: false, mail: true });
+    expect(status('a@example.com')).toBe('unsubscribed');
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: false, mail: false });
+    await put(app, cookie, MAIL_ON);
+    expect(status('a@example.com')).toBe('active');
+  });
+
+  it('로그인 전에 같은 주소로 구독했다면 그 기록에 연결한다', async () => {
+    const app = buildUser();
+    await subscribe(app, 'a@example.com');
+    const cookie = await login(app, 'a@example.com');
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: false, mail: true });
+    await put(app, cookie, MAIL_ON);
+    expect(db.prepare('SELECT COUNT(*) FROM daily_subscribers').pluck().get()).toBe(1);
+    expect(db.prepare('SELECT user_id FROM daily_subscribers').pluck().get()).toBeTruthy();
+  });
+
+  it('메일 자리가 없거나 반송된 주소면 거절하지만 인박스는 켠다', async () => {
+    const app = buildUser({ DAILY_MAX_SUBSCRIBERS: '1' });
+    await subscribe(app, 'first@example.com');
+    const cookie = await login(app, 'a@example.com');
+    const full = await put(app, cookie, MAIL_ON);
+    expect(full.status).toBe(409);
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: true, mail: false });
+
+    db.prepare("UPDATE daily_subscribers SET status = 'bounced' WHERE email = 'first@example.com'").run();
+    const bounced = await login(app, 'first@example.com');
+    expect((await put(app, bounced, MAIL_ON)).status).toBe(409);
+    expect(await settings(app, bounced)).toMatchObject({ subscribed: true, mail: false, mailBlocked: true });
+  });
+
+  it('탈퇴하면 구독·읽음 기록을 함께 지운다', async () => {
+    const app = buildUser();
+    const cookie = await login(app, 'a@example.com');
+    await adminLogin(app);
+    await saveIssue(app);
+    await put(app, cookie, MAIL_ON);
+    await app.request(`/api/me/daily/inbox/${DATE}/read`, me(cookie, 'POST'));
+    const userId = db.prepare('SELECT id FROM users WHERE email = ?').pluck().get('a@example.com') as string;
+    expect((await app.request(`/api/admin/users/${userId}`, admin('DELETE'))).status).toBe(200);
+    for (const table of ['daily_subscribers', 'daily_members', 'daily_inbox_reads']) expect(db.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get()).toBe(0);
   });
 });

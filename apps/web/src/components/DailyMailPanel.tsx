@@ -24,9 +24,9 @@ const STATUS_COLOR: Record<DailySubscriber['status'], string> = {
 
 type Draft = DailyIssueInput & { issueDate: string };
 
-const emptyDraft = (today: string): Draft => ({ issueDate: today, problemId: '', title: '', body: '', difficulty: '쉬움', minutes: 15, note: '', status: 'draft' });
+const emptyDraft = (today: string): Draft => ({ issueDate: today, problemId: '', title: '', body: '', difficulty: '쉬움', hint: '', status: 'draft' });
 
-const toDraft = (i: DailyIssue): Draft => ({ issueDate: i.issueDate, problemId: i.problemId, title: i.title, body: i.body, difficulty: i.difficulty, minutes: i.minutes, note: i.note, status: i.status });
+const toDraft = (i: DailyIssue): Draft => ({ issueDate: i.issueDate, problemId: i.problemId, title: i.title, body: i.body, difficulty: i.difficulty, hint: i.hint, status: i.status });
 
 /** 관리자 모드의 일일 메일 탭: 발송 상태, 회차 작성·시험 발송, 구독자 관리 */
 export function DailyMailPanel() {
@@ -115,12 +115,9 @@ function IssueEditor({ data, onSaved }: Readonly<{ data: DailyAdminOverview; onS
         <Field label="지문" className="mt-3">
           <textarea className="field min-h-36 font-sans" value={draft.body} onChange={(e) => set('body', e.target.value)} required maxLength={5000} />
         </Field>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <Field label="난이도">
             <input className="field font-sans" value={draft.difficulty} onChange={(e) => set('difficulty', e.target.value)} required maxLength={20} />
-          </Field>
-          <Field label="예상 시간(분)">
-            <input type="number" className="field" min={1} max={120} value={draft.minutes} onChange={(e) => set('minutes', Number(e.target.value))} required />
           </Field>
           <Field label="상태">
             <select className="field font-sans" value={draft.status} onChange={(e) => set('status', e.target.value as Draft['status'])}>
@@ -129,8 +126,8 @@ function IssueEditor({ data, onSaved }: Readonly<{ data: DailyAdminOverview; onS
             </select>
           </Field>
         </div>
-        <Field label="어제 문제 핵심(선택)" className="mt-3">
-          <textarea className="field min-h-20 font-sans" value={draft.note} onChange={(e) => set('note', e.target.value)} maxLength={1000} />
+        <Field label="문제 힌트(선택, 메일에는 보기 링크만 들어가요)" className="mt-3">
+          <textarea className="field min-h-20 font-sans" value={draft.hint} onChange={(e) => set('hint', e.target.value)} maxLength={1000} />
         </Field>
         <div className="mt-4 flex flex-wrap gap-2">
           <button type="submit" className="btn-primary" disabled={save.isPending}>

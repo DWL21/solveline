@@ -1,4 +1,4 @@
-import type { DailyAdminOverview, DailyIssue, DailyIssueInput, DailySendResult, DailySubscriber } from '@solveline/shared';
+import type { DailyAdminOverview, DailyInbox, DailyIssue, DailyIssueInput, DailySendResult, DailySettings, DailySettingsInput, DailySubscriber } from '@solveline/shared';
 import type { DailyConfig } from './config.ts';
 import { randomToken, sha256Hex } from './crypto.ts';
 import { MailSendError, type MailSender, type OutgoingMail } from './mail-sender.ts';
@@ -12,6 +12,17 @@ const MAX_ATTEMPTS = 3;
 const CONFIRM_TTL_MS = 24 * 3_600_000;
 
 const MAX_SUBSCRIBERS_FALLBACK = 90;
+
+/** 관리자가 주말 회차를 보낼 때도 빠지지 않게 토·일 비트는 항상 켠다 */
+const WEEKEND_BITS = 0b1100000;
+const toWeekdayMask = (days: number[]) => days.reduce((mask, d) => mask | (1 << (d - 1)), WEEKEND_BITS);
+const fromWeekdayMask = (mask: number) => [1, 2, 3, 4, 5].filter((d) => mask & (1 << (d - 1)));
+/** 회차 날짜의 요일 비트 위치(월 0 ~ 일 6) */
+const weekdayBit = (date: string) => (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+/** 그날 회차는 발송을 시작하는 07시(한국 시간)부터 인박스에 보인다 */
+const publishedThrough = (now: number) => kstDate(now - 7 * 3_600_000);
+
+type DailyUser = { id: string; email: string };
 
 /** mailer Worker의 env에서 발송 설정을 읽는다(API의 loadConfig는 로그인 비밀까지 요구한다) */
 export function dailyConfigFrom(env: Record<string, unknown>): DailyConfig | null {
@@ -37,6 +48,8 @@ type SubscriberRow = {
   created_at: string;
   confirmed_at: string | null;
   ended_at: string | null;
+  user_id: string | null;
+  weekdays: number;
 };
 
 type IssueRow = {
@@ -45,8 +58,8 @@ type IssueRow = {
   title: string;
   body: string;
   difficulty: string;
-  minutes: number;
-  note: string;
+  hint: string;
+  hint_token: string;
   status: 'draft' | 'ready';
 };
 
@@ -56,8 +69,7 @@ const toIssue = (r: IssueRow, delivery: DailyIssue['delivery']): DailyIssue => (
   title: r.title,
   body: r.body,
   difficulty: r.difficulty,
-  minutes: r.minutes,
-  note: r.note,
+  hint: r.hint,
   status: r.status,
   delivery,
 });
@@ -116,6 +128,100 @@ export class DailyStore {
     return (await this.sql.run('DELETE FROM daily_subscribers WHERE id = ?', id)).changes > 0;
   }
 
+  /** 계정에 연결된 수신 주소. 로그인 전에 같은 주소로 구독했다면 그 기록을 쓴다 */
+  private subscriberOf(user: DailyUser) {
+    return this.sql.get<SubscriberRow>('SELECT * FROM daily_subscribers WHERE user_id = ? OR email = ? ORDER BY user_id IS NULL LIMIT 1', user.id, normalizeEmail(user.email));
+  }
+
+  private member(userId: string) {
+    return this.sql.get<{ started_date: string; ended_date: string | null }>('SELECT started_date, ended_date FROM daily_members WHERE user_id = ?', userId);
+  }
+
+  async settings(user: DailyUser, config: DailyConfig | null): Promise<DailySettings> {
+    const [member, sub] = await Promise.all([this.member(user.id), this.subscriberOf(user)]);
+    return {
+      email: user.email,
+      subscribed: !!member && !member.ended_date,
+      mail: sub?.status === 'active',
+      mailAvailable: !!config,
+      mailBlocked: sub?.status === 'bounced' || sub?.status === 'complained',
+      weekdays: sub ? fromWeekdayMask(sub.weekdays) : [1, 2, 3, 4, 5],
+    };
+  }
+
+  /** 구독(인박스)과 메일 수신을 함께 정한다. 계정 이메일은 로그인에서 인증되어 확인 메일을 보내지 않는다. 메일 자리가 없어도 인박스는 받을 수 있다 */
+  async saveSettings(user: DailyUser, input: DailySettingsInput, config: DailyConfig | null, now: number): Promise<'ok' | 'full' | 'blocked'> {
+    const today = kstDate(now);
+    if (input.subscribed) {
+      await this.sql.run('INSERT INTO daily_members (user_id, started_date) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET ended_date = NULL', user.id, today);
+    } else {
+      await this.sql.run('UPDATE daily_members SET ended_date = ? WHERE user_id = ? AND ended_date IS NULL', today, user.id);
+    }
+    const at = new Date(now).toISOString();
+    const mask = toWeekdayMask(input.weekdays);
+    const sub = await this.subscriberOf(user);
+    if (!input.subscribed || !input.mail || !config) {
+      if (sub) {
+        await this.sql.run(
+          `UPDATE daily_subscribers SET user_id = ?, weekdays = ?, confirm_hash = NULL, confirm_expires_at = NULL,
+             ended_at = CASE WHEN status IN ('active','pending') THEN ? ELSE ended_at END,
+             status = CASE WHEN status IN ('active','pending') THEN 'unsubscribed' ELSE status END
+           WHERE id = ?`,
+          user.id, mask, at, sub.id,
+        );
+      }
+      return 'ok';
+    }
+    if (sub?.status === 'bounced' || sub?.status === 'complained') return 'blocked';
+    if (sub?.status === 'active') {
+      await this.sql.run('UPDATE daily_subscribers SET user_id = ?, weekdays = ? WHERE id = ?', user.id, mask, sub.id);
+      return 'ok';
+    }
+    const seats = "(SELECT COUNT(*) FROM daily_subscribers WHERE status = 'active') < ?";
+    const { changes } = sub
+      ? await this.sql.run(
+          `UPDATE daily_subscribers SET user_id = ?, weekdays = ?, status = 'active', confirm_hash = NULL, confirm_expires_at = NULL, confirmed_at = ?, ended_at = NULL WHERE id = ? AND ${seats}`,
+          user.id, mask, at, sub.id, config.maxSubscribers,
+        )
+      : await this.sql.run(
+          `INSERT INTO daily_subscribers (id, email, status, unsubscribe_token, created_at, confirmed_at, user_id, weekdays)
+           SELECT ?, ?, 'active', ?, ?, ?, ?, ? WHERE ${seats}`,
+          crypto.randomUUID(), normalizeEmail(user.email), randomToken(), at, at, user.id, mask, config.maxSubscribers,
+        );
+    return changes ? 'ok' : 'full';
+  }
+
+  /** 인박스 범위: 구독을 시작한 날부터 구독을 끝낸 날 또는 이미 열린 회차까지 */
+  private async inboxRange(userId: string, now: number) {
+    const member = await this.member(userId);
+    if (!member) return null;
+    const opened = publishedThrough(now);
+    return { from: member.started_date, to: member.ended_date && member.ended_date < opened ? member.ended_date : opened };
+  }
+
+  async inbox(userId: string, now: number): Promise<DailyInbox> {
+    const range = await this.inboxRange(userId, now);
+    if (!range) return { items: [], unread: 0 };
+    const rows = await this.sql.all<IssueRow & { read_at: string | null }>(
+      `SELECT i.*, r.read_at FROM daily_issues i LEFT JOIN daily_inbox_reads r ON r.issue_date = i.issue_date AND r.user_id = ?
+       WHERE i.status = 'ready' AND i.issue_date BETWEEN ? AND ? ORDER BY i.issue_date DESC LIMIT 60`,
+      userId, range.from, range.to,
+    );
+    const items = rows.map((r) => ({ issueDate: r.issue_date, problemId: r.problem_id, title: r.title, body: r.body, difficulty: r.difficulty, hint: r.hint, read: !!r.read_at }));
+    return { items, unread: items.filter((i) => !i.read).length };
+  }
+
+  /** 인박스에 보이는 회차만 읽음으로 남긴다 */
+  async markRead(userId: string, date: string, now: number) {
+    const range = await this.inboxRange(userId, now);
+    if (!range) return;
+    await this.sql.run(
+      `INSERT OR IGNORE INTO daily_inbox_reads (user_id, issue_date, read_at)
+       SELECT ?, issue_date, ? FROM daily_issues WHERE issue_date = ? AND status = 'ready' AND issue_date BETWEEN ? AND ?`,
+      userId, new Date(now).toISOString(), date, range.from, range.to,
+    );
+  }
+
   async paused() {
     return (await this.sql.value<number>('SELECT paused FROM daily_settings WHERE id = 1')) === 1;
   }
@@ -127,16 +233,21 @@ export class DailyStore {
   async saveIssue(date: string, input: DailyIssueInput, now: number) {
     const at = new Date(now).toISOString();
     await this.sql.run(
-      `INSERT INTO daily_issues (issue_date, problem_id, title, body, difficulty, minutes, note, status, created_at, updated_at)
+      `INSERT INTO daily_issues (issue_date, problem_id, title, body, difficulty, hint, hint_token, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (issue_date) DO UPDATE SET problem_id = excluded.problem_id, title = excluded.title, body = excluded.body,
-         difficulty = excluded.difficulty, minutes = excluded.minutes, note = excluded.note, status = excluded.status, updated_at = excluded.updated_at`,
-      date, input.problemId, input.title, input.body, input.difficulty, input.minutes, input.note, input.status, at, at,
+         difficulty = excluded.difficulty, hint = excluded.hint, status = excluded.status, updated_at = excluded.updated_at`,
+      date, input.problemId, input.title, input.body, input.difficulty, input.hint, crypto.randomUUID(), input.status, at, at,
     );
   }
 
   issue(date: string) {
     return this.sql.get<IssueRow>('SELECT * FROM daily_issues WHERE issue_date = ?', date);
+  }
+
+  /** 메일의 "힌트 확인" 링크로 회차를 찾는다 */
+  issueByHintToken(token: string) {
+    return this.sql.get<IssueRow>('SELECT * FROM daily_issues WHERE hint_token = ?', token);
   }
 
   /** 발송 기록이 있는 회차는 지우지 않는다(발송 현황을 남긴다) */
@@ -178,32 +289,38 @@ export class DailyStore {
   }
 }
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 
 const paragraphs = (text: string) =>
   text.split(/\n{2,}/).map((p) => `<p style="margin:0 0 14px;line-height:1.65">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
 
 const layout = (body: string) =>
-  `<!doctype html><html lang="ko"><body style="margin:0;background:#fff;color:#111"><div style="max-width:560px;margin:0 auto;padding:24px 20px;font:15px/1.6 -apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif">${body}</div></body></html>`;
+  `<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body style="margin:0;background:#fff;color:#111"><div style="max-width:560px;margin:0 auto;padding:24px 20px;font:15px/1.6 -apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif">${body}</div></body></html>`;
 
-const button = (href: string, label: string) =>
-  `<p style="margin:22px 0"><a href="${escapeHtml(href)}" style="display:inline-block;background:#111;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:700">${escapeHtml(label)}</a></p>`;
+const ACCENT = '#0066e0';
+
+/** 메일 앱이 a의 여백을 잘라 내지 않게 표 칸에 배경과 여백을 준다. quiet는 테두리만 있는 보조 버튼이다 */
+const button = (href: string, label: string, quiet = false) =>
+  `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;border-collapse:separate"><tr><td ${quiet ? '' : `bgcolor="${ACCENT}" `}style="padding:12px 22px;border-radius:6px;${quiet ? 'border:1px solid #111' : `background:${ACCENT}`}"><a href="${escapeHtml(href)}" style="color:${quiet ? '#111' : '#fff'};text-decoration:none;font-weight:700">${escapeHtml(label)}</a></td></tr></table>`;
 
 /** 회차 메일. unsubscribeUrl이 없으면 시험 발송이다(수신거부 대상이 아니다) */
 export function issueMail(issue: IssueRow, opts: { from: string; to: string; webOrigin: string; unsubscribeUrl?: string; test?: boolean }): OutgoingMail {
   const problemUrl = `${opts.webOrigin}/#/p/${encodeURIComponent(issue.problem_id)}`;
   const prefix = opts.test ? '[시험] ' : '';
-  const meta = `${issue.difficulty} · 약 ${issue.minutes}분`;
-  const note = issue.note ? `<hr style="border:0;border-top:1px solid #ddd;margin:24px 0"><p style="margin:0 0 6px;font-weight:700">어제 문제 핵심</p>${paragraphs(issue.note)}` : '';
+  const hintUrl = `${opts.webOrigin}/api/public/daily/hint?token=${encodeURIComponent(issue.hint_token)}`;
+  // 메일 앱 대부분이 접기(details)를 지원하지 않아, 힌트는 본문에 넣지 않고 링크로 연다
+  const hint = issue.hint
+    ? `<div style="margin-top:28px;padding-top:22px;border-top:1px solid #ddd"><p style="margin:0;color:#444">막히는 부분이 있다면 힌트를 확인해 보세요.</p>${button(hintUrl, '힌트 확인', true)}</div>`
+    : '';
   const footer = opts.unsubscribeUrl
-    ? `<p style="margin:28px 0 0;font-size:12px;color:#666">Solveline 일일 메일을 구독해 주셔서 보내 드렸어요. <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:#666">수신거부</a></p>`
+    ? `<p style="margin:28px 0 0;font-size:12px;color:#666">Solveline 일일 메일을 구독해 주셔서 보내 드렸어요. <a href="${escapeHtml(`${opts.webOrigin}/#/inbox`)}" style="color:#666">수신 설정</a> · <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:#666">수신거부</a></p>`
     : '<p style="margin:28px 0 0;font-size:12px;color:#666">관리자가 보낸 시험 메일이에요.</p>';
   return {
     from: opts.from,
     to: opts.to,
     subject: `${prefix}[Solveline] ${issue.title}`,
-    html: layout(`<p style="margin:0 0 4px;font-size:13px;color:#666">${escapeHtml(issue.issue_date)} · ${escapeHtml(meta)}</p><h1 style="margin:0 0 18px;font-size:21px">${escapeHtml(issue.title)}</h1>${paragraphs(issue.body)}${button(problemUrl, '바로 풀기')}${note}${footer}`),
-    text: [issue.title, meta, '', issue.body, '', `바로 풀기: ${problemUrl}`, ...(issue.note ? ['', '어제 문제 핵심', issue.note] : []), ...(opts.unsubscribeUrl ? ['', `수신거부: ${opts.unsubscribeUrl}`] : [])].join('\n'),
+    html: layout(`<div style="border-top:3px solid ${ACCENT};padding-top:18px"><p style="margin:0 0 8px;font-size:13px;font-weight:700;color:${ACCENT}">오늘의 문제</p><h1 style="margin:0 0 8px;font-size:23px;line-height:1.35">${escapeHtml(issue.title)}</h1><p style="margin:0 0 20px;font-size:13px;color:#666">${escapeHtml(issue.issue_date)} · ${escapeHtml(issue.difficulty)}</p></div>${paragraphs(issue.body)}${button(problemUrl, '바로 풀기')}${hint}${footer}`),
+    text: [issue.title, issue.difficulty, '', issue.body, '', `바로 풀기: ${problemUrl}`, ...(issue.hint ? [`힌트 확인: ${hintUrl}`] : []), ...(opts.unsubscribeUrl ? ['', `수신거부: ${opts.unsubscribeUrl}`] : [])].join('\n'),
     headers: opts.unsubscribeUrl ? { 'List-Unsubscribe': `<${opts.unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : undefined,
   };
 }
@@ -235,7 +352,7 @@ export async function runDailyTick(deps: TickDeps): Promise<DailySendResult> {
   if (issue?.status !== 'ready') return done('no_issue');
 
   await sql.batch([
-    stmt("INSERT OR IGNORE INTO daily_deliveries (issue_date, subscriber_id, status) SELECT ?, id, 'pending' FROM daily_subscribers WHERE status = 'active'", date),
+    stmt("INSERT OR IGNORE INTO daily_deliveries (issue_date, subscriber_id, status) SELECT ?, id, 'pending' FROM daily_subscribers WHERE status = 'active' AND (weekdays >> ?) & 1", date, weekdayBit(date)),
     // 대기 중에 수신거부·반송된 사람은 보내지 않는다
     stmt(
       `UPDATE daily_deliveries SET status = 'skipped' WHERE issue_date = ? AND status = 'pending'
@@ -245,7 +362,8 @@ export async function runDailyTick(deps: TickDeps): Promise<DailySendResult> {
   ]);
   const remaining = async () => (await sql.value<number>("SELECT COUNT(*) FROM daily_deliveries WHERE issue_date = ? AND status = 'pending'", date)) ?? 0;
   const targets = await sql.all<{ id: string; email: string; unsubscribe_token: string; attempts: number }>(
-    `SELECT s.id, s.email, s.unsubscribe_token, d.attempts FROM daily_deliveries d JOIN daily_subscribers s ON s.id = d.subscriber_id
+    `SELECT s.id, COALESCE(u.email, s.email) AS email, s.unsubscribe_token, d.attempts FROM daily_deliveries d JOIN daily_subscribers s ON s.id = d.subscriber_id
+     LEFT JOIN users u ON u.id = s.user_id
      WHERE d.issue_date = ? AND d.status = 'pending' ORDER BY s.id LIMIT ?`,
     date, BATCH_SIZE,
   );

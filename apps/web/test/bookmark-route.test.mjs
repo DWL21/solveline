@@ -7,3 +7,8 @@ test('북마크 목록 주소를 만들고 다시 읽는다', () => {
   assert.equal(hrefOf(route), '#/bookmarks');
   assert.deepEqual(parseRoute('#/bookmarks'), route);
 });
+
+test('인박스 주소를 만들고 다시 읽는다', () => {
+  assert.equal(hrefOf({ kind: 'inbox' }), '#/inbox');
+  assert.deepEqual(parseRoute('#/inbox'), { kind: 'inbox' });
+});
