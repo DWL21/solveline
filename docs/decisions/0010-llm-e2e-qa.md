@@ -97,7 +97,7 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 
 ### 판정과 결과
 
-- `llm-qa`는 커밋 상태(Commit Status API)로 단다. 커밋 상태의 값은 `pending`·`success`·`failure`·`error` 넷뿐이다. `neutral`은 GitHub App이 쓰는 Checks API에만 있으므로, "확인 못 함"은 `success`에 설명 문구로 구분한다. 설명란(140자)은 항상 `통과 n · 실패 n · 확인 못 함 n` 형식으로 시작해, 초록 체크만 보고 통과로 오해하지 않게 한다.
+- `llm-qa`는 커밋 상태(Commit Status API)로 단다. 커밋 상태의 값은 `pending`·`success`·`failure`·`error` 넷뿐이다. `neutral`은 GitHub App이 쓰는 Checks API에만 있으므로, "확인 못 함"은 `success`에 설명 문구로 구분한다. 시나리오를 돌린 경우 설명란(140자)은 항상 `통과 n · 실패 n · 확인 못 함 n`으로 시작하고, 돌리지 못한 경우는 `대상 아님`·`확인 못 함:`으로 시작해, 초록 체크만 보고 통과로 오해하지 않게 한다.
 
   | 상태 | 경우 | 설명 예 |
   |---|---|---|
