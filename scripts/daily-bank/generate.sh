@@ -31,10 +31,11 @@ case "$AGENT" in
       -c 'mcp_servers.solveline_bank.args=["--agent","codex"]' \
       -c mcp_servers.solveline_bank.startup_timeout_sec=60 \
       -c mcp_servers.solveline_bank.tool_timeout_sec=180 \
-      "$PROMPT"
+      -c mcp_servers.solveline_bank.default_tools_approval_mode='"approve"' \
+      "$PROMPT" </dev/null
     ;;
   claude)
-    exec timeout 50m claude -p "$PROMPT" \
+    exec timeout 50m claude -p "$PROMPT" </dev/null \
       --mcp-config "{\"mcpServers\":{\"solveline_bank\":{\"command\":\"$MCP\",\"args\":[\"--agent\",\"claude\"]}}}" \
       --strict-mcp-config --allowedTools 'mcp__solveline_bank__*'
     ;;
