@@ -51,29 +51,29 @@ function AdminLogin() {
       <main className="w-full max-w-sm">
         <a href="/" className="mb-6 flex items-center gap-2.5">
           <img src="/icon.svg" alt="" className="size-8" />
-          <span className="text-[20px] font-extrabold tracking-tight">Solveline</span>
+          <span className="text-title font-extrabold tracking-tight">Solveline</span>
         </a>
-        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-2xl shadow-black/30">
-          <h1 className="text-[20px] font-bold">관리자 모드</h1>
+        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-overlay shadow-black/30">
+          <h1 className="text-title font-bold">관리자 모드</h1>
           <input type="text" name="username" autoComplete="username" value="solveline-admin" readOnly hidden />
           <label className="mt-5 flex flex-col gap-1.5">
-            <span className="text-[12px] font-bold text-dim">비밀번호</span>
+            <span className="text-caption font-bold text-dim">비밀번호</span>
             <input
               type="password"
               name="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="field py-2.5 text-[14px]"
+              className="field py-2.5 text-body"
               autoFocus
               required
             />
           </label>
-          <button type="submit" disabled={login.isPending || !password} className="btn-primary mt-4 min-h-11 w-full text-[14px]">
+          <button type="submit" disabled={login.isPending || !password} className="btn-primary mt-4 min-h-11 w-full text-body">
             {login.isPending ? <Spinner size={16} label="확인하는 중" /> : '들어가기'}
           </button>
           {error && (
-            <p role="alert" className="mt-3 rounded-md border border-bad/40 bg-bad/10 p-3 text-[13px] font-semibold text-bad">
+            <p role="alert" className="mt-3 rounded-md border border-bad/40 bg-bad/10 p-3 text-ui font-semibold text-bad">
               {error}
             </p>
           )}
@@ -101,9 +101,9 @@ function Dashboard() {
       <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 border-b border-line bg-bar px-4 sm:h-12 sm:flex-nowrap">
         <a href="/" className="flex items-center gap-2">
           <img src="/icon.svg" alt="" className="size-6" />
-          <span className="text-[15px] font-extrabold tracking-tight">Solveline</span>
+          <span className="text-body-lg font-extrabold tracking-tight">Solveline</span>
         </a>
-        <span className="shrink-0 whitespace-nowrap rounded bg-warn/15 px-2 py-0.5 text-[11.5px] font-bold text-warn">관리자 모드</span>
+        <span className="shrink-0 whitespace-nowrap rounded bg-warn/15 px-2 py-0.5 text-micro font-bold text-warn">관리자 모드</span>
         <nav className="order-last flex h-10 w-full gap-1 sm:order-none sm:ml-4 sm:h-full sm:w-auto">
           {(
             [
@@ -116,13 +116,13 @@ function Dashboard() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`h-full whitespace-nowrap border-b-2 px-3 text-[13px] font-semibold ${tab === t ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`}
+              className={`h-full whitespace-nowrap border-b-2 px-3 text-ui font-semibold ${tab === t ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`}
             >
               {label}
             </button>
           ))}
         </nav>
-        <button type="button" className="btn-quiet ml-auto px-2 text-[12px]" onClick={() => logout.mutate()}>
+        <button type="button" className="btn-quiet ml-auto px-2 text-caption" onClick={() => logout.mutate()}>
           나가기
         </button>
       </header>
@@ -136,14 +136,14 @@ function Dashboard() {
             {selected ? (
               <div className="min-w-0">
                 {!wide && (
-                  <button type="button" className="btn-quiet touch-target mb-2 px-1 text-[13px]" onClick={() => setSelected(null)}>
+                  <button type="button" className="btn-quiet touch-target mb-2 px-1 text-ui" onClick={() => setSelected(null)}>
                     ← 사용자 목록
                   </button>
                 )}
                 <UserDetail id={selected} onDeleted={() => setSelected(null)} />
               </div>
             ) : (
-              <p className="hidden py-16 text-center text-[13px] text-faint lg:block">왼쪽에서 사용자를 선택하세요</p>
+              <p className="hidden py-16 text-center text-ui text-faint lg:block">왼쪽에서 사용자를 선택하세요</p>
             )}
           </div>
         ) : tab === 'signup' ? (
@@ -160,13 +160,13 @@ function UserList({ selected, onSelect }: Readonly<{ selected: string | null; on
   const users = useQuery({ queryKey: qk.adminUsers, queryFn: adminApi.users });
   const [filter, setFilter] = useState('');
   if (users.isPending) return <ListSkeleton />;
-  if (users.isError) return <p className="text-[13px] text-bad">{errMsg(users.error)}</p>;
+  if (users.isError) return <p className="text-ui text-bad">{errMsg(users.error)}</p>;
   const q = filter.trim().toLowerCase();
   const list = users.data.filter((u) => !q || u.email.includes(q) || u.name.toLowerCase().includes(q));
   return (
     <section>
       <div className="mb-3 flex items-center gap-2">
-        <h1 className="text-[16px] font-bold">
+        <h1 className="text-lead font-bold">
           사용자 <span className="text-faint">{users.data.length}</span>
         </h1>
         <input className="field ml-auto w-56 font-sans" placeholder="이메일·이름 검색" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="사용자 검색" />
@@ -181,17 +181,17 @@ function UserList({ selected, onSelect }: Readonly<{ selected: string | null; on
             >
               <Avatar picture={u.picture} email={u.email} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13.5px] font-semibold">{u.name || u.email}</span>
-                <span className="block truncate text-[12px] text-dim">{u.email}</span>
+                <span className="block truncate text-ui-lg font-semibold">{u.name || u.email}</span>
+                <span className="block truncate text-caption text-dim">{u.email}</span>
               </span>
               <Badges user={u} />
-              <span className="w-16 shrink-0 text-right text-[12px] text-dim" title="맞힌 문제 / 제출">
+              <span className="w-16 shrink-0 text-right text-caption text-dim" title="맞힌 문제 / 제출">
                 <span className="text-ok">✓ {u.solved}</span> · {u.submissions}
               </span>
             </button>
           </li>
         ))}
-        {list.length === 0 && <li className="p-6 text-center text-[13px] text-faint">사용자가 없어요</li>}
+        {list.length === 0 && <li className="p-6 text-center text-ui text-faint">사용자가 없어요</li>}
       </ol>
     </section>
   );
@@ -229,7 +229,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
         <LinesSkeleton />
       </section>
     );
-  if (d.isError) return <p className="text-[13px] text-bad">{errMsg(d.error)}</p>;
+  if (d.isError) return <p className="text-ui text-bad">{errMsg(d.error)}</p>;
   const u = d.data;
   const busy = role.isPending || remove.isPending;
   return (
@@ -237,13 +237,13 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
       <div className="flex items-center gap-3">
         <Avatar picture={u.picture} email={u.email} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-bold">{u.name || u.email}</p>
-          <p className="truncate text-[12.5px] text-dim">{u.email}</p>
+          <p className="truncate text-body-lg font-bold">{u.name || u.email}</p>
+          <p className="truncate text-meta text-dim">{u.email}</p>
         </div>
         <Badges user={u} />
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[12.5px] sm:grid-cols-4">
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-meta sm:grid-cols-4">
         {(
           [
             ['가입', day(u.createdAt)],
@@ -258,7 +258,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
           </div>
         ))}
       </dl>
-      <p className="mt-2 text-[11.5px] text-faint">
+      <p className="mt-2 text-micro text-faint">
         약관 {u.termsVersion} · 개인정보 {u.privacyVersion} 동의 <span className="whitespace-nowrap">({time(u.agreedAt)})</span>
       </p>
 
@@ -268,7 +268,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
         </button>
         <button
           type="button"
-          className="btn-quiet ml-auto text-[12px] text-faint hover:text-bad"
+          className="btn-quiet ml-auto text-caption text-faint hover:text-bad"
           disabled={busy}
           onClick={() => confirm(`${u.email} 사용자를 삭제할까요? 작성 코드·메모·제출 기록이 모두 지워지고 되돌릴 수 없어요.`) && remove.mutate()}
         >
@@ -276,12 +276,12 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
         </button>
       </div>
 
-      <h2 className="mt-5 mb-2 text-[13px] font-bold">풀이 현황 {u.problems.length}</h2>
+      <h2 className="mt-5 mb-2 text-ui font-bold">풀이 현황 {u.problems.length}</h2>
       {u.problems.length === 0 ? (
-        <p className="text-[12.5px] text-faint">아직 연 문제가 없어요</p>
+        <p className="text-meta text-faint">아직 연 문제가 없어요</p>
       ) : (
         <div className="max-h-72 overflow-y-auto rounded-md border border-line">
-          <table className="w-full text-[12.5px]">
+          <table className="w-full text-meta">
             <thead className="sticky top-0 bg-base text-left text-dim">
               <tr>
                 <th className="px-2 py-1.5 font-semibold">문제</th>
@@ -304,11 +304,11 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
         </div>
       )}
 
-      <h2 className="mt-5 mb-2 text-[13px] font-bold">최근 제출</h2>
+      <h2 className="mt-5 mb-2 text-ui font-bold">최근 제출</h2>
       {u.recentSubmissions.length === 0 ? (
-        <p className="text-[12.5px] text-faint">제출 기록이 없어요</p>
+        <p className="text-meta text-faint">제출 기록이 없어요</p>
       ) : (
-        <ul className="max-h-60 overflow-y-auto rounded-md border border-line text-[12.5px]">
+        <ul className="max-h-60 overflow-y-auto rounded-md border border-line text-meta">
           {u.recentSubmissions.map((s) => (
             <li key={s.id} className="border-b border-line px-2.5 py-2 last:border-0">
               <div className="flex items-center gap-2">
@@ -317,7 +317,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
                   {s.kind === 'submit' && s.score !== null && (s.score === 100 ? '✓' : `${s.score}점`)}
                 </span>
               </div>
-              <p className="mt-0.5 text-[11.5px] whitespace-nowrap text-faint tabular-nums">
+              <p className="mt-0.5 text-micro whitespace-nowrap text-faint tabular-nums">
                 {time(s.createdAt)} · {s.kind === 'submit' ? '제출' : '실행'} · {s.language === 'java' ? 'Java' : 'Python'}
               </p>
             </li>
@@ -339,15 +339,15 @@ function SignupControl() {
     },
   });
   if (settings.isPending) return <LinesSkeleton />;
-  if (settings.isError) return <p role="alert" className="text-[13px] text-bad">{errMsg(settings.error)}</p>;
+  if (settings.isError) return <p role="alert" className="text-ui text-bad">{errMsg(settings.error)}</p>;
   const enabled = settings.data.signupEnabled;
   return (
     <section className="max-w-xl rounded-lg border border-line bg-panel p-5">
-      <h1 className="text-[16px] font-bold">신규 가입</h1>
+      <h1 className="text-lead font-bold">신규 가입</h1>
       <output className={`block mt-4 font-semibold ${enabled ? 'text-ok' : 'text-warn'}`}>
         {enabled ? '✓ 신규 가입을 받고 있어요' : '✗ 신규 가입을 멈춘 상태예요'}
       </output>
-      <p className="mt-2 text-[13px] text-dim">중지하면 가입 절차를 밟고 있던 계정을 포함해 새 계정을 만들 수 없어요. 기존 회원은 그대로 이용할 수 있어요.</p>
+      <p className="mt-2 text-ui text-dim">중지하면 가입 절차를 밟고 있던 계정을 포함해 새 계정을 만들 수 없어요. 기존 회원은 그대로 이용할 수 있어요.</p>
       <button
         type="button"
         className="btn-primary mt-5"
@@ -357,8 +357,8 @@ function SignupControl() {
         {save.isPending && '저장 중…'}
         {!save.isPending && (enabled ? '신규 가입 중지하기' : '신규 가입 다시 받기')}
       </button>
-      {save.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(save.error)}</p>}
-      {save.isSuccess && <output className="block mt-3 text-[13px] text-dim">설정을 저장했어요.</output>}
+      {save.isError && <p role="alert" className="mt-3 text-ui text-bad">{errMsg(save.error)}</p>}
+      {save.isSuccess && <output className="block mt-3 text-ui text-dim">설정을 저장했어요.</output>}
     </section>
   );
 }

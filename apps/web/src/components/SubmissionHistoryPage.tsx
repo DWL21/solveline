@@ -27,11 +27,11 @@ const isActive = (status: string | undefined) => status === 'queued' || status =
 
 /** 채점 결과 영역: 상태별로 한 가지만 보여 준다 */
 function GradeBody({ item }: Readonly<{ item: SubmissionDetail }>) {
-  if (isActive(item.status)) return <p className="p-4 text-[13px] text-dim">{statusText(item)}</p>;
-  if (item.status === 'error') return <p className="p-4 text-[13px] text-bad">{item.error ?? '채점하지 못했어요'}</p>;
-  if (item.status === 'cancelled') return <p className="p-4 text-[13px] text-warn">채점을 중지했습니다.</p>;
+  if (isActive(item.status)) return <p className="p-4 text-ui text-dim">{statusText(item)}</p>;
+  if (item.status === 'error') return <p className="p-4 text-ui text-bad">{item.error ?? '채점하지 못했어요'}</p>;
+  if (item.status === 'cancelled') return <p className="p-4 text-ui text-warn">채점을 중지했습니다.</p>;
   if (item.result) return <ResultPanel state={{ kind: 'graded', result: item.result, score: item.score ?? 0 }} />;
-  return <p className="p-4 text-[13px] text-dim">결과가 없어요</p>;
+  return <p className="p-4 text-ui text-dim">결과가 없어요</p>;
 }
 
 function Detail({ id, onClose, onPickProblem }: Readonly<{ id: string; onClose: () => void; onPickProblem: (id: string) => void }>) {
@@ -45,24 +45,24 @@ function Detail({ id, onClose, onPickProblem }: Readonly<{ id: string; onClose: 
     <section className="min-w-0 flex-1 rounded-lg border border-line bg-panel" aria-label="제출 상세">
       <div className="flex items-start justify-between gap-3 border-b border-line p-4">
         <div>
-          <h2 className="text-[16px] font-bold">{item?.problemTitle ?? '제출 상세'}</h2>
-          {item && <p className="mt-1 text-[13px] text-dim">{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'} · {statusText(item)}</p>}
+          <h2 className="text-lead font-bold">{item?.problemTitle ?? '제출 상세'}</h2>
+          {item && <p className="mt-1 text-ui text-dim">{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'} · {statusText(item)}</p>}
         </div>
         <button type="button" className="btn-quiet touch-target shrink-0" onClick={onClose} aria-label="상세 닫기"><span className="lg:hidden">목록으로</span><span className="hidden lg:inline">닫기</span></button>
       </div>
       {query.isPending && <div className="p-4"><LinesSkeleton /></div>}
       {query.isError && (
-        <div className="p-4 text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></div>
+        <div className="p-4 text-ui text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></div>
       )}
       {!query.isPending && !query.isError && item && (
         <div className="space-y-5 p-4">
           {item.problemId && item.problemTitle && <button type="button" className="btn-ghost" onClick={() => onPickProblem(item.problemId!)}>문제로 이동</button>}
           <div>
-            <h3 className="mb-2 text-[13px] font-bold">제출한 코드</h3>
-            <pre className="max-h-96 overflow-auto rounded-md border border-line bg-raised p-3 font-mono text-[12px] leading-relaxed text-text"><code>{item.code}</code></pre>
+            <h3 className="mb-2 text-ui font-bold">제출한 코드</h3>
+            <pre className="max-h-96 overflow-auto rounded-md border border-line bg-raised p-3 font-mono text-caption leading-relaxed text-text"><code>{item.code}</code></pre>
           </div>
           <div>
-            <h3 className="mb-2 text-[13px] font-bold">채점 결과</h3>
+            <h3 className="mb-2 text-ui font-bold">채점 결과</h3>
             <div className="rounded-md border border-line">
               <GradeBody item={item} />
             </div>
@@ -83,19 +83,19 @@ export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProble
     enabled: !!me,
     refetchInterval: (q) => (q.state.data?.items.some((item) => isActive(item.status)) ? 1500 : false),
   });
-  if (!me) return <div className="p-6 text-[14px]">제출 기록은 로그인하면 볼 수 있어요. <a className="font-semibold text-accent-text underline" href={loginHref()}>로그인</a></div>;
+  if (!me) return <div className="p-6 text-body">제출 기록은 로그인하면 볼 수 있어요. <a className="font-semibold text-accent-text underline" href={loginHref()}>로그인</a></div>;
   let listBody: ReactNode;
   if (query.isPending) listBody = <LinesSkeleton lines={5} />;
-  else if (query.isError) listBody = <p className="text-[13px] text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></p>;
-  else if (query.data.items.length === 0 && offset === 0) listBody = <p className="rounded-lg border border-line bg-panel px-5 py-10 text-center text-[14px] text-dim">아직 제출한 기록이 없어요</p>;
+  else if (query.isError) listBody = <p className="text-ui text-bad">{errorText(query.error)} <button type="button" className="btn-ghost ml-2" onClick={() => void query.refetch()}>다시 시도</button></p>;
+  else if (query.data.items.length === 0 && offset === 0) listBody = <p className="rounded-lg border border-line bg-panel px-5 py-10 text-center text-body text-dim">아직 제출한 기록이 없어요</p>;
   else
     listBody = (
       <>
         <ol className="overflow-hidden rounded-lg border border-line bg-panel">
           {query.data.items.map((item) => <li key={item.id} className="border-b border-line last:border-0">
             <button type="button" onClick={() => setSelected(item.id)} aria-pressed={selected === item.id} className={`w-full px-4 py-3 text-left hover:bg-raised ${selected === item.id ? 'bg-raised' : ''}`}>
-              <span className="block truncate text-[14px] font-semibold">{item.problemTitle ?? '삭제된 문제'}</span>
-              <span className="mt-1 flex items-center justify-between gap-2 text-[12.5px] text-dim"><span>{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'}</span><span className={`font-semibold ${statusColor(item)}`}>{statusText(item)}</span></span>
+              <span className="block truncate text-body font-semibold">{item.problemTitle ?? '삭제된 문제'}</span>
+              <span className="mt-1 flex items-center justify-between gap-2 text-meta text-dim"><span>{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'}</span><span className={`font-semibold ${statusColor(item)}`}>{statusText(item)}</span></span>
             </button>
           </li>)}
         </ol>
@@ -110,13 +110,13 @@ export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProble
     <main className="pb-safe min-h-0 flex-1 overflow-y-auto px-4 pt-6 pb-10 sm:px-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
         <h1 className="text-[24px] font-bold tracking-tight">제출 기록</h1>
-        <p className="mt-1.5 text-[14px] text-dim">최근 30일 동안 제출한 코드와 채점 결과예요.</p>
+        <p className="mt-1.5 text-body text-dim">최근 30일 동안 제출한 코드와 채점 결과예요.</p>
         <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-start">
           {/* 좁은 화면: 제출을 고르면 목록 대신 상세를 크게 보여 준다 */}
           <section className={`w-full shrink-0 lg:block lg:w-80 ${selected ? 'hidden' : ''}`} aria-label="제출 목록">
             {listBody}
           </section>
-          {selected ? <Detail key={selected} id={selected} onClose={() => setSelected(null)} onPickProblem={onPickProblem} /> : <div className="hidden min-h-48 flex-1 items-center justify-center rounded-lg border border-dashed border-line-strong p-4 text-[14px] text-faint lg:flex">왼쪽에서 제출을 선택하세요</div>}
+          {selected ? <Detail key={selected} id={selected} onClose={() => setSelected(null)} onPickProblem={onPickProblem} /> : <div className="hidden min-h-48 flex-1 items-center justify-center rounded-lg border border-dashed border-line-strong p-4 text-body text-faint lg:flex">왼쪽에서 제출을 선택하세요</div>}
         </div>
       </div>
     </main>

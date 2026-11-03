@@ -7,7 +7,7 @@ import { api, qk } from '../lib/api.ts';
 /** 화면 맨 아래 약관 링크. admin이면 관리자 모드로 가는 흐린 글자를 덧붙인다. */
 export function LegalFooter({ admin = false }: Readonly<{ admin?: boolean }>) {
   return (
-    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-1 px-4 py-5 text-[12px] text-faint">
+    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-1 px-4 py-5 text-caption text-faint">
       <span>© Solveline</span>
       <a href="/terms" className="hover:text-dim">
         이용약관
@@ -36,14 +36,14 @@ function Page({ title, version, children }: Readonly<{ title: string; version: s
         <div className="mx-auto flex h-13 max-w-3xl items-center px-4">
           <a href="/" className="flex items-center gap-2">
             <img src="/icon.svg" alt="" className="size-6" />
-            <span className="text-[16px] font-extrabold tracking-tight">Solveline</span>
+            <span className="text-lead font-extrabold tracking-tight">Solveline</span>
           </a>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-10">
         <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
-        <p className="mt-1 text-[12.5px] text-faint">시행일 {version}</p>
-        <div className="legal mt-6 flex flex-col gap-6 text-[15px] leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-[13px] [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
+        <p className="mt-1 text-meta text-faint">시행일 {version}</p>
+        <div className="legal mt-6 flex flex-col gap-6 text-body-lg leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-ui [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
           {children}
         </div>
       </main>
@@ -256,7 +256,7 @@ export function PrivacyPage() {
         <p>
           운영자 · <Contact email={email} />
         </p>
-        <p className="mt-2 text-[13px] text-dim">
+        <p className="mt-2 text-ui text-dim">
           개인정보 침해 신고·상담: 개인정보침해신고센터(privacy.kisa.or.kr, 국번 없이 118), 개인정보분쟁조정위원회(kopico.go.kr, 1833-6972)
         </p>
       </section>

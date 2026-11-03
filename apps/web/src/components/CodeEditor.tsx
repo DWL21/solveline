@@ -29,8 +29,8 @@ const navy = EditorView.theme(
   {
     '&': { backgroundColor: 'var(--color-raised)' },
     '.cm-gutters': { backgroundColor: 'var(--color-raised)', borderRight: '1px solid var(--color-line)', color: 'var(--color-faint)' },
-    '.cm-activeLine': { backgroundColor: 'rgb(255 255 255 / 0.04)' },
-    '.cm-activeLineGutter': { backgroundColor: 'rgb(255 255 255 / 0.06)' },
+    '.cm-activeLine': { backgroundColor: 'var(--color-editor-active-line)' },
+    '.cm-activeLineGutter': { backgroundColor: 'var(--color-editor-active-gutter)' },
   },
   { dark: true },
 );

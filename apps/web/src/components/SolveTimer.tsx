@@ -78,7 +78,7 @@ export function SolveTimerBadge({
   return (
     <span className="inline-flex items-center gap-1">
       <span
-        className={`rounded-md px-2 py-1 font-mono text-[12.5px] font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : pausedTone}`}
+        className={`rounded-md px-2 py-1 font-mono text-meta font-semibold tabular-nums ${solved ? 'bg-ok/15 text-ok' : pausedTone}`}
         title={solved ? '정답을 맞힌 시점의 풀이 시간' : '풀이 시간'}
         aria-label={solved ? `풀이 시간 ${formatDuration(timer.solvedMs!)}, 해결` : `풀이 시간 ${formatDuration(timer.elapsedMs)}`}
       >
@@ -111,10 +111,10 @@ export function SolveTimerBadge({
 export function PausedOverlay({ elapsedMs, onResume }: Readonly<{ elapsedMs: number; onResume: () => void }>) {
   return (
     <dialog open className="absolute inset-0 z-20 flex items-center justify-center bg-ink/40 backdrop-blur-md h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="타이머 일시정지됨">
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-line-strong bg-panel/95 px-8 py-6 text-center shadow-2xl">
-        <p className="text-[13px] font-semibold text-dim">일시정지</p>
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-line-strong bg-panel/95 px-8 py-6 text-center shadow-overlay">
+        <p className="text-ui font-semibold text-dim">일시정지</p>
         <p className="font-mono text-[32px] font-bold tabular-nums">{formatDuration(elapsedMs)}</p>
-        <button type="button" className="btn-primary min-h-11 px-6 text-[15px]" onClick={onResume} autoFocus>
+        <button type="button" className="btn-primary min-h-11 px-6 text-body-lg" onClick={onResume} autoFocus>
           다시 시작
         </button>
       </div>

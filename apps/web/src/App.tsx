@@ -49,7 +49,7 @@ function Main() {
   if (session.isPending) return <BootScreen />;
   if (session.isError)
     return (
-      <div className="p-6 text-[13px]">
+      <div className="p-6 text-ui">
         <p className="font-semibold text-bad">{session.error instanceof ApiError ? session.error.message : '서버에 연결할 수 없어요'}</p>
         <button type="button" className="btn-ghost mt-3" onClick={() => void session.refetch()}>
           다시 시도
@@ -154,7 +154,7 @@ function Shell() {
 
 
 const navLink = (active: boolean) =>
-  `flex h-full items-center border-b-2 px-1 text-[14px] font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
+  `flex h-full items-center border-b-2 px-1 text-body font-semibold ${active ? 'border-accent text-text' : 'border-transparent text-dim hover:text-text'}`;
 
 /** 상단바: 로고, 주 메뉴(문제 화면에서는 목록으로 돌아가기), 제출 기록, 계정 */
 function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ route: Route; signedIn: boolean; onLogo: () => void; onList: () => void; onLogout: () => void }>) {
@@ -172,7 +172,7 @@ function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ rou
         }}
       >
         <img src="/icon.svg" alt="" className="size-6" />
-        <span className="text-[16px] font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
+        <span className="text-lead font-extrabold tracking-tight max-[359px]:hidden">Solveline</span>
       </a>
       {ide ? (
         <button type="button" className="btn-quiet ml-1 gap-1 px-2" onClick={onList}>
@@ -190,20 +190,20 @@ function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ rou
           )}
           {signedIn && (
             <a href="#/inbox" className={navLink(route.kind === 'inbox')} aria-current={route.kind === 'inbox' ? 'page' : undefined}>
-              인박스{unread > 0 && <span className="ml-1 text-[12px] font-bold text-accent-text">{unread}</span>}
+              인박스{unread > 0 && <span className="ml-1 text-caption font-bold text-accent-text">{unread}</span>}
             </a>
           )}
         </nav>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
         {signedIn && (ide ? (
-          <a href="#/submissions" className="btn-quiet px-2 text-[13px]">제출 기록</a>
+          <a href="#/submissions" className="btn-quiet px-2 text-ui">제출 기록</a>
         ) : (
           <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
         ))}
         {signedIn && !ide && (
           <a href="#/inbox" className={`btn-quiet px-2 sm:hidden ${route.kind === 'inbox' ? 'text-text' : ''}`} aria-current={route.kind === 'inbox' ? 'page' : undefined}>
-            인박스{unread > 0 && <span className="ml-1 text-[12px] font-bold text-accent-text">{unread}</span>}
+            인박스{unread > 0 && <span className="ml-1 text-caption font-bold text-accent-text">{unread}</span>}
           </a>
         )}
         <UserMenu onLogout={onLogout} />
@@ -240,16 +240,16 @@ function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
     <div className="relative" data-user-menu>
       <button type="button" className="flex items-center gap-2 rounded-full py-1 pr-1 pl-1 hover:bg-raised sm:pr-2.5" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Avatar picture={me.picture} email={me.email} name={temporary ? me.name : undefined} size={24} />
-        <span className="hidden max-w-44 truncate text-[13px] font-semibold text-dim sm:inline">{label}</span>
+        <span className="hidden max-w-44 truncate text-ui font-semibold text-dim sm:inline">{label}</span>
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-1.5 w-60 rounded-lg border border-line bg-panel p-1.5 shadow-2xl">
+        <div className="absolute right-0 z-40 mt-1.5 w-60 rounded-lg border border-line bg-panel p-1.5 shadow-overlay">
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
-            <p className="truncate text-[13px] font-semibold">{me.name || me.email}</p>
-            <p className="truncate text-[12px] text-dim">{temporary ? '임시 계정' : me.email}</p>
-            {me.editor && <p className="mt-1.5 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-[11.5px] font-semibold text-accent-text">편집 권한</p>}
+            <p className="truncate text-ui font-semibold">{me.name || me.email}</p>
+            <p className="truncate text-caption text-dim">{temporary ? '임시 계정' : me.email}</p>
+            {me.editor && <p className="mt-1.5 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-micro font-semibold text-accent-text">편집 권한</p>}
           </div>
-          <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-raised" onClick={onLogout}>
+          <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-ui hover:bg-raised" onClick={onLogout}>
             로그아웃
           </button>
         </div>
@@ -282,9 +282,9 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
     },
   });
   return (
-    <dialog open className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="새 문제">
+    <dialog open className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 h-auto max-h-none w-auto max-w-none text-inherit" aria-modal="true" aria-label="새 문제">
       <form
-        className="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-overlay"
         onSubmit={(e) => {
           e.preventDefault();
           create.mutate();
@@ -292,11 +292,11 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
       >
         <h2 className="text-[17px] font-bold">새 문제</h2>
         <label className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[12px] font-bold text-dim">제목</span>
-          <input className="field font-sans text-[14px]" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 두 개 뽑아서 더하기" autoFocus />
+          <span className="text-caption font-bold text-dim">제목</span>
+          <input className="field font-sans text-body" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 두 개 뽑아서 더하기" autoFocus />
         </label>
         <fieldset className="mt-4">
-          <legend className="mb-1.5 text-[12px] font-bold text-dim">문제 형식</legend>
+          <legend className="mb-1.5 text-caption font-bold text-dim">문제 형식</legend>
           <div className="grid grid-cols-2 gap-2">
             {(
               [
@@ -306,18 +306,18 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
             ).map(([m, name, hint]) => (
               <label key={m} className={`cursor-pointer rounded-md border p-3 ${mode === m ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-dim'}`}>
                 <input type="radio" name="mode" className="sr-only" checked={mode === m} onChange={() => setMode(m)} />
-                <span className="block text-[13px] font-bold">{name}</span>
-                <span className="block text-[11.5px] text-faint">{hint}</span>
+                <span className="block text-ui font-bold">{name}</span>
+                <span className="block text-micro text-faint">{hint}</span>
               </label>
             ))}
           </div>
         </fieldset>
         <label className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[12px] font-bold text-dim">폴더</span>
+          <span className="text-caption font-bold text-dim">폴더</span>
           <select
             value={folderId ?? ''}
             onChange={(e) => setFolderId(e.target.value || null)}
-            className="h-[34px] rounded-md border border-line-strong bg-panel px-2 text-[13px] outline-none focus:border-accent"
+            className="h-[34px] rounded-md border border-line-strong bg-panel px-2 text-ui outline-none focus:border-accent"
           >
             <option value="">선택 안 함</option>
             {folders.data?.map((f) => (
@@ -328,20 +328,20 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
           </select>
         </label>
         {collection && (
-          <p className="mt-2 text-[12px] text-faint">'{collection.name}' 컬렉션 맨 뒤에 추가돼요.</p>
+          <p className="mt-2 text-caption text-faint">'{collection.name}' 컬렉션 맨 뒤에 추가돼요.</p>
         )}
         <label className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[12px] font-bold text-dim">언어</span>
+          <span className="text-caption font-bold text-dim">언어</span>
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value as Language)}
-            className="h-[34px] rounded-md border border-line-strong bg-panel px-2 text-[13px] font-semibold outline-none focus:border-accent"
+            className="h-[34px] rounded-md border border-line-strong bg-panel px-2 text-ui font-semibold outline-none focus:border-accent"
           >
             <option value="java">Java</option>
             <option value="python">Python3</option>
           </select>
         </label>
-        {create.isError && <p className="mt-3 text-[13px] font-semibold text-bad">{create.error instanceof ApiError ? create.error.message : '문제를 만들지 못했어요'}</p>}
+        {create.isError && <p className="mt-3 text-ui font-semibold text-bad">{create.error instanceof ApiError ? create.error.message : '문제를 만들지 못했어요'}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className="btn-quiet" onClick={onClose}>
             취소

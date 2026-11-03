@@ -58,13 +58,13 @@ const stats = (r: CaseResult) => `${r.timeMs.toFixed(2)}ms, ${r.memoryMb.toFixed
 export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
   if (state.kind === 'idle')
     return (
-      <p className="p-4 text-[13px] text-faint">
+      <p className="p-4 text-ui text-faint">
         실행 결과가 여기에 표시됩니다. <span className="max-md:hidden">코드 실행은 ⌘/Ctrl + Enter</span>
       </p>
     );
   if (state.kind === 'running')
     return (
-      <output className="flex items-center gap-2.5 p-4 text-[13px] text-dim" aria-live="polite">
+      <output className="flex items-center gap-2.5 p-4 text-ui text-dim" aria-live="polite">
         <Spinner size={16} className="text-accent-text" />
         {state.ahead ? (
           <span>
@@ -75,8 +75,8 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
         )}
       </output>
     );
-  if (state.kind === 'error') return <p className="p-4 text-[13px] font-semibold text-bad">{state.message}</p>;
-  if (state.kind === 'cancelled') return <p className="p-4 text-[13px] font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
+  if (state.kind === 'error') return <p className="p-4 text-ui font-semibold text-bad">{state.message}</p>;
+  if (state.kind === 'cancelled') return <p className="p-4 text-ui font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
   if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
   if (state.kind === 'graded') return <Graded result={state.result} score={state.score} />;
 
@@ -87,10 +87,10 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
   const allPassed = passed === graded.length;
 
   return (
-    <div className="flex flex-col gap-2.5 p-4 font-mono text-[12.5px] leading-relaxed">
-      {state.cancelled && <p className="font-sans text-[13px] font-semibold text-warn">실행을 중지했습니다.</p>}
+    <div className="flex flex-col gap-2.5 p-4 font-mono text-meta leading-relaxed">
+      {state.cancelled && <p className="font-sans text-ui font-semibold text-warn">실행을 중지했습니다.</p>}
       {graded.length > 0 && (
-        <p className={`font-sans text-[14px] font-bold ${allPassed ? 'text-ok' : 'text-bad'}`}>
+        <p className={`font-sans text-body font-bold ${allPassed ? 'text-ok' : 'text-bad'}`}>
           {allPassed ? '✓ ' : '✗ '}
           {graded.length}개 중 {passed}개 성공
         </p>
@@ -100,12 +100,12 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
         return (
           <section key={r.id} className="rounded-md border border-line bg-base/60 px-3 py-2.5">
             <header className="mb-1.5 flex flex-wrap items-baseline gap-x-2 font-sans">
-              <b className="text-[13px] text-text">테스트 {i + 1}</b>
-              <span className={`text-[12.5px] font-bold ${STATUS_STYLE[r.status].color}`}>
+              <b className="text-ui text-text">테스트 {i + 1}</b>
+              <span className={`text-meta font-bold ${STATUS_STYLE[r.status].color}`}>
                 {STATUS_STYLE[r.status].mark}
                 {label[r.status]}
               </span>
-              {r.status !== 'skipped' && <span className="ml-auto text-[11.5px] text-faint tabular-nums">{stats(r)}</span>}
+              {r.status !== 'skipped' && <span className="ml-auto text-micro text-faint tabular-nums">{stats(r)}</span>}
             </header>
             {c && (
               <dl className="grid grid-cols-[4.5rem_1fr] gap-x-3 gap-y-1">
@@ -143,8 +143,8 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
 function CompileError({ output }: Readonly<{ output: string }>) {
   return (
     <div className="p-4">
-      <p className="mb-2 text-[13px] font-bold text-bad">컴파일 에러</p>
-      <pre className="overflow-x-auto font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-bad/90">{output.trim()}</pre>
+      <p className="mb-2 text-ui font-bold text-bad">컴파일 에러</p>
+      <pre className="overflow-x-auto font-mono text-meta leading-relaxed whitespace-pre-wrap text-bad/90">{output.trim()}</pre>
     </div>
   );
 }
@@ -162,14 +162,14 @@ const gradedLabel: Record<CaseResult['status'], string> = {
 function Graded({ result, score }: Readonly<{ result: RunResult; score: number }>) {
   const passed = result.results.filter((r) => r.status === 'pass').length;
   return (
-    <div className="p-4 text-[13px]">
+    <div className="p-4 text-ui">
       {score === 100 ? (
-        <p className="mb-3 rounded-md bg-ok/12 px-3 py-2.5 text-[14px] font-bold text-ok">✓ 정답입니다</p>
+        <p className="mb-3 rounded-md bg-ok/12 px-3 py-2.5 text-body font-bold text-ok">✓ 정답입니다</p>
       ) : (
-        <p className="mb-3 rounded-md bg-bad/10 px-3 py-2.5 text-[14px] font-bold text-bad">✗ 틀렸습니다</p>
+        <p className="mb-3 rounded-md bg-bad/10 px-3 py-2.5 text-body font-bold text-bad">✗ 틀렸습니다</p>
       )}
       <p className="mb-1.5 font-bold">정확성 테스트</p>
-      <ul className="font-mono text-[12.5px] leading-[1.9]">
+      <ul className="font-mono text-meta leading-[1.9]">
         {result.results.map((r, i) => {
           const ok = r.status === 'pass';
           return (
@@ -186,9 +186,9 @@ function Graded({ result, score }: Readonly<{ result: RunResult; score: number }
       </ul>
       <div className="mt-3 flex flex-wrap items-baseline gap-x-2 border-t border-line pt-3">
         <span className="font-bold">점수</span>
-        <b className={`text-[16px] tabular-nums ${score === 100 ? 'text-ok' : 'text-bad'}`}>{score.toFixed(1)}</b>
+        <b className={`text-lead tabular-nums ${score === 100 ? 'text-ok' : 'text-bad'}`}>{score.toFixed(1)}</b>
         <span className="text-faint">/ 100.0</span>
-        <span className="ml-auto text-[12.5px] text-dim">
+        <span className="ml-auto text-meta text-dim">
           {result.results.length}개 중 {passed}개 통과
         </span>
       </div>

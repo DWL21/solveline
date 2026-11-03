@@ -1,31 +1,94 @@
 @import 'tailwindcss';
 
-/* 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤. 색은 모두 이 토큰으로만 쓴다. */
+/*
+ * 디자인 토큰. 쓰임새와 규칙은 저장소 루트 DESIGN.md에 있다.
+ * 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤이 기본이다. 색은 모두 이 토큰으로만 쓴다.
+ */
 @theme {
   --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: 'JetBrains Mono', 'D2Coding', 'SF Mono', Menlo, Consolas, monospace;
 
+  /* 표면: 어두운 것부터 밝은 것 순서 */
   --color-ink: #0c151c;
+  --color-bar: #0f1922;
   --color-base: #172334;
   --color-panel: #1e2a38;
   --color-raised: #263747;
+  /* 경계선 */
   --color-line: #2f4256;
   --color-line-strong: #3d5468;
+  /* 글자: 본문 > 보조 > 흐림 */
   --color-text: #e6edf3;
   --color-dim: #aab9c9;
   --color-faint: #90a3b6;
+  /* 강조(주 행동)와 링크 */
   --color-accent: #0066e0;
   --color-accent-hover: #1a74e8;
   --color-accent-text: #5aaeff;
+  --color-on-accent: #ffffff;
   --color-sky: #44c4f5;
+  /* 상태: 색만으로 구분하지 않고 ✓/✗·문구를 같이 쓴다 */
   --color-ok: #3ec27d;
   --color-bad: #ff6b6b;
   --color-warn: #f5b94a;
-  --color-bar: #0f1922;
+  /* 보조 */
+  --color-star: #f0a80e;
+  --color-star-hover: #e8a20c;
+  --color-scrim: rgb(0 0 0 / 0.6);
+  --color-selection: rgb(0 120 255 / 0.35);
+  --color-editor-active-line: rgb(255 255 255 / 0.04);
+  --color-editor-active-gutter: rgb(255 255 255 / 0.06);
+
+  /* 글자 크기. 줄 높이는 정하지 않고 부모를 따른다(예전 text-[13px]과 같다). */
+  --text-micro: 11.5px;
+  --text-caption: 12px;
+  --text-meta: 12.5px;
+  --text-ui: 13px;
+  --text-ui-lg: 13.5px;
+  --text-body: 14px;
+  --text-body-lg: 15px;
+  --text-lead: 16px;
+  --text-title: 20px;
+  --text-title-lg: 22px;
+
+  /* 그림자: 떠 있는 층(메뉴·대화상자·카드형 화면)에만 쓴다. Tailwind가 값을 그대로 넣으므로 테마별로 바꾸지 않는다. */
+  --shadow-overlay: 0 25px 50px -12px rgb(0 0 0 / 0.25);
 }
 
 :root {
   color-scheme: dark;
+}
+
+/*
+ * 라이트 팔레트(준비 단계). html에 data-theme="light"를 붙이면 적용된다.
+ * 아직 화면에서 고르는 곳은 없다. 에디터 테마(oneDark)는 다크 고정이라 함께 바꿔야 한다(DESIGN.md).
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-ink: #eef2f6;
+  --color-bar: #e3e9ef;
+  --color-base: #f7f9fb;
+  --color-panel: #ffffff;
+  --color-raised: #e9eef3;
+  --color-line: #d5dde6;
+  --color-line-strong: #b8c4d1;
+  --color-text: #13202c;
+  --color-dim: #44566a;
+  --color-faint: #5a6b7d;
+  --color-accent: #0066e0;
+  --color-accent-hover: #0057c2;
+  --color-accent-text: #0058c4;
+  --color-on-accent: #ffffff;
+  --color-sky: #0b6f9c;
+  --color-ok: #167443;
+  --color-bad: #c53030;
+  --color-warn: #8f5c00;
+  --color-star: #b07800;
+  --color-star-hover: #9a6900;
+  --color-scrim: rgb(15 25 34 / 0.45);
+  --color-selection: rgb(0 102 224 / 0.2);
+  --color-editor-active-line: rgb(0 0 0 / 0.04);
+  --color-editor-active-gutter: rgb(0 0 0 / 0.06);
 }
 
 /*
@@ -106,7 +169,7 @@ body {
 }
 
 ::selection {
-  background: rgb(0 120 255 / 0.35);
+  background: var(--color-selection);
 }
 
 * {
@@ -115,11 +178,11 @@ body {
 }
 
 @utility btn {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 text-[13px] font-semibold whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 text-ui font-semibold whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   min-height: 34px;
 }
 @utility btn-primary {
-  @apply btn bg-accent text-white hover:bg-accent-hover;
+  @apply btn bg-accent text-on-accent hover:bg-accent-hover;
 }
 @utility btn-ghost {
   @apply btn border border-line-strong bg-panel text-text hover:border-faint hover:bg-raised;
@@ -128,10 +191,10 @@ body {
   @apply btn text-dim hover:bg-raised hover:text-text;
 }
 @utility field {
-  @apply w-full rounded-md border border-line-strong bg-base px-2.5 py-1.5 font-mono text-[13px] text-text outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/15;
+  @apply w-full rounded-md border border-line-strong bg-base px-2.5 py-1.5 font-mono text-ui text-text outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/15;
 }
 @utility pane-title {
-  @apply flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-[13px] font-bold text-dim;
+  @apply flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-ui font-bold text-dim;
 }
 
 /* CodeMirror를 패널에 꽉 채운다 */

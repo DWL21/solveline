@@ -45,7 +45,7 @@ export function Workspace({ problemId, onDeleted, onNext, onList }: Readonly<{ p
   if (q.isPending) return <WorkspaceSkeleton />;
   if (q.isError)
     return (
-      <div className="p-6 text-[13px]">
+      <div className="p-6 text-ui">
         <p className="font-semibold text-bad">{errMsg(q.error)}</p>
         <button type="button" className="btn-ghost mt-3" onClick={() => void q.refetch()}>
           다시 시도
@@ -345,7 +345,7 @@ function Editor({ problem, onDeleted, onNext, onList }: Readonly<{ problem: Prob
         onToggleEditing={toggleEditing}
         onSaveStarter={saveAsStarter}
       />
-      {editing && !panes.codeFocus && <p className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-[12px] text-warn">편집 모드 · 바꾼 내용은 모든 사용자에게 적용돼요</p>}
+      {editing && !panes.codeFocus && <p className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-caption text-warn">편집 모드 · 바꾼 내용은 모든 사용자에게 적용돼요</p>}
       {narrow && <PaneTabs pane={panes.pane} onPane={panes.selectPane} compact={panes.codeFocus} runner={runner} unseen={panes.unseen} />}
       {solvedOpen && <SolvedDialog solvedMs={solve.timer.solvedMs ?? solve.timer.elapsedMs} onNext={onNext} onList={onList} onClose={() => setSolvedOpen(false)} />}
       <div ref={rowRef} className="relative flex min-h-0 flex-1 flex-col md:flex-row" style={{ '--left': `${layout.leftPct}%` } as React.CSSProperties}>
@@ -420,7 +420,7 @@ function RunFooter({
         테스트 케이스 추가하기
       </button>
       {editing && !narrow && (
-        <button type="button" className="btn-quiet text-[12px]" onClick={onSaveStarter} title="모든 사용자의 시작 코드가 바뀌어요">
+        <button type="button" className="btn-quiet text-caption" onClick={onSaveStarter} title="모든 사용자의 시작 코드가 바뀌어요">
           시작 코드로 저장
         </button>
       )}
@@ -496,10 +496,10 @@ function TitleBar({
           value={draft.title}
           onChange={(e) => patch({ title: e.target.value })}
           aria-label="문제 제목"
-          className="min-w-0 flex-1 basis-56 rounded bg-raised/60 px-1 py-1 text-[15px] font-bold outline-none focus:bg-raised"
+          className="min-w-0 flex-1 basis-56 rounded bg-raised/60 px-1 py-1 text-body-lg font-bold outline-none focus:bg-raised"
         />
       ) : (
-        <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-[15px] font-bold">{draft.title}</h1>
+        <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-body-lg font-bold">{draft.title}</h1>
       )}
       <BookmarkStar id={problem.id} bookmarked={summaries.data?.find((p) => p.id === problem.id)?.bookmarked} />
       {!guest && <SaveBadge state={saveState} onRetry={() => { if (queue) void queue.flush(problem.id); }} />}
@@ -514,7 +514,7 @@ function TitleBar({
           value={draft.language}
           aria-label="언어"
           onChange={(e) => patch({ language: e.target.value as Language })}
-          className="h-[34px] rounded-md border border-line-strong bg-raised px-2 text-[13px] font-semibold outline-none focus:border-accent"
+          className="h-[34px] rounded-md border border-line-strong bg-raised px-2 text-ui font-semibold outline-none focus:border-accent"
         >
           <option value="java">Java</option>
           <option value="python">Python3</option>
@@ -530,7 +530,7 @@ function LastScore({ problem }: Readonly<{ problem: Problem }>) {
   if (!sub) return null;
   const solved = sub.score === 100;
   return (
-    <span className={`text-[12.5px] font-semibold whitespace-nowrap ${solved ? 'text-ok' : 'text-warn'}`} title={`최근 제출 ${new Date(sub.at).toLocaleString('ko-KR')}`}>
+    <span className={`text-meta font-semibold whitespace-nowrap ${solved ? 'text-ok' : 'text-warn'}`} title={`최근 제출 ${new Date(sub.at).toLocaleString('ko-KR')}`}>
       {solved ? '✓ 해결' : `${sub.score}점`}
     </span>
   );
@@ -556,12 +556,12 @@ function EditTools({
   return (
     <>
       {editing && narrow && (
-        <button type="button" className="btn-quiet px-2 text-[12px]" onClick={onSaveStarter}>
+        <button type="button" className="btn-quiet px-2 text-caption" onClick={onSaveStarter}>
           시작 코드로 저장
         </button>
       )}
       {editing && (
-        <button type="button" className="btn-quiet px-2 text-[12px]" disabled={deleting} onClick={() => confirm(`"${title}" 문제를 모든 사용자에게서 삭제할까요? 되돌릴 수 없어요.`) && onDelete()}>
+        <button type="button" className="btn-quiet px-2 text-caption" disabled={deleting} onClick={() => confirm(`"${title}" 문제를 모든 사용자에게서 삭제할까요? 되돌릴 수 없어요.`) && onDelete()}>
           삭제
         </button>
       )}
@@ -591,7 +591,7 @@ function PaneTabs({ pane, onPane, compact, runner, unseen }: Readonly<{ pane: Pa
           type="button"
           aria-pressed={pane === p}
           onClick={() => onPane(p)}
-          className={`relative border-b-2 text-[13.5px] font-semibold ${compact ? 'h-10' : 'h-11'} ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
+          className={`relative border-b-2 text-ui-lg font-semibold ${compact ? 'h-10' : 'h-11'} ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
         >
           {label}
           {p === 'result' && <ResultDot pending={runner.pending} unseen={unseen} />}
@@ -635,7 +635,7 @@ function ProblemBody({ tab, problem, draft, patch, guest, editing }: Readonly<{ 
         onChange={(e) => patch({ memo: e.target.value })}
         placeholder="나만 볼 수 있는 메모예요."
         aria-label="내 메모"
-        className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
+        className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-body leading-relaxed outline-none placeholder:text-faint"
       />
     );
   if (tab === 'desc') return <Description value={draft.description} editing={editing} onChange={(description) => patch({ description })} />;
@@ -665,12 +665,12 @@ function Description({ value, editing, onChange }: Readonly<{ value: string; edi
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="문제 설명 (Markdown)"
-        className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-[14px] leading-relaxed outline-none placeholder:text-faint"
+        className="h-full min-h-[240px] w-full resize-none bg-transparent p-4 text-body leading-relaxed outline-none placeholder:text-faint"
         autoFocus
       />
     );
   return (
-    <div className="markdown-body p-4 text-[14px] leading-[1.75] text-text/90">
+    <div className="markdown-body p-4 text-body leading-[1.75] text-text/90">
       {value.trim() ? (
         <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} skipHtml>
           {value}
@@ -739,7 +739,7 @@ function CodePane({
 function FolderName({ id }: Readonly<{ id: string | null }>) {
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const name = folders.data?.find((f) => f.id === id)?.name;
-  return name ? <span className="max-w-40 truncate text-[12.5px] text-dim">{name}</span> : null;
+  return name ? <span className="max-w-40 truncate text-meta text-dim">{name}</span> : null;
 }
 
 function FolderSelect({ value, onChange }: Readonly<{ value: string | null; onChange: (id: string | null) => void }>) {
@@ -750,7 +750,7 @@ function FolderSelect({ value, onChange }: Readonly<{ value: string | null; onCh
       aria-label="폴더"
       title="내 폴더"
       onChange={(e) => onChange(e.target.value || null)}
-      className="h-[34px] max-w-40 rounded-md border border-line-strong bg-raised px-2 text-[13px] outline-none focus:border-accent"
+      className="h-[34px] max-w-40 rounded-md border border-line-strong bg-raised px-2 text-ui outline-none focus:border-accent"
     >
       <option value="">폴더 없음</option>
       {folders.data?.map((f) => (
@@ -807,14 +807,14 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
         컬렉션{mine > 0 ? ` ${mine}` : ''}
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-2 shadow-2xl">
+        <div className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-line-strong bg-panel p-2 shadow-overlay">
           {list.length > 0 && (
             <ul className="max-h-72 overflow-y-auto">
               {list.map((c) => {
                 const checked = c.problemIds.includes(problemId);
                 return (
                   <li key={c.id}>
-                    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-raised">
+                    <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-ui hover:bg-raised">
                       <input
                         type="checkbox"
                         className="size-4 accent-accent"
@@ -823,7 +823,7 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
                         onChange={() => toggle.mutate({ id: c.id, ids: checked ? c.problemIds.filter((x) => x !== problemId) : [...c.problemIds, problemId] })}
                       />
                       <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                      <span className="text-[11.5px] text-faint">{c.problemIds.length}</span>
+                      <span className="text-micro text-faint">{c.problemIds.length}</span>
                     </label>
                   </li>
                 );
@@ -840,7 +840,7 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
             <input className="field min-w-0 flex-1" aria-label="새 컬렉션 이름" placeholder="새 컬렉션 이름" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} disabled={create.isPending} />
             <button type="submit" className="btn-primary shrink-0 px-2" disabled={!name.trim() || create.isPending}>만들기</button>
           </form>
-          {create.isError && <p role="alert" className="mt-2 text-[12px] text-bad">{create.error.message}</p>}
+          {create.isError && <p role="alert" className="mt-2 text-caption text-bad">{create.error.message}</p>}
         </div>
       )}
     </div>
@@ -850,12 +850,12 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
 function SaveBadge({ state, onRetry }: Readonly<{ state: DraftState; onRetry: () => void }>) {
   if (state === 'error' || state === 'storage-error')
     return (
-      <button type="button" onClick={onRetry} className="text-[12px] font-semibold text-bad underline">
+      <button type="button" onClick={onRetry} className="text-caption font-semibold text-bad underline">
         {state === 'storage-error' ? '임시 저장 실패 · 다시 저장' : '저장 안 됨 · 다시 시도'}
       </button>
     );
   return (
-    <span className="inline-flex items-center gap-1 text-[12px] text-faint" aria-live="polite">
+    <span className="inline-flex items-center gap-1 text-caption text-faint" aria-live="polite">
       {state === 'saved' || state === 'local' ? '저장됨' : <><Spinner size={11} /> 저장 중</>}
     </span>
   );
