@@ -167,6 +167,40 @@ describe('임시 로그인', () => {
     expect(s.db.prepare("SELECT count(*) AS n FROM users WHERE email = ?").get(a.user.email)).toEqual({ n: 1 });
   });
 
+  it('임시 계정으로 쓰다 Google로 가입하면 같은 계정을 정식 계정으로 바꿔 기록을 이어 쓴다', async () => {
+    const s = setup();
+    const temp = await s.app.request('/api/auth/temporary', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const tempCookie = cookieOf(temp, 'solveline_session')!;
+    const tempEmail = ((await temp.json()) as { data: { user: { email: string } } }).data.user.email;
+    const tempId = s.db.prepare('SELECT id FROM users WHERE email = ?').pluck().get(tempEmail) as string;
+    expect((await s.app.request('/api/me/daily/settings', { method: 'PUT', headers: { cookie: tempCookie, 'content-type': 'application/json' }, body: JSON.stringify({ subscribed: true, mail: false, weekdays: [1, 2, 3, 4, 5] }) })).status).toBe(200);
+
+    const r = await googleRoundTrip(s, 'new@example.com');
+    expect(r.location).toBe('/signup');
+    const both = `${r.signup!}; ${tempCookie}`;
+    const pending = await s.app.request('/api/auth/signup', { headers: { cookie: both } });
+    expect(((await pending.json()) as { data: { fromTemporary: boolean } }).data.fromTemporary).toBe(true);
+    const res = await s.app.request('/api/auth/signup', { method: 'POST', headers: { cookie: both, 'content-type': 'application/json' }, body: JSON.stringify(agree) });
+    expect(res.status).toBe(200);
+    const session = cookieOf(res, 'solveline_session')!;
+
+    expect(s.db.prepare('SELECT id FROM users WHERE email = ?').pluck().get('new@example.com')).toBe(tempId);
+    expect(s.db.prepare('SELECT COUNT(*) FROM users WHERE email = ?').pluck().get(tempEmail)).toBe(0);
+    expect(s.db.prepare("SELECT terms_version FROM users WHERE id = ?").pluck().get(tempId)).not.toBe('temporary');
+    const settings = await s.app.request('/api/me/daily/settings', { headers: { cookie: session } });
+    expect(((await settings.json()) as { data: { subscribed: boolean; temporary: boolean } }).data).toMatchObject({ subscribed: true, temporary: false });
+    expect(((await (await s.app.request('/api/auth/session', { headers: { cookie: tempCookie } })).json()).data).authenticated).toBe(false);
+    // 다음 로그인은 같은 계정으로 들어온다
+    expect((await googleRoundTrip(s, 'new@example.com')).session).toBeDefined();
+  });
+
+  it('임시 계정 없이 가입하면 새 계정을 만든다', async () => {
+    const s = setup();
+    const r = await googleRoundTrip(s, 'plain@example.com');
+    const pending = await s.app.request('/api/auth/signup', { headers: { cookie: r.signup! } });
+    expect(((await pending.json()) as { data: { fromTemporary: boolean } }).data.fromTemporary).toBe(false);
+  });
+
   it('신규 가입 중지와 JSON 요청 제한을 따른다', async () => {
     const s = setup();
     expect((await s.app.request('/api/auth/temporary', { method: 'POST' })).status).toBe(400);

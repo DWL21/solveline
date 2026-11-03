@@ -110,6 +110,11 @@ export function SignupScreen() {
                   </tbody>
                 </table>
 
+                {pending.data?.fromTemporary && (
+                  <p className="mt-3 rounded-md border border-line bg-raised px-3 py-2 text-ui text-dim">
+                    임시 계정에서 쓰던 풀이 기록·제출·인박스를 이 계정으로 그대로 옮겨요.
+                  </p>
+                )}
                 {signup.isError && (
                   <p role="alert" className="mt-3 text-ui font-semibold text-bad">
                     {apiMessage(signup.error, '가입하지 못했어요')}

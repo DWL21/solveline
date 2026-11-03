@@ -21,7 +21,7 @@ function GoogleSignupNudge() {
   return (
     <div className="mt-3 rounded-md border border-line bg-raised p-4">
       <p className="text-ui font-semibold">임시 계정은 인박스로만 받아요</p>
-      <p className="mt-1 text-ui text-dim">Google 계정으로 가입하면 매일 아침 메일로도 받아요. 임시 계정에서 받은 문제와 풀이 기록은 옮겨지지 않아요.</p>
+      <p className="mt-1 text-ui text-dim">Google 계정으로 가입하면 매일 아침 메일로도 받아요. 지금까지 받은 문제와 풀이 기록은 가입한 계정으로 그대로 옮겨져요.</p>
       <button type="button" className="btn-ghost mt-3 gap-2" onClick={startGoogleLogin}>
         <GoogleMark /> Google 계정으로 가입하기
       </button>

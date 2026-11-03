@@ -419,11 +419,18 @@ export function createApp(deps: AppDeps) {
     return p && p.exp > now() && p.profile?.sub ? p : null;
   };
 
+  /** 지금 세션이 임시 계정이면 그 세션과 사용자 */
+  const temporaryUser = async (c: Context) => {
+    const s = await readSession(c);
+    const u = s ? await users.byId(s.userId) : null;
+    return s && u && isTemporaryEmail(u.email) ? { session: s, user: u } : null;
+  };
+
   app.get('/api/auth/signup', async (c) => {
     if (!await signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
     const p = await readPending(c);
     if (!p) return fail(c, 404, 'no_pending_signup', '가입 대기 중인 Google 계정이 없습니다. 다시 시도하세요.');
-    return ok(c, SignupPending, { email: p.profile.email, name: p.profile.name, picture: p.profile.picture });
+    return ok(c, SignupPending, { email: p.profile.email, name: p.profile.name, picture: p.profile.picture, fromTemporary: !!(await temporaryUser(c)) });
   });
 
   app.post('/api/auth/signup', async (c) => {
@@ -434,11 +441,17 @@ export function createApp(deps: AppDeps) {
     // 본문을 읽는 동안 설정이 바뀔 수 있으므로 계정 생성 직전에 다시 검사한다.
     if (!await signupSettings.enabled()) return fail(c, 403, 'signup_closed', '신규 가입이 중지되어 있습니다. 기존 회원은 로그인할 수 있습니다.');
     // 운영자는 처음부터 편집 권한을 갖는다(공용 문제를 만들어 온 계정)
-    const user = await users.create(p.profile, { terms: TERMS_VERSION, privacy: PRIVACY_VERSION }, { editor: isOwner(p.profile.email) });
+    const versions = { terms: TERMS_VERSION, privacy: PRIVACY_VERSION };
+    const opts = { editor: isOwner(p.profile.email) };
+    // 임시 계정으로 쓰다 가입하면 그 계정을 그대로 정식 계정으로 바꿔 기록을 이어 쓴다
+    const temp = await temporaryUser(c);
+    const upgraded = temp ? await users.upgradeTemporary(temp.user.id, p.profile, versions, opts, new Date(now())) : null;
+    if (temp) await sessions.revoke(temp.session.id);
+    const user = upgraded ?? (await users.create(p.profile, versions, opts));
     await claimIfOwner(user.id, p.profile.email);
     deleteCookie(c, SIGNUP_COOKIE, flowCookie);
     const s = await startSession(c, user.id);
-    log.info(`[auth] 가입 user=${user.id}`);
+    log.info(`[auth] 가입 user=${user.id}${upgraded ? ' (임시 계정에서 전환)' : ''}`);
     return ok(c, Session, await sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
   });
 
