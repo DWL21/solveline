@@ -12,6 +12,7 @@ import { Icon } from './components/Icon.tsx';
 import { BootScreen, Spinner, WorkspaceSkeleton } from './components/Loading.tsx';
 import { Home, scopeList } from './components/Home.tsx';
 import { SubmissionHistoryPage } from './components/SubmissionHistoryPage.tsx';
+import { DailyInboxPage } from './components/DailyInboxPage.tsx';
 import { blankProblem } from './lib/blank.ts';
 import { useDraftSync } from './lib/drafts.ts';
 import { loginHref, useMe } from './lib/me.ts';
@@ -107,6 +108,7 @@ function Shell() {
         />
       </Suspense>
     );
+  else if (route.kind === 'inbox') page = <DailyInboxPage />;
   else if (route.kind === 'submissions') page = <SubmissionHistoryPage onPickProblem={(id) => go({ kind: 'problem', id })} />;
   else
     page = (
@@ -157,6 +159,7 @@ const navLink = (active: boolean) =>
 /** 상단바: 로고, 주 메뉴(문제 화면에서는 목록으로 돌아가기), 제출 기록, 계정 */
 function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ route: Route; signedIn: boolean; onLogo: () => void; onList: () => void; onLogout: () => void }>) {
   const ide = route.kind === 'problem';
+  const unread = useQuery({ queryKey: qk.dailyInbox, queryFn: api.dailyInbox, enabled: signedIn, staleTime: 60_000 }).data?.unread ?? 0;
   return (
     <header className="code-focus-hide flex h-13 shrink-0 items-center gap-1 border-b border-line bg-bar px-3 sm:gap-5 sm:px-5">
       <a
@@ -185,6 +188,11 @@ function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ rou
               제출 기록
             </a>
           )}
+          {signedIn && (
+            <a href="#/inbox" className={navLink(route.kind === 'inbox')} aria-current={route.kind === 'inbox' ? 'page' : undefined}>
+              인박스{unread > 0 && <span className="ml-1 text-[12px] font-bold text-accent-text">{unread}</span>}
+            </a>
+          )}
         </nav>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
@@ -193,6 +201,11 @@ function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ rou
         ) : (
           <a href="#/submissions" className={`btn-quiet px-2 sm:hidden ${route.kind === 'submissions' ? 'text-text' : ''}`} aria-current={route.kind === 'submissions' ? 'page' : undefined}>제출 기록</a>
         ))}
+        {signedIn && !ide && (
+          <a href="#/inbox" className={`btn-quiet px-2 sm:hidden ${route.kind === 'inbox' ? 'text-text' : ''}`} aria-current={route.kind === 'inbox' ? 'page' : undefined}>
+            인박스{unread > 0 && <span className="ml-1 text-[12px] font-bold text-accent-text">{unread}</span>}
+          </a>
+        )}
         <UserMenu onLogout={onLogout} />
       </div>
     </header>

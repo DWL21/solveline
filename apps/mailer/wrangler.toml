@@ -1,0 +1,16 @@
+# 일일 메일 발송 Worker. Pages에는 cron이 없어 따로 둔다. 비밀(RESEND_API_KEY)은 배포가 wrangler secret으로 넣는다.
+name = "solveline-mailer"
+main = "../api/src/mailer-entry.ts"
+compatibility_date = "2026-10-23"
+
+# 평일 07:00~07:55 KST(UTC 일~목 22시)에 5분마다. 한 번에 일부만 보내므로 무료 CPU 한도를 넘지 않는다.
+[triggers]
+crons = ["*/5 22 * * 0-4"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "solveline"
+database_id = "6abebb04-4276-48ba-8fa6-c22a1c2e5fa4"
+
+[vars]
+WEB_ORIGIN = "https://solveline.simplyimg.com"

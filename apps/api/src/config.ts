@@ -47,6 +47,12 @@ const EnvSchema = z.object({
   R2_BUCKET: optionalString,
   /** R2 키 대신 Pages Worker의 R2 바인딩으로 게시할 때 Worker와 나눠 가진 비밀(32자 이상) */
   R2_PROXY_SECRET: optionalString,
+  /** 일일 메일. RESEND_API_KEY와 DAILY_FROM이 함께 있어야 켜진다(없으면 구독·발송 모두 꺼짐) */
+  RESEND_API_KEY: optionalString,
+  RESEND_WEBHOOK_SECRET: optionalString,
+  DAILY_FROM: optionalString,
+  /** 구독 상한. Resend 무료 플랜의 하루 100통에서 인증 메일·재시도 몫을 뺀 값 */
+  DAILY_MAX_SUBSCRIBERS: positiveNumber(90),
 });
 
 export type Config = {
@@ -71,7 +77,11 @@ export type Config = {
   r2: { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string } | null;
   /** Worker를 거쳐 R2에 게시할 때의 공유 비밀. r2가 있으면 그쪽을 쓴다 */
   r2ProxySecret: string | null;
+  /** 일일 메일 발송 설정. null이면 구독·발송이 모두 꺼져 있다 */
+  daily: DailyConfig | null;
 };
+
+export type DailyConfig = { resendApiKey: string; webhookSecret: string | null; from: string; maxSubscribers: number };
 
 export class ConfigError extends Error {}
 
@@ -112,6 +122,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         ? { accountId: e.R2_ACCOUNT_ID, accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY, bucket: e.R2_BUCKET }
         : null,
     r2ProxySecret: e.R2_PROXY_SECRET ?? null,
+    daily:
+      e.RESEND_API_KEY && e.DAILY_FROM
+        ? { resendApiKey: e.RESEND_API_KEY, webhookSecret: e.RESEND_WEBHOOK_SECRET ?? null, from: e.DAILY_FROM, maxSubscribers: e.DAILY_MAX_SUBSCRIBERS }
+        : null,
   };
 }
 

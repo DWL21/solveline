@@ -5,6 +5,7 @@ import { ApiError, adminApi, qk } from '../lib/api.ts';
 import { formatDuration } from '../lib/time.ts';
 import { useMediaQuery } from '../lib/media.ts';
 import { Avatar } from './Avatar.tsx';
+import { DailyMailPanel } from './DailyMailPanel.tsx';
 import { BootScreen, LinesSkeleton, ListSkeleton, Spinner } from './Loading.tsx';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
@@ -85,7 +86,7 @@ function AdminLogin() {
 function Dashboard() {
   const wide = useMediaQuery('(min-width: 1024px)');
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'users' | 'signup'>('users');
+  const [tab, setTab] = useState<'users' | 'signup' | 'daily'>('users');
   const [selected, setSelected] = useState<string | null>(null);
   const logout = useMutation({
     mutationFn: adminApi.logout,
@@ -108,6 +109,7 @@ function Dashboard() {
             [
               ['users', '사용자'],
               ['signup', '신규 가입'],
+              ['daily', '일일 메일'],
             ] as const
           ).map(([t, label]) => (
             <button
@@ -144,8 +146,10 @@ function Dashboard() {
               <p className="hidden py-16 text-center text-[13px] text-faint lg:block">왼쪽에서 사용자를 선택하세요</p>
             )}
           </div>
-        ) : (
+        ) : tab === 'signup' ? (
           <SignupControl />
+        ) : (
+          <DailyMailPanel />
         )}
       </main>
     </div>

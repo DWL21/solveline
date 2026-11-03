@@ -42,6 +42,16 @@ import {
   AdminUser,
   AdminUserDetail,
   SignupSettings,
+  DailyAdminOverview,
+  DailyInbox,
+  DailySettings,
+  DailySettingsInput,
+  DailyIssueInput,
+  DailyPauseInput,
+  DailySendResult,
+  DailySubscribeInput,
+  DailySubscribeResult,
+  DailyTestInput,
   CodeSet,
   RoleInput,
   SignupPending,
@@ -61,8 +71,10 @@ import { isTerminal, SubmissionStore } from './submissions.ts';
 import { buildCatalog, CatalogPublisher } from './catalog.ts';
 import { sqliteSql, type Sql } from './sql.ts';
 import type { ObjectStore } from '@solveline/judge/r2';
+import { confirmMail, DailyStore, escapeHtml, issueMail, normalizeEmail, runDailyTick, verifyWebhook } from './daily.ts';
+import { MailSendError, ResendSender, type MailSender } from './mail-sender.ts';
 import { log } from './redact.ts';
-import { decodeJson, encodeJson, randomInt } from './crypto.ts';
+import { decodeJson, encodeJson, randomInt, sha256Hex } from './crypto.ts';
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 502 | 503;
 
@@ -81,6 +93,8 @@ export type AppDeps = {
   limiters?: LimiterFactory;
   /** 테스트에서 Google 대신 끼워 넣는다. 없으면 config.google로 만든다. */
   google?: GoogleClient | null;
+  /** 테스트에서 Resend 대신 끼워 넣는다. 없으면 config.daily로 만든다 */
+  mailSender?: MailSender | null;
   now?: () => number;
 };
 
@@ -124,6 +138,12 @@ async function readJson<T extends z.ZodType>(c: Context, schema: T): Promise<z.o
   }
 }
 
+const ISSUE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 메일 링크가 여는 작은 안내 화면. 메일 보안 검사가 링크를 미리 열어도 처리되지 않도록 action이 있으면 버튼을 눌러야 한다 */
+const dailyPage = (title: string, message: string, action?: { url: string; label: string }) =>
+  `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title></head><body style="margin:0;font:15px/1.6 -apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#111;background:#fff"><main style="max-width:480px;margin:0 auto;padding:48px 20px"><h1 style="font-size:21px;margin:0 0 12px">${title}</h1><p style="margin:0 0 20px">${message}</p>${action ? `<form method="post" action="${action.url}"><button type="submit" style="background:#111;color:#fff;border:0;border-radius:6px;padding:12px 20px;font:inherit;font-weight:700;cursor:pointer">${action.label}</button></form>` : ''}</main></body></html>`;
+
 const clientIp = (c: Context) =>
   c.req.header('cf-connecting-ip') ?? c.req.header('x-real-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
 
@@ -156,6 +176,13 @@ export function createApp(deps: AppDeps) {
   const adminGlobalLimit = limiter('admin-all', 60, 3_600_000);
   // 실행·채점: 사용자별 분당 30회
   const runLimit = limiter('run', 30, 60_000);
+  // 일일 메일 구독: IP별 시간당 5회, 주소별 하루 3회, 인증 메일은 무료 발송 한도를 지키려고 전체 하루 10통
+  const dailyIpLimit = limiter('daily-ip', 5, 3_600_000);
+  const dailyEmailLimit = limiter('daily-email', 3, 86_400_000);
+  const dailyConfirmLimit = limiter('daily-confirm', 10, 86_400_000);
+  const daily = new DailyStore(sql);
+  const dailyConfig = config.daily;
+  const mailSender = deps.mailSender === undefined ? (dailyConfig ? new ResendSender(dailyConfig.resendApiKey) : null) : deps.mailSender;
 
   const app = new Hono<Env>();
 
@@ -191,6 +218,74 @@ export function createApp(deps: AppDeps) {
       // 게시에 실패해도 SQLite에는 저장됐다. 다음 변경이나 재시작 때 다시 맞춘다.
       log.error('[catalog] R2 게시 실패', e);
     }
+  });
+
+  // ─── 일일 메일 구독(공개) ───
+  // 주소가 이미 구독 중인지 알 수 없게, 신청은 어떤 경우든 같은 응답을 준다.
+  app.post('/api/public/daily/subscribe', async (c) => {
+    if (!dailyConfig || !mailSender) return fail(c, 503, 'daily_unavailable', '아직 구독을 받고 있지 않아요.');
+    const retry = await dailyIpLimit.hit(clientIp(c));
+    if (retry) return fail(c, 429, 'rate_limited', '잠시 뒤에 다시 시도해 주세요.');
+    if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json')) return fail(c, 400, 'invalid_request', '요청을 확인해 주세요.');
+    const input = await readJson(c, DailySubscribeInput);
+    if (!input) return fail(c, 400, 'invalid_request', '이메일과 수신 동의를 확인해 주세요.');
+    const email = normalizeEmail(input.email);
+    const accepted = () => ok(c, DailySubscribeResult, { status: 'pending' });
+    const existing = await daily.byEmail(email);
+    if (existing && ['active', 'bounced', 'complained'].includes(existing.status)) return accepted();
+    if ((await daily.activeCount()) >= dailyConfig.maxSubscribers) return fail(c, 409, 'daily_full', '구독 인원이 다 찼어요.');
+    if (await dailyEmailLimit.hit(await sha256Hex(email))) return accepted();
+    if (await dailyConfirmLimit.hit('all')) return fail(c, 429, 'rate_limited', '오늘 신청이 많아요. 내일 다시 시도해 주세요.');
+    const token = await daily.startPending(email, now());
+    const confirmUrl = `${config.webOrigin}/api/public/daily/confirm?token=${encodeURIComponent(token)}`;
+    try {
+      await mailSender.sendBatch([confirmMail({ from: dailyConfig.from, to: email, confirmUrl })], `daily-confirm-${(await sha256Hex(token)).slice(0, 32)}`);
+    } catch (e) {
+      log.error('[daily] 인증 메일 발송 실패', e);
+      return fail(c, 502, 'mail_failed', '메일을 보내지 못했어요. 잠시 뒤에 다시 시도해 주세요.');
+    }
+    return accepted();
+  });
+
+  const tokenAction = (c: Context) => `?token=${encodeURIComponent(c.req.query('token') ?? '')}`;
+
+  app.get('/api/public/daily/confirm', (c) =>
+    c.html(dailyPage('구독 확인', '아래 버튼을 누르면 평일 아침마다 한 문제를 보내 드려요.', { url: `/api/public/daily/confirm${tokenAction(c)}`, label: '구독 확인하기' })));
+
+  app.post('/api/public/daily/confirm', async (c) => {
+    if (!dailyConfig) return c.html(dailyPage('구독 확인', '아직 구독을 받고 있지 않아요.'), 503);
+    const result = await daily.confirm(c.req.query('token') ?? '', now(), dailyConfig.maxSubscribers);
+    if (result === 'confirmed') return c.html(dailyPage('구독을 시작했어요', '다음 평일 아침부터 메일을 보내 드려요.'));
+    if (result === 'full') return c.html(dailyPage('구독 인원이 다 찼어요', '자리가 나면 다시 신청해 주세요.'), 409);
+    return c.html(dailyPage('링크가 만료됐어요', '이미 확인했거나 24시간이 지난 링크예요. 필요하면 다시 신청해 주세요.'), 400);
+  });
+
+  app.get('/api/public/daily/unsubscribe', (c) =>
+    c.html(dailyPage('수신거부', '아래 버튼을 누르면 일일 메일을 더 보내지 않아요.', { url: `/api/public/daily/unsubscribe${tokenAction(c)}`, label: '수신거부하기' })));
+
+  // 메일 앱의 원클릭 수신거부(List-Unsubscribe-Post)도 이 경로로 온다
+  app.post('/api/public/daily/unsubscribe', async (c) => {
+    await daily.unsubscribe(c.req.query('token') ?? '', now());
+    return c.html(dailyPage('수신거부했어요', '앞으로 일일 메일을 보내지 않아요.'));
+  });
+
+  // 읽기 전용이라 메일 스캐너가 먼저 열어도 바뀌는 것이 없다
+  app.get('/api/public/daily/hint', async (c) => {
+    const issue = await daily.issueByHintToken(c.req.query('token') ?? '');
+    if (!issue?.hint) return c.html(dailyPage('문제 힌트', '볼 수 있는 내용이 없어요.'), 404);
+    return c.html(dailyPage(`${escapeHtml(issue.title)} 힌트`, escapeHtml(issue.hint).replace(/\n/g, '<br>')));
+  });
+
+  app.post('/api/public/daily/webhook/resend', async (c) => {
+    const secret = dailyConfig?.webhookSecret;
+    if (!secret) return fail(c, 404, 'not_found', '없는 경로입니다.');
+    const body = await c.req.text();
+    const headers = { id: c.req.header('svix-id'), timestamp: c.req.header('svix-timestamp'), signature: c.req.header('svix-signature') };
+    if (!(await verifyWebhook(secret, headers, body, now()))) return fail(c, 401, 'invalid_signature', '서명이 맞지 않습니다.');
+    const event = JSON.parse(body) as { type?: string; data?: { to?: string[]; bounce?: { type?: string } } };
+    const reason = event.type === 'email.complained' ? 'complained' : event.type === 'email.bounced' && event.data?.bounce?.type === 'Permanent' ? 'bounced' : null;
+    if (reason) for (const to of event.data?.to ?? []) await daily.stop(normalizeEmail(to), reason, now());
+    return c.json({ data: { received: true } });
   });
 
   // ─── 공개 ───
@@ -416,6 +511,69 @@ export function createApp(deps: AppDeps) {
     return next();
   });
 
+  // ─── 일일 메일 관리 ───
+  const issueDateOf = (c: Context) => {
+    const date = c.req.param('date') ?? '';
+    return ISSUE_DATE.test(date) ? date : null;
+  };
+  const mailFailed = (c: Context, e: unknown) => {
+    log.error('[daily] 관리자 발송 실패', e);
+    return fail(c, 502, 'mail_failed', e instanceof MailSendError ? `메일을 보내지 못했어요(${e.message}).` : '메일을 보내지 못했어요.');
+  };
+
+  app.get('/api/admin/daily', async (c) => ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now())));
+
+  app.put('/api/admin/daily/pause', async (c) => {
+    const input = await readJson(c, DailyPauseInput);
+    if (!input) return fail(c, 400, 'invalid_request', '요청을 확인해 주세요.');
+    await daily.setPaused(input.paused);
+    return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
+  });
+
+  app.delete('/api/admin/daily/subscribers/:id', async (c) => {
+    if (!(await daily.remove(c.req.param('id')))) return fail(c, 404, 'not_found', '구독자를 찾을 수 없어요.');
+    return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
+  });
+
+  app.put('/api/admin/daily/issues/:date', async (c) => {
+    const date = issueDateOf(c);
+    const input = await readJson(c, DailyIssueInput);
+    if (!date || !input) return fail(c, 400, 'invalid_request', '회차 내용을 확인해 주세요.');
+    await daily.saveIssue(date, input, now());
+    return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
+  });
+
+  app.delete('/api/admin/daily/issues/:date', async (c) => {
+    const date = issueDateOf(c);
+    if (!date || !(await daily.deleteIssue(date))) return fail(c, 409, 'issue_locked', '없는 회차이거나 이미 발송 기록이 있어요.');
+    return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
+  });
+
+  // 시험 발송: 지정한 주소로만 보내고 발송 기록을 남기지 않는다
+  app.post('/api/admin/daily/issues/:date/test', async (c) => {
+    if (!dailyConfig || !mailSender) return fail(c, 503, 'daily_unavailable', '발송 설정이 없어요.');
+    const date = issueDateOf(c);
+    const input = await readJson(c, DailyTestInput);
+    const issue = date ? await daily.issue(date) : undefined;
+    if (!input || !issue) return fail(c, 400, 'invalid_request', '회차와 주소를 확인해 주세요.');
+    const mails = input.emails.map((to) => issueMail(issue, { from: dailyConfig.from, to: normalizeEmail(to), webOrigin: config.webOrigin, test: true }));
+    try {
+      await mailSender.sendBatch(mails, `daily-test-${crypto.randomUUID()}`);
+    } catch (e) {
+      return mailFailed(c, e);
+    }
+    return ok(c, DailySendResult, { outcome: 'test', sent: mails.length, failed: 0, remaining: 0 });
+  });
+
+  // 지금 보내기: cron을 기다리지 않고 그날 회차를 한 묶음 보낸다. 실패 건도 다시 시도한다
+  app.post('/api/admin/daily/issues/:date/send', async (c) => {
+    if (!dailyConfig || !mailSender) return fail(c, 503, 'daily_unavailable', '발송 설정이 없어요.');
+    const date = issueDateOf(c);
+    if (!date) return fail(c, 400, 'invalid_request', '날짜를 확인해 주세요.');
+    await daily.retryFailed(date);
+    return ok(c, DailySendResult, await runDailyTick({ sql, sender: mailSender, from: dailyConfig.from, webOrigin: config.webOrigin, now: now(), date }));
+  });
+
   app.get('/api/admin/users', async (c) => ok(c, z.array(AdminUser), await users.list()));
 
   app.get('/api/admin/users/:id', async (c) => {
@@ -525,6 +683,28 @@ export function createApp(deps: AppDeps) {
   };
 
   // ─── 내 풀이 상태(사용자 데이터, pahidc SQLite). 웹이 카탈로그와 합친다 ───
+  // ─── 일일 메일: 내 인박스·수신 설정 ───
+  const dailyUser = async (c: Context<Env>) => (await users.byId(c.get('userId')))!;
+
+  app.get('/api/me/daily/settings', async (c) => ok(c, DailySettings, await daily.settings(await dailyUser(c), dailyConfig)));
+
+  app.put('/api/me/daily/settings', async (c) => {
+    const input = await readJson(c, DailySettingsInput);
+    if (!input) return fail(c, 400, 'invalid_request', '수신 설정을 확인해 주세요.');
+    const user = await dailyUser(c);
+    const result = await daily.saveSettings(user, input, dailyConfig, now());
+    if (result === 'full') return fail(c, 409, 'daily_full', '메일 구독 인원이 다 찼어요. 인박스로는 계속 받을 수 있어요.');
+    if (result === 'blocked') return fail(c, 409, 'daily_mail_blocked', '반송이나 스팸 신고가 있었던 주소라 메일을 보낼 수 없어요. 인박스로는 계속 받을 수 있어요.');
+    return ok(c, DailySettings, await daily.settings(user, dailyConfig));
+  });
+
+  app.get('/api/me/daily/inbox', async (c) => ok(c, DailyInbox, await daily.inbox(c.get('userId'), now())));
+
+  app.post('/api/me/daily/inbox/:date/read', async (c) => {
+    await daily.markRead(c.get('userId'), c.req.param('date'), now());
+    return ok(c, DailyInbox, await daily.inbox(c.get('userId'), now()));
+  });
+
   app.get('/api/me/problems', async (c) => ok(c, z.array(MyProblemSummary), await problems.mySummaries(c.get('userId'))));
   app.get('/api/me/problems/:id', async (c) => {
     const st = await problems.myState(c.req.param('id'), c.get('userId'));

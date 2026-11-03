@@ -5,7 +5,7 @@ import { openDb } from '../src/db-node.ts';
 import { D1_SCHEMA_FILE, schemaSql } from '../src/d1-schema.ts';
 
 const file = fileURLToPath(new URL(`../${D1_SCHEMA_FILE}`, import.meta.url));
-const sql = schemaSql(openDb(':memory:'));
+const sql = schemaSql(openDb(':memory:', { d1BaselineOnly: true }));
 if (process.argv.includes('--check')) {
   if (readFileSync(file, 'utf8') !== sql) {
     console.error(`${D1_SCHEMA_FILE}가 마이그레이션과 다릅니다. pnpm --filter @solveline/api d1:schema 로 다시 만드세요.`);

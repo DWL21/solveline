@@ -75,12 +75,16 @@ jobs:
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
           JUDGE_SECRET: ${{ secrets.JUDGE_SECRET }}
           R2_PROXY_SECRET: ${{ secrets.R2_PROXY_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          DAILY_FROM: ${{ vars.DAILY_FROM }}
+          DAILY_MAX_SUBSCRIBERS: ${{ vars.DAILY_MAX_SUBSCRIBERS }}
         working-directory: apps/web
         run: |
           umask 077
           f="$RUNNER_TEMP/pages-secrets.json"
           python3 -c 'import json, os
-          keys = "SESSION_TTL_DAYS ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL JUDGE_SECRET R2_PROXY_SECRET".split()
+          keys = "SESSION_TTL_DAYS ACCESS_PASSWORD SESSION_SECRET GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET OWNER_EMAIL CONTACT_EMAIL JUDGE_SECRET R2_PROXY_SECRET RESEND_API_KEY RESEND_WEBHOOK_SECRET DAILY_FROM DAILY_MAX_SUBSCRIBERS".split()
           print(json.dumps({k: os.environ[k] for k in keys if os.environ.get(k)}))' > "$f"
           npx --yes wrangler@4.151.0 pages secret bulk "$f" --project-name solveline >/dev/null
           rm -f "$f"
@@ -119,6 +123,23 @@ jobs:
           PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
         working-directory: apps/web
         run: npx --yes wrangler@4.151.0 pages deploy dist --project-name solveline --branch main --commit-hash "$GITHUB_SHA"
+      - name: Deploy daily mail Worker
+        # 발송 설정이 있을 때만 배포한다. cron은 Pages에 없어 별도 Worker다(apps/mailer). 비밀 값은 출력하지 않는다.
+        if: ${{ vars.DAILY_FROM != '' }}
+        env:
+          PATH: /home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+          CI: "true"
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DAILY_FROM: ${{ vars.DAILY_FROM }}
+        working-directory: apps/mailer
+        run: |
+          umask 077
+          f="$RUNNER_TEMP/mailer-secrets.json"
+          python3 -c 'import json, os
+          print(json.dumps({k: os.environ[k] for k in ("RESEND_API_KEY", "DAILY_FROM")}))' > "$f"
+          npx --yes wrangler@4.151.0 deploy
+          npx --yes wrangler@4.151.0 secret bulk "$f" >/dev/null
+          rm -f "$f"
       - name: Verify public deployment
         run: |
           curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors https://solveline-api.simplyimg.com/judge/health

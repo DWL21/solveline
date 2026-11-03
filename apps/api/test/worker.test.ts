@@ -7,7 +7,7 @@ import { TestsetStore } from '@solveline/judge/testsets';
 import type { RunJob } from '@solveline/judge/runner';
 import { templateFor, type ProblemInput } from '@solveline/shared';
 import { SqlRateLimiter } from '../src/auth/rate-limit.ts';
-import { D1_SCHEMA_FILE, schemaSql } from '../src/d1-schema.ts';
+import { D1_MIGRATION_FILES, D1_SCHEMA_FILE, schemaSql } from '../src/d1-schema.ts';
 import { D1_TABLES, exportForD1 } from '../src/d1-export.ts';
 import { sqliteSql } from '../src/sql.ts';
 import { ProblemStore, UserStore } from '../src/db.ts';
@@ -26,7 +26,7 @@ const schemaFile = new URL(`../${D1_SCHEMA_FILE}`, import.meta.url);
 function d1FromSchemaFile() {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  db.exec(readFileSync(schemaFile, 'utf8'));
+  for (const f of D1_MIGRATION_FILES) db.exec(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'));
   return db;
 }
 
@@ -107,11 +107,11 @@ async function session(s: ReturnType<typeof setup>, email: string, editor = fals
 
 describe('D1 스키마 파일', () => {
   it('마이그레이션 결과와 같다(마이그레이션을 더하면 pnpm --filter @solveline/api d1:schema)', () => {
-    expect(readFileSync(schemaFile, 'utf8')).toBe(schemaSql(openDb(':memory:')));
+    expect(readFileSync(schemaFile, 'utf8')).toBe(schemaSql(openDb(':memory:', { d1BaselineOnly: true })));
   });
 
   it('스키마 파일로 만든 DB와 마이그레이션한 DB의 테이블·색인이 같고, 기본 설정 행이 있다', () => {
-    const shape = (db: Database.Database) => db.prepare("SELECT type, name, tbl_name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != '_migrations' ORDER BY name").all();
+    const shape = (db: Database.Database) => db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name != '_migrations' ORDER BY name").all();
     const fresh = d1FromSchemaFile();
     expect(shape(fresh)).toEqual(shape(openDb(':memory:')));
     expect(fresh.prepare('SELECT enabled FROM signup_settings WHERE id = 1').pluck().get()).toBe(1);
