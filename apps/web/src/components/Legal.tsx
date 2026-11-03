@@ -3,9 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { PRIVACY_VERSION, TERMS_VERSION } from '@solveline/shared';
 import { api, qk } from '../lib/api.ts';
 
-/** 시행일 전이면 개정 안내를 보여 준다(약관·방침의 변경 7일 전 공지) */
-const upcoming = (version: string) => version > new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
-const effectiveLabel = (version: string) => `${Number(version.slice(5, 7))}월 ${Number(version.slice(8, 10))}일`;
 
 /** 화면 맨 아래 약관 링크. admin이면 관리자 모드로 가는 흐린 글자를 덧붙인다. */
 export function LegalFooter({ admin = false }: Readonly<{ admin?: boolean }>) {
@@ -23,11 +20,6 @@ export function LegalFooter({ admin = false }: Readonly<{ admin?: boolean }>) {
           관리자 모드
         </a>
       )}
-      {upcoming(PRIVACY_VERSION) && (
-        <a href="/privacy" className="w-full text-center text-dim underline hover:text-text">
-          개인정보처리방침·이용약관 개정 안내({effectiveLabel(PRIVACY_VERSION)} 시행)
-        </a>
-      )}
     </footer>
   );
 }
@@ -37,7 +29,7 @@ function useContact() {
   return q.data?.contactEmail ?? null;
 }
 
-function Page({ title, version, notice, children }: Readonly<{ title: string; version: string; notice: ReactNode; children: ReactNode }>) {
+function Page({ title, version, children }: Readonly<{ title: string; version: string; children: ReactNode }>) {
   return (
     <div className="min-h-full bg-ink">
       <header className="border-b border-line bg-bar">
@@ -51,12 +43,6 @@ function Page({ title, version, notice, children }: Readonly<{ title: string; ve
       <main className="mx-auto max-w-3xl px-4 py-10">
         <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
         <p className="mt-1 text-[12.5px] text-faint">시행일 {version}</p>
-        {upcoming(version) && (
-          <aside className="mt-4 rounded-lg border border-line bg-panel p-4 text-[14px] leading-relaxed">
-            <p className="font-semibold">아래 내용은 {effectiveLabel(version)}부터 시행됩니다.</p>
-            <div className="mt-2 text-dim [&_li]:ml-5 [&_ul]:list-disc">{notice}</div>
-          </aside>
-        )}
         <div className="legal mt-6 flex flex-col gap-6 text-[15px] leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-[13px] [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
           {children}
         </div>
@@ -71,7 +57,7 @@ const Contact = ({ email }: { email: string | null }) => (email ? <a href={`mail
 export function TermsPage() {
   const email = useContact();
   return (
-    <Page title="이용약관" version={TERMS_VERSION} notice={<p>제5조에 일일 문제 구독(선택)을 더합니다.</p>}>
+    <Page title="이용약관" version={TERMS_VERSION}>
       <section>
         <h2>제1조 (목적)</h2>
         <p>이 약관은 Solveline(이하 "서비스")의 이용 조건과 절차, 운영자와 회원의 권리·의무를 정합니다.</p>
@@ -159,17 +145,7 @@ export function TermsPage() {
 export function PrivacyPage() {
   const email = useContact();
   return (
-    <Page
-      title="개인정보처리방침"
-      version={PRIVACY_VERSION}
-      notice={
-        <ul>
-          <li>일일 문제 구독(선택)에 필요한 개인정보 항목과 보유 기간을 더합니다.</li>
-          <li>메일 발송을 맡기는 Resend, Inc.(미국)를 위탁·국외 이전 대상에 더합니다.</li>
-          <li>서비스 데이터를 Cloudflare 저장소에 보관하는 현재 구조에 맞게 위탁 내용과 저장 위치를 바로잡습니다.</li>
-        </ul>
-      }
-    >
+    <Page title="개인정보처리방침" version={PRIVACY_VERSION}>
       <p>Solveline(이하 "서비스")은 「개인정보 보호법」에 따라 이용자의 개인정보를 보호하고, 관련 고충을 신속하게 처리하기 위해 다음과 같이 개인정보처리방침을 둡니다.</p>
       <section>
         <h2>1. 수집하는 개인정보와 목적</h2>

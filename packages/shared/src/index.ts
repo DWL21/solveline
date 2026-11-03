@@ -7,8 +7,8 @@ export const SESSION_COOKIE = 'solveline_session';
 export const LEGACY_SESSION_COOKIE = 'codetest_session';
 
 /** 약관·개인정보처리방침 버전(시행일). 내용을 바꾸면 올리고, 가입 때 동의한 버전을 저장한다. */
-export const TERMS_VERSION = '2026-11-10';
-export const PRIVACY_VERSION = '2026-11-10';
+export const TERMS_VERSION = '2026-10-23';
+export const PRIVACY_VERSION = '2026-10-23';
 
 /** editor: 편집 권한(문제 추가·수정, 채점 케이스, 폴더). 관리자 모드(마스터 비밀번호)에서 준다. */
 /** owner: 운영자(OWNER_EMAIL). 화면 하단에 관리자 모드 링크를 보여 준다(관리자 모드 자체는 마스터 비밀번호로만 열린다). */
