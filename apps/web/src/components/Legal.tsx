@@ -3,10 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { PRIVACY_VERSION, TERMS_VERSION } from '@solveline/shared';
 import { api, qk } from '../lib/api.ts';
 
+/** 시행일 전이면 개정 안내를 보여 준다(약관·방침의 변경 7일 전 공지) */
+const upcoming = (version: string) => version > new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+const effectiveLabel = (version: string) => `${Number(version.slice(5, 7))}월 ${Number(version.slice(8, 10))}일`;
+
 /** 화면 맨 아래 약관 링크. admin이면 관리자 모드로 가는 흐린 글자를 덧붙인다. */
 export function LegalFooter({ admin = false }: Readonly<{ admin?: boolean }>) {
   return (
-    <footer className="flex shrink-0 items-center justify-center gap-4 px-4 py-5 text-[12px] text-faint">
+    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-1 px-4 py-5 text-[12px] text-faint">
       <span>© Solveline</span>
       <a href="/terms" className="hover:text-dim">
         이용약관
@@ -19,6 +23,11 @@ export function LegalFooter({ admin = false }: Readonly<{ admin?: boolean }>) {
           관리자 모드
         </a>
       )}
+      {upcoming(PRIVACY_VERSION) && (
+        <a href="/privacy" className="w-full text-center text-dim underline hover:text-text">
+          개인정보처리방침·이용약관 개정 안내({effectiveLabel(PRIVACY_VERSION)} 시행)
+        </a>
+      )}
     </footer>
   );
 }
@@ -28,7 +37,7 @@ function useContact() {
   return q.data?.contactEmail ?? null;
 }
 
-function Page({ title, version, children }: Readonly<{ title: string; version: string; children: ReactNode }>) {
+function Page({ title, version, notice, children }: Readonly<{ title: string; version: string; notice: ReactNode; children: ReactNode }>) {
   return (
     <div className="min-h-full bg-ink">
       <header className="border-b border-line bg-bar">
@@ -42,6 +51,12 @@ function Page({ title, version, children }: Readonly<{ title: string; version: s
       <main className="mx-auto max-w-3xl px-4 py-10">
         <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
         <p className="mt-1 text-[12.5px] text-faint">시행일 {version}</p>
+        {upcoming(version) && (
+          <aside className="mt-4 rounded-lg border border-line bg-panel p-4 text-[14px] leading-relaxed">
+            <p className="font-semibold">아래 내용은 {effectiveLabel(version)}부터 시행됩니다.</p>
+            <div className="mt-2 text-dim [&_li]:ml-5 [&_ul]:list-disc">{notice}</div>
+          </aside>
+        )}
         <div className="legal mt-6 flex flex-col gap-6 text-[15px] leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-[13px] [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
           {children}
         </div>
@@ -56,7 +71,7 @@ const Contact = ({ email }: { email: string | null }) => (email ? <a href={`mail
 export function TermsPage() {
   const email = useContact();
   return (
-    <Page title="이용약관" version={TERMS_VERSION}>
+    <Page title="이용약관" version={TERMS_VERSION} notice={<p>제5조에 일일 문제 구독(선택)을 더합니다.</p>}>
       <section>
         <h2>제1조 (목적)</h2>
         <p>이 약관은 Solveline(이하 "서비스")의 이용 조건과 절차, 운영자와 회원의 권리·의무를 정합니다.</p>
@@ -90,6 +105,7 @@ export function TermsPage() {
           <li>문제 열람, 코드 작성·자동 저장, 코드 실행과 채점, 풀이 시간·제출 기록·메모·내 테스트 케이스·컬렉션 저장을 제공합니다.</li>
           <li>서비스는 무료이며, 운영자는 운영상·기술상 필요에 따라 서비스의 전부 또는 일부를 바꾸거나 중단할 수 있습니다. 중단할 때는 가능한 한 미리 알립니다.</li>
           <li>코드 실행에는 시간·메모리·요청 횟수 제한이 있습니다.</li>
+          <li>회원은 평일마다 새 문제를 인박스와 메일로 받는 일일 문제 구독을 선택해 이용할 수 있으며, 언제든 메일 수신이나 구독을 끌 수 있습니다.</li>
         </ol>
       </section>
       <section>
@@ -143,7 +159,17 @@ export function TermsPage() {
 export function PrivacyPage() {
   const email = useContact();
   return (
-    <Page title="개인정보처리방침" version={PRIVACY_VERSION}>
+    <Page
+      title="개인정보처리방침"
+      version={PRIVACY_VERSION}
+      notice={
+        <ul>
+          <li>일일 문제 구독(선택)에 필요한 개인정보 항목과 보유 기간을 더합니다.</li>
+          <li>메일 발송을 맡기는 Resend, Inc.(미국)를 위탁·국외 이전 대상에 더합니다.</li>
+          <li>서비스 데이터를 Cloudflare 저장소에 보관하는 현재 구조에 맞게 위탁 내용과 저장 위치를 바로잡습니다.</li>
+        </ul>
+      }
+    >
       <p>Solveline(이하 "서비스")은 「개인정보 보호법」에 따라 이용자의 개인정보를 보호하고, 관련 고충을 신속하게 처리하기 위해 다음과 같이 개인정보처리방침을 둡니다.</p>
       <section>
         <h2>1. 수집하는 개인정보와 목적</h2>
@@ -167,6 +193,11 @@ export function PrivacyPage() {
               <td>코드 실행·채점, 풀이 기록 저장</td>
             </tr>
             <tr>
+              <td>일일 문제 구독(선택)</td>
+              <td>이메일(회원은 계정 이메일), 신청·인증·해지 일시, 수신 설정(메일 수신 여부, 받을 요일), 수신거부·반송·스팸 신고 상태, 회차별 발송 기록, 인박스 읽음 기록</td>
+              <td>일일 문제 메일 발송, 인박스 제공, 중복 발송 방지, 수신거부 처리</td>
+            </tr>
+            <tr>
               <td>자동 수집</td>
               <td>접속 IP, 접속 일시, 브라우저 정보, 세션 쿠키</td>
               <td>보안, 요청 횟수 제한, 장애 대응</td>
@@ -174,11 +205,13 @@ export function PrivacyPage() {
           </tbody>
         </table>
         <p className="mt-2">Google 계정의 비밀번호는 받지 않습니다. 만 14세 미만 아동의 가입은 받지 않습니다.</p>
+        <p className="mt-2">일일 문제 구독은 선택 사항이며, 구독하지 않아도 다른 기능을 그대로 쓸 수 있습니다. 회원은 인박스의 수신 설정에서, 그 밖의 구독자는 메일의 수신거부 링크로 언제든 그만둘 수 있습니다.</p>
       </section>
       <section>
         <h2>2. 보유·이용 기간과 파기</h2>
         <ul>
           <li>회원 정보와 서비스 이용 기록: 탈퇴(삭제) 요청을 받으면 지체 없이 삭제합니다.</li>
+          <li>일일 문제 구독 정보: 회원은 탈퇴하면 지체 없이 삭제합니다. 수신거부·반송·스팸 신고 기록은 원치 않는 메일을 다시 보내지 않기 위해 삭제를 요청할 때까지 보관합니다.</li>
           <li>장애 대비 백업: 최대 7일 보관 후 자동 삭제합니다.</li>
           <li>접속 기록(서버 로그): 서비스마다 30MB를 넘으면 오래된 것부터 자동 삭제합니다.</li>
           <li>이용 제한 기록(차단 이메일): 부정 재가입 방지를 위해 제한을 해제할 때까지 보관합니다.</li>
@@ -209,13 +242,19 @@ export function PrivacyPage() {
             </tr>
             <tr>
               <td>Cloudflare, Inc. (미국)</td>
-              <td>웹 트래픽 전달, 보안</td>
-              <td>접속 IP, 요청 정보</td>
-              <td>전송 처리 동안</td>
+              <td>웹 트래픽 전달, 보안, API 실행, 서비스 데이터와 백업 저장</td>
+              <td>회원 정보, 서비스 이용 기록, 일일 문제 구독 정보, 접속 IP, 요청 정보</td>
+              <td>저장 정보는 2번 항목의 기간까지, 요청 정보는 전송 처리 동안</td>
+            </tr>
+            <tr>
+              <td>Resend, Inc. (미국)</td>
+              <td>일일 문제 메일과 구독 인증 메일 발송</td>
+              <td>받는 이메일, 메일 내용(수신거부 링크 포함), 발송 결과</td>
+              <td>Resend 정책에 따름</td>
             </tr>
           </tbody>
         </table>
-        <p className="mt-2">서비스 데이터는 대한민국에 있는 서버에 저장합니다. 국외 이전은 서비스 이용 시 네트워크를 통해 이루어지며, 이전을 원하지 않으면 탈퇴를 요청할 수 있습니다.</p>
+        <p className="mt-2">코드 실행과 채점은 대한민국에 있는 서버에서 처리하고, 서비스 데이터는 Cloudflare 저장소(아시아·태평양 지역)에 보관합니다. 국외 이전은 서비스 이용이나 메일 발송 때 네트워크를 통해 이루어지며, 이전을 원하지 않으면 탈퇴를 요청할 수 있습니다. 메일 발송만 원하지 않으면 수신 설정에서 끌 수 있습니다.</p>
       </section>
       <section>
         <h2>5. 쿠키와 브라우저 저장소</h2>
