@@ -23,7 +23,8 @@ Worker API (apps/api/src/app.ts의 bankTool)
 
 - **MCP 서버는 얇다.** 도구 목록을 내보내고, 호출을 서명해 Worker로 넘기고, 결과를 MCP 응답으로 감싼다. 문제를 검증·저장하는 일은 모두 Worker가 한다. 관리자 화면의 "문제 직접 추가"도 같은 함수(`saveDaily`)를 쓴다.
 - **도구 정의는 한 곳에 있다.** `packages/shared/src/index.ts`의 `DailyBankTools`(이름·설명·Zod 입력)를 MCP 서버는 `z.toJSONSchema`로 내보내고, Worker는 같은 Zod로 검증한다. 도구를 바꾸면 양쪽이 함께 바뀐다.
-- **모델과 무관하다.** MCP를 말하는 클라이언트라면 어떤 모델이든 같은 도구로 문제를 만든다. 작성 지침도 도구(`bank_guide`)로 주므로, 지침을 고치면 모든 모델에 함께 적용된다.
+- **모델과 무관하다.** MCP를 말하는 클라이언트라면 어떤 모델이든 같은 도구로 문제를 만든다.
+- **작업 지시도 서버가 준다.** 출제 기준(`DAILY_AUTHOR_GUIDE`: 학습 목표 개념, 유형별 핵심 개념, 난이도 2~4 중심, 형식)과 작업 절차(`dailyBatchTask`)는 `bank_guide` 도구와 `create_daily_batch` 프롬프트로 나간다. 실행하는 쪽의 프롬프트는 "지침을 읽고 N개 만들라" 한 줄뿐이라, 기준을 바꾸려면 서버 코드만 고치면 모든 모델에 함께 적용된다.
 
 ## 구성 요소
 
@@ -38,11 +39,19 @@ Worker API (apps/api/src/app.ts의 bankTool)
 | `scripts/daily-bank/solveline-bank-generate.{service,timer}` | 매일 04:00 KST 자동 제작(systemd) |
 | `scripts/deploy-production.sh` | 위 스크립트와 systemd 유닛을 설치하고 타이머를 켠다(main 머지 때) |
 
+## 프롬프트
+
+| 프롬프트 | 하는 일 |
+|---|---|
+| `create_daily_batch` (`count`, 기본 10) | 출제 기준과 작업 절차를 사용자 메시지로 준다. Claude Code에서는 `/mcp__solveline-bank__create_daily_batch`로 쓴다 |
+
+Codex CLI처럼 MCP 프롬프트를 고를 수 없는 클라이언트는 `bank_guide` 도구가 같은 내용(출제 기준 + workflow)을 돌려준다.
+
 ## 도구
 
 | 도구 | 하는 일 |
 |---|---|
-| `bank_guide` | 작성 지침과 유형 목록. 문제를 만들기 전에 먼저 읽는다 |
+| `bank_guide` | 출제 기준, 작업 절차(workflow), 유형 목록. 문제를 만들기 전에 먼저 읽는다 |
 | `bank_overview` | 유형(topic)×난이도(level)별 공개(ready)·작성 중(draft) 문제 수. 적은 칸부터 채운다 |
 | `list_problems` | 제목·유형·난이도·상태·만든 곳·받은 사람·맞힌 사람. 겹치는 문제를 피할 때 쓴다 |
 | `get_problem` | 설명·예제·시작 코드·힌트(채점 케이스는 보이지 않는다) |
@@ -98,12 +107,12 @@ printf '%s\n' \
 
 ## 자동 제작
 
-`solveline-bank-generate.timer`가 매일 04:00 KST(무작위 지연 최대 10분)에 `solveline-bank-generate`를 실행한다. 스크립트는 에이전트 CLI에 MCP를 붙이고, 지침을 읽어 부족한 칸부터 새 문제를 만들라는 작업을 준다.
+`solveline-bank-generate.timer`(systemd, cron과 같은 매일 실행이며 꺼져 있던 동안 놓친 실행은 켜질 때 한 번 돈다)가 매일 04:00 KST(무작위 지연 최대 10분)에 `solveline-bank-generate`를 실행해 문제 10개를 만든다. 스크립트는 에이전트 CLI에 MCP를 붙이고 "`bank_guide`를 읽고 그 절차대로 N개 만들라"는 한 줄만 준다.
 
 | 환경 변수(`/etc/solveline/bank-generate.env`) | 기본값 | 뜻 |
 |---|---|---|
 | `BANK_AGENT_CLI` | `codex` | 쓸 에이전트(`codex`, `claude`) |
-| `BANK_GENERATE_COUNT` | `3` | 한 번에 만들 문제 수(1~99) |
+| `BANK_GENERATE_COUNT` | `10` | 한 번에 만들 문제 수(1~99) |
 | `BANK_REASONING_EFFORT` | `medium` | Codex 추론 강도 |
 
 에이전트 CLI는 pahidc의 `ubuntu` 사용자로 미리 로그인해 둔다(Codex: `~/.codex/auth.json`). 로그인이 풀리면 자동 제작만 멈추고 메일 발송은 계속된다.
