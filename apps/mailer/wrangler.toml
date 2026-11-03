@@ -5,7 +5,8 @@ compatibility_date = "2026-10-23"
 
 # 평일 07:00~07:55 KST(UTC 일~목 22시)에 5분마다. 한 번에 일부만 보내므로 무료 CPU 한도를 넘지 않는다.
 [triggers]
-crons = ["*/5 22 * * 0-4"]
+# Cloudflare cron은 요일을 1~7(일요일=1)로 세어 0을 받지 않으므로 이름으로 쓴다
+crons = ["*/5 22 * * SUN-THU"]
 
 [[d1_databases]]
 binding = "DB"
