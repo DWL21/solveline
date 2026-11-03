@@ -74,6 +74,9 @@ function SubscribeCard({ settings }: Readonly<{ settings: DailySettings }>) {
       <h2 className="text-[16px] font-bold">평일마다 한 문제, 인박스로 받아 보세요</h2>
       <p className="mt-2 text-[14px] text-dim">코딩 테스트 준비에 맞춘 새 문제를 평일 아침 7시에 보내 드려요.</p>
       {settings.mailAvailable && !settings.mailBlocked && <p className="mt-1 break-all text-[13px] text-dim">{settings.email}(으)로 메일도 함께 보내 드려요. 수신 설정에서 언제든 끌 수 있어요.</p>}
+      <p className="mt-3 text-[12.5px] text-dim">
+        구독하면 이메일과 수신 기록을 일일 문제 제공에 사용하고, 메일 발송을 Resend(미국)에 맡겨요. 자세한 내용은 <a href="/privacy" className="underline">개인정보처리방침</a>을 확인해 주세요.
+      </p>
       <button type="button" className="btn-primary mt-4" disabled={subscribe.isPending} onClick={() => subscribe.mutate()}>
         {subscribe.isPending ? '구독하는 중…' : '구독하기'}
       </button>
