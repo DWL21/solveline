@@ -291,6 +291,40 @@ describe('중지·시작', () => {
   });
 });
 
+describe('긴 조회', () => {
+  it('다른 작업이 끝나도 깨지 않고, 이 작업의 상태가 바뀔 때 돌려준다', async () => {
+    // 동시 채점 중 다른 작업이 끝나면 긴 조회가 일찍 돌아와 검증 채점이 "끝나지 않음"(점수 없음)이 되던 문제
+    const held = new Map<string, () => void>();
+    const runner = {
+      run: async (j: RunJob) => {
+        await new Promise<void>((r) => held.set(j.jobId!, r));
+        return { compile: { ok: true, output: '' }, results: [{ id: 'c1', status: 'pass' as const, actual: '1', stdout: '', stderr: '', timeMs: 1, memoryMb: 1 }] };
+      },
+      runtime: async () => ({ runner: 'up' as const, versions: { java: null, python: null } }),
+      cancel: async () => true,
+    };
+    const judge = createJudge({ db: openJobsDb(':memory:'), runners: [runner], slotsPerRunner: 2, testsets: new TestsetStore(':memory:'), secret: SECRET, resultsUrl: null });
+    judge.start();
+    const send = async (method: string, path: string, body?: unknown) => {
+      const text = body === undefined ? '' : JSON.stringify(body);
+      return (await (await judge.app.request(path, { method, body: text || undefined, headers: { 'content-type': 'application/json', ...(await judgeHeaders(SECRET, method, path, text)) } })).json()).data as JudgeStatus;
+    };
+    await send('POST', '/jobs', job('fast'));
+    await send('POST', '/jobs', job('slow'));
+    await expect.poll(() => held.has('fast') && held.has('slow')).toBe(true);
+    let polled: JudgeStatus | null = null;
+    const waiting = judge.dispatcher.poll('slow', 5000).then((s) => (polled = s));
+    held.get('fast')!();
+    expect((await judge.dispatcher.wait('fast')).status).toBe('done');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(polled).toBeNull();
+    held.get('slow')!();
+    await waiting;
+    expect(polled!.status).toBe('done');
+    judge.stop();
+  });
+});
+
 describe('저장소', () => {
   it('테스트셋 파일은 해시로 한 번만 저장하고, 해시가 맞는 원문만 받는다', async () => {
     const { mkdtempSync } = await import('node:fs');

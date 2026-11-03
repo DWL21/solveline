@@ -211,18 +211,25 @@ export class Dispatcher {
 
   /** 긴 조회: 끝났으면 바로, 아니면 상태가 바뀌거나 ms가 지날 때 현재 상태를 돌려준다. 없는 작업이면 null. */
   async poll(id: string, ms: number): Promise<JudgeStatus | null> {
-    const cur = this.store.status(id);
-    if (!cur || isTerminal(cur.status) || ms <= 0) return cur;
-    await new Promise<void>((resolve) => {
-      const done = () => {
-        clearTimeout(timer);
-        this.watchers.delete(done);
-        resolve();
-      };
-      const timer = setTimeout(done, ms);
-      this.watchers.add(done);
-    });
-    return this.store.status(id);
+    const first = this.store.status(id);
+    if (!first || isTerminal(first.status) || ms <= 0) return first;
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const left = deadline - Date.now();
+      if (left <= 0) return this.store.status(id);
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          this.watchers.delete(done);
+          resolve();
+        };
+        const timer = setTimeout(done, left);
+        this.watchers.add(done);
+      });
+      // 어떤 작업이 바뀌어도 깨어나므로, 이 작업의 상태가 바뀌었을 때만 돌려준다
+      const cur = this.store.status(id);
+      if (!cur || cur.status !== first.status) return cur;
+    }
   }
 
   /** 끝날 때까지 기다린다(테스트용) */
