@@ -6,8 +6,11 @@ set -euo pipefail
 
 COUNT="${BANK_GENERATE_COUNT:-3}"
 AGENT="${BANK_AGENT_CLI:-codex}"
+# 문제 품질을 위해 기본은 medium(Codex 기본값은 none일 수 있다)
+EFFORT="${BANK_REASONING_EFFORT:-medium}"
 MCP=/usr/local/bin/solveline-bank-mcp
 [[ "$COUNT" =~ ^[1-9][0-9]?$ ]] || { echo "BANK_GENERATE_COUNT는 1~99입니다." >&2; exit 2; }
+[[ "$EFFORT" =~ ^(none|minimal|low|medium|high|xhigh)$ ]] || { echo "BANK_REASONING_EFFORT 값이 올바르지 않습니다." >&2; exit 2; }
 
 read -r -d '' PROMPT <<EOF || true
 너는 Solveline 일일 미니 문제 출제자다. solveline_bank MCP 도구만 쓰고, 셸 명령·파일·인터넷은 쓰지 않는다.
@@ -27,6 +30,7 @@ case "$AGENT" in
   codex)
     exec timeout 50m "$HOME/.local/bin/codex" exec --skip-git-repo-check --sandbox read-only \
       -c approval_policy='"never"' \
+      -c "model_reasoning_effort=\"$EFFORT\"" \
       -c "mcp_servers.solveline_bank.command=\"$MCP\"" \
       -c 'mcp_servers.solveline_bank.args=["--agent","codex"]' \
       -c mcp_servers.solveline_bank.startup_timeout_sec=60 \

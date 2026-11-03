@@ -505,6 +505,7 @@ export const DAILY_AUTHOR_GUIDE = `Solveline 일일 미니 문제 작성 지침
 - 형식: 기본은 함수형(mode=function). params는 매개변수 이름, 케이스 args는 매개변수별 JSON 리터럴 텍스트, expected는 반환값 JSON.
 - 설명(description, 마크다운): 상황 1~3문장, 입력·출력 조건, 제한(크기·값 범위)을 분명히. 예제는 cases의 hidden=false로만 둔다.
 - 케이스: 예제 1~5개 + 채점 케이스(hidden=true) 6개 이상. 빈 입력·최솟값·최댓값·중복·음수 같은 경계를 넣는다. 정답이 하나로 정해지게.
+- 케이스 입력은 작게: 케이스 하나의 args를 합쳐 2,000자 이하로 둔다. 최대 크기 입력은 케이스로 넣지 말고 제한에만 적는다(큰 입력은 도구 호출 크기 제한에 걸린다). 경계는 작은 값으로 보인다.
 - 난이도(level): 1 기초 구현, 2 자료구조 한 가지, 3 대표 알고리즘 한 번 응용, 4 두 가지 결합·최적화, 5 실전 고난도.
 - 시작 코드(starterCode): java는 class Solution { public <타입> solution(...) { } }, python은 def solution(...): 형태로 기존 문제와 같게.
 - 기준 풀이(referenceSolution)는 모든 케이스를 통과해야 저장된다. 실패하면 돌려받은 failures를 보고 케이스나 풀이를 고친다.
