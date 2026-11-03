@@ -5,5 +5,12 @@
     "runId": 41677184916,
     "key": "41677184916",
     "note": "PR stage report (CI #41677184916)"
+  },
+  {
+    "version": "0.2",
+    "date": "2026-11-03T16:51:58Z",
+    "runId": 41677184916,
+    "key": "41677184916-llm-41677963344",
+    "note": "PR stage report + LLM e2e QA (CI #41677184916, LLM QA #41677963344)"
   }
 ]
