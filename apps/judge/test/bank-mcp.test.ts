@@ -20,6 +20,20 @@ describe('문제은행 MCP 서버', () => {
     expect(await handle(rpc('resources/list'), echo)).toMatchObject({ error: { code: -32601 } });
   });
 
+  it('작업 지시를 MCP 프롬프트로 준다(출제 기준 + 작업 절차, 개수는 1~20)', async () => {
+    const init = (await handle(rpc('initialize', {}), echo)) as { result: { capabilities: Record<string, unknown> } };
+    expect(init.result.capabilities).toHaveProperty('prompts');
+    expect(await handle(rpc('prompts/list'), echo)).toMatchObject({ result: { prompts: [{ name: 'create_daily_batch' }] } });
+    type Got = { result: { messages: { role: string; content: { text: string } }[] } };
+    const got = (await handle(rpc('prompts/get', { name: 'create_daily_batch', arguments: { count: '7' } }), echo)) as Got;
+    expect(got.result.messages[0]!.role).toBe('user');
+    expect(got.result.messages[0]!.content.text).toContain('7개');
+    expect(got.result.messages[0]!.content.text).toContain('학습 목표 개념');
+    expect(((await handle(rpc('prompts/get', { name: 'create_daily_batch', arguments: { count: '999' } }), echo)) as Got).result.messages[0]!.content.text).toContain('20개');
+    expect(((await handle(rpc('prompts/get', { name: 'create_daily_batch' }), echo)) as Got).result.messages[0]!.content.text).toContain('10개');
+    expect(await handle(rpc('prompts/get', { name: 'nope' }), echo)).toMatchObject({ error: { code: -32602 } });
+  });
+
   it('공용 도구 목록을 JSON Schema로 내보낸다', async () => {
     const res = (await handle(rpc('tools/list'), echo)) as { result: { tools: ReturnType<typeof toolList> } };
     expect(res.result.tools.map((t) => t.name)).toEqual(Object.keys(DailyBankTools));

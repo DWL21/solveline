@@ -471,7 +471,7 @@ describe('문제은행 에이전트(MCP)', () => {
 
   it('지침·현황을 읽고 문제를 만들며, 만든 곳을 agent:<이름>으로 남긴다', async () => {
     const app = build();
-    expect(await data(await call(app, 'bank_guide', {}))).toMatchObject({ guide: expect.stringContaining('referenceSolution') });
+    expect(await data(await call(app, 'bank_guide', {}))).toMatchObject({ guide: expect.stringContaining('학습 목표 개념'), workflow: expect.stringContaining('요청받은 수만큼') });
     const saved = await data<{ saved: boolean; id: string }>(await call(app, 'create_problem', problemInput({ topic: '그리디', level: 2 })));
     expect(saved.saved).toBe(true);
     const ov = await data<{ cells: { topic: string; level: number; ready: number }[]; emptiest: unknown[]; totalReady: number }>(await call(app, 'bank_overview', {}));
