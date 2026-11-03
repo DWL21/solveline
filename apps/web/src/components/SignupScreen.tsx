@@ -15,11 +15,11 @@ function AgreeItem({ name, label, href, agree, onChange }: Readonly<{ name: keyo
   return (
     <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2.5 hover:bg-raised">
       <input type="checkbox" className="size-4 accent-accent" checked={agree[name]} onChange={(e) => onChange({ ...agree, [name]: e.target.checked })} />
-      <span className="flex-1 text-ui-lg">
+      <span className="flex-1 text-ui">
         {label} <span className="text-faint">(필수)</span>
       </span>
       {href && (
-        <a href={href} target="_blank" rel="noreferrer" className="text-meta text-faint underline underline-offset-2 hover:text-dim" onClick={(e) => e.stopPropagation()}>
+        <a href={href} target="_blank" rel="noreferrer" className="text-caption text-faint underline underline-offset-2 hover:text-dim" onClick={(e) => e.stopPropagation()}>
           보기
         </a>
       )}
@@ -56,13 +56,13 @@ export function SignupScreen() {
       </header>
       <div className="flex flex-1 items-center justify-center px-4 pt-6 pb-16">
         <main className="w-full max-w-[440px]">
-          <div className="rounded-xl border border-line bg-panel px-6 py-8 shadow-overlay shadow-black/30 sm:px-8">
-            <h1 className="text-title-lg font-bold tracking-tight">회원가입</h1>
+          <div className="rounded-xl border border-line bg-panel px-6 py-8 shadow-overlay sm:px-8">
+            <h1 className="text-headline font-bold tracking-tight">회원가입</h1>
             {!pending.isError && <p className="mt-1.5 text-body text-dim">아래 계정으로 가입해요. 약관을 확인하고 동의해 주세요.</p>}
             {pending.isError ? (
               <>
                 <p className="mt-3 text-ui text-dim">{apiMessage(pending.error, '가입 정보를 불러오지 못했어요.')}</p>
-                <button type="button" className="btn-primary mt-5 min-h-12 w-full text-body-lg" onClick={closed ? () => location.assign('/') : startGoogleLogin}>
+                <button type="button" className="btn-primary mt-5 min-h-12 w-full text-body" onClick={closed ? () => location.assign('/') : startGoogleLogin}>
                   {closed ? '문제 둘러보기' : 'Google로 다시 로그인'}
                 </button>
               </>
@@ -72,7 +72,7 @@ export function SignupScreen() {
                   <Avatar picture={pending.data.picture} email={pending.data.email} size={36} />
                   <div className="min-w-0">
                     <p className="truncate text-body font-semibold">{pending.data.name || pending.data.email}</p>
-                    <p className="truncate text-meta text-dim">{pending.data.email}</p>
+                    <p className="truncate text-caption text-dim">{pending.data.email}</p>
                   </div>
                 </div>
 
@@ -93,7 +93,7 @@ export function SignupScreen() {
                   </div>
                 </div>
 
-                <table className="mt-3 w-full text-left text-meta text-dim">
+                <table className="mt-3 w-full text-left text-caption text-dim">
                   <tbody className="[&_th]:w-20 [&_th]:py-1 [&_th]:pr-2 [&_th]:align-top [&_th]:font-semibold [&_td]:py-1">
                     <tr>
                       <th>수집 항목</th>
@@ -115,7 +115,7 @@ export function SignupScreen() {
                     {apiMessage(signup.error, '가입하지 못했어요')}
                   </p>
                 )}
-                <button type="button" className="btn-primary mt-5 min-h-12 w-full text-body-lg" disabled={!all || signup.isPending || hasCode(signup.error, 'signup_closed')} onClick={() => signup.mutate()}>
+                <button type="button" className="btn-primary mt-5 min-h-12 w-full text-body" disabled={!all || signup.isPending || hasCode(signup.error, 'signup_closed')} onClick={() => signup.mutate()}>
                   {signup.isPending ? <Spinner size={16} label="가입하는 중" /> : '동의하고 가입'}
                 </button>
                 <button type="button" className="btn-quiet mt-2 w-full" disabled={cancel.isPending} onClick={() => cancel.mutate()}>

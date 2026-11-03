@@ -31,7 +31,7 @@ function SettingsPanel({ settings }: Readonly<{ settings: DailySettings }>) {
 
   return (
     <section className="rounded-lg border border-line bg-panel p-5" aria-label="수신 설정">
-      <h2 className="text-body-lg font-bold">수신 설정</h2>
+      <h2 className="text-body font-bold">수신 설정</h2>
       <p className="mt-1 break-all text-ui text-dim">받는 주소: {settings.email}</p>
       <label className="mt-4 flex items-center gap-2 text-body">
         <input type="checkbox" checked={settings.mail} disabled={save.isPending || !settings.mailAvailable || settings.mailBlocked} onChange={(e) => change({ mail: e.target.checked })} />
@@ -74,7 +74,7 @@ function SubscribeCard({ settings }: Readonly<{ settings: DailySettings }>) {
       <h2 className="text-lead font-bold">평일마다 나에게 맞춘 한 문제</h2>
       <p className="mt-2 text-body text-dim">코딩 테스트 준비용 미니 문제를 평일 아침 7시에 보내 드려요. 풀이 기록을 보고 약한 유형과 알맞은 난이도로 사람마다 다르게 골라요. 구독하면 첫 문제를 바로 받아요.</p>
       {settings.mailAvailable && !settings.mailBlocked && <p className="mt-1 break-all text-ui text-dim">{settings.email}(으)로 메일도 함께 보내 드려요. 수신 설정에서 언제든 끌 수 있어요.</p>}
-      <p className="mt-3 text-meta text-dim">
+      <p className="mt-3 text-caption text-dim">
         구독하면 이메일과 수신 기록을 일일 문제 제공에 사용하고, 메일 발송을 Resend(미국)에 맡겨요. 자세한 내용은 <a href="/privacy" className="underline">개인정보처리방침</a>을 확인해 주세요.
       </p>
       <button type="button" className="btn-primary mt-4" disabled={subscribe.isPending} onClick={() => subscribe.mutate()}>
@@ -100,7 +100,7 @@ function InboxEntry({ item, open, onToggle }: Readonly<{ item: DailyInboxItem; o
           {!item.read && <span className="mr-2 text-caption font-bold text-accent-text">새 문제</span>}
           {item.title}
         </span>
-        <span className="mt-1 block text-meta text-dim">
+        <span className="mt-1 block text-caption text-dim">
           {item.date} · {item.topic} · {item.level}단계
           {progress && <span className={`ml-2 font-semibold ${progress.className}`}>{progress.label}</span>}
         </span>
@@ -155,7 +155,7 @@ export function DailyInboxPage() {
   return (
     <main className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-4 py-6">
-        <h1 className="text-[18px] font-bold">인박스</h1>
+        <h1 className="text-title sm:text-headline font-bold tracking-tight">인박스</h1>
         {failed && <p role="alert" className="mt-4 text-ui text-bad">{errMsg(failed)}</p>}
         {!failed && (!settings.data || !inbox.data) && <div className="mt-4"><LinesSkeleton lines={5} /></div>}
         {!failed && settings.data && inbox.data && (

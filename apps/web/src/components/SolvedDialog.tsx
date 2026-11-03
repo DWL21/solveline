@@ -46,11 +46,11 @@ export function SolvedDialog({
         {!onNext && <p className="mt-1 text-ui text-faint">이 목록의 마지막 문제예요.</p>}
         <div className="mt-6 flex flex-col gap-2">
           {onNext ? (
-            <button type="button" className="btn-primary min-h-11 text-body-lg" onClick={onNext} autoFocus>
+            <button type="button" className="btn-primary min-h-11 text-body" onClick={onNext} autoFocus>
               다음 문제
             </button>
           ) : (
-            <button type="button" className="btn-primary min-h-11 text-body-lg" onClick={onList} autoFocus>
+            <button type="button" className="btn-primary min-h-11 text-body" onClick={onList} autoFocus>
               문제 목록으로
             </button>
           )}

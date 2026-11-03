@@ -98,19 +98,19 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
   let listBody: ReactNode;
   if (all.length === 0)
     listBody = (
-      <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel py-16 text-center">
-        <p className="text-body-lg font-semibold">아직 문제가 없어요</p>
+      <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel shadow-card py-16 text-center">
+        <p className="text-body font-semibold">아직 문제가 없어요</p>
         {editor && <p className="text-ui text-dim">새 문제를 추가해 보세요.</p>}
       </div>
     );
   else if (shown.length === 0)
     listBody = (
-      <p className="rounded-lg border border-line bg-panel py-14 text-center text-body text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
+      <p className="rounded-lg border border-line bg-panel shadow-card py-14 text-center text-body text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
     );
   else
     listBody = (
       <>
-      <ol className="overflow-hidden rounded-lg border border-line bg-panel" aria-label="문제 목록">
+      <ol className="overflow-hidden rounded-lg border border-line bg-panel shadow-card" aria-label="문제 목록">
         {shown.slice(0, limit).map((p) => (
           <ProblemRow
             key={p.id}
@@ -153,7 +153,7 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
                 <Icon name="left" size={18} />
               </button>
             )}
-            <h1 className="min-w-0 text-title-lg font-bold tracking-tight sm:text-[24px]">
+            <h1 className="min-w-0 text-title sm:text-headline font-bold tracking-tight">
               {title} <span className="text-lead font-semibold text-faint tabular-nums">{overview ? cards.length : list.length}</span>
             </h1>
             {overview && <button type="button" className="btn-ghost ml-auto" onClick={() => onScope({ kind: 'all' })}>전체 보기</button>}
@@ -262,7 +262,7 @@ function CollectionCards({ cards, all, signedIn, overview, onScope }: Readonly<{
 function Progress({ solved, total, done }: Readonly<{ solved: number; total: number; done: boolean }>) {
   return (
     <div className="mt-4 flex max-w-md items-center gap-3 text-ui" title="100점을 받은 문제">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-fill" aria-hidden>
         <div className="h-full rounded-full bg-ok" style={{ width: `${total ? (solved / total) * 100 : 0}%` }} />
       </div>
       <span className={`shrink-0 font-semibold tabular-nums ${done ? 'text-ok' : 'text-dim'}`}>
@@ -322,7 +322,7 @@ function ProblemRow({ p, order, folderLabel, onPick }: Readonly<{ p: ProblemSumm
     <li className="flex items-center border-b border-line last:border-b-0 hover:bg-raised/60">
       <button type="button" onClick={() => onPick(p.id)} className="flex min-h-13 min-w-0 flex-1 items-center gap-4 py-3 pl-5 text-left">
         {order !== null && <span className="w-5 shrink-0 text-right text-ui text-faint tabular-nums">{order}</span>}
-        <span className="min-w-0 flex-1 truncate text-body-lg font-medium">{p.title}</span>
+        <span className="min-w-0 flex-1 truncate text-body font-medium">{p.title}</span>
         {folderLabel && <span className="hidden max-w-32 shrink-0 truncate rounded bg-raised px-2 py-0.5 text-caption text-dim sm:inline">{folderLabel}</span>}
         <SolvedMark p={p} />
       </button>
@@ -397,7 +397,7 @@ function Sidebar({
                 type="button"
                 aria-current={chip === s.key ? 'page' : undefined}
                 onClick={() => onScope(s.scope)}
-                className={`h-9 shrink-0 rounded-full border px-3.5 text-ui-lg font-semibold whitespace-nowrap ${chip === s.key ? 'border-text bg-text text-base' : 'border-line-strong text-dim'}`}
+                className={`h-9 shrink-0 rounded-full border px-3.5 text-ui font-semibold whitespace-nowrap ${chip === s.key ? 'border-text bg-text text-base' : 'border-line-strong text-dim'}`}
               >
                 {s.label} <span className="font-normal opacity-70">{s.count}</span>
               </button>
@@ -450,7 +450,7 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
   });
   return (
     <form
-      className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3"
+      className="flex flex-col gap-2 rounded-lg border border-line bg-panel shadow-card p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (name.trim()) create.mutate();
@@ -604,16 +604,16 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
     <button
       type="button"
       onClick={onOpen}
-      className={`group flex w-full flex-col rounded-lg border border-line bg-panel text-left transition hover:border-line-strong hover:bg-raised/40 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
+      className={`group flex w-full flex-col rounded-lg border border-line bg-panel shadow-card text-left transition hover:border-line-strong hover:bg-raised/40 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
     >
       <span className="flex items-start gap-3">
         <span className="min-w-0 flex-1">
-          <span className={`block truncate font-bold ${compact ? 'text-body-lg' : 'text-[18px]'}`}>{node.name}</span>
+          <span className={`block truncate font-bold ${compact ? 'text-body' : 'text-lead'}`}>{node.name}</span>
           {!compact && desc ? <span className="mt-1 line-clamp-1 text-body text-dim">{desc}</span> : null}
         </span>
         <Icon name="right" size={compact ? 14 : 16} className="mt-1 shrink-0 text-faint transition group-hover:translate-x-0.5 group-hover:text-text" />
       </span>
-      <span className={`mt-auto flex min-w-0 items-center text-faint ${compact ? 'flex-wrap gap-x-2 gap-y-1 text-meta' : 'gap-3 text-ui'}`}>
+      <span className={`mt-auto flex min-w-0 items-center text-faint ${compact ? 'flex-wrap gap-x-2 gap-y-1 text-caption' : 'gap-3 text-ui'}`}>
         <span className={compact ? 'min-w-0 basis-full break-words' : 'shrink-0'}>{meta}</span>
         {signedIn && total > 0 && (
           <>

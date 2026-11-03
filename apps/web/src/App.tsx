@@ -16,6 +16,7 @@ import { DailyInboxPage } from './components/DailyInboxPage.tsx';
 import { blankProblem } from './lib/blank.ts';
 import { useDraftSync } from './lib/drafts.ts';
 import { loginHref, useMe } from './lib/me.ts';
+import { useTheme } from './lib/theme.ts';
 
 // 문제 화면(에디터)은 무거우므로 열 때만 받는다. 목록 화면이 뜨면 미리 받아 둔다(prefetchWorkspace).
 const loadWorkspace = () => import('./components/Workspace.tsx');
@@ -206,15 +207,29 @@ function AppHeader({ route, signedIn, onLogo, onList, onLogout }: Readonly<{ rou
             인박스{unread > 0 && <span className="ml-1 text-caption font-bold text-accent-text">{unread}</span>}
           </a>
         )}
+        <ThemeToggle className={signedIn ? 'max-sm:hidden' : ''} />
         <UserMenu onLogout={onLogout} />
       </div>
     </header>
   );
 }
 
+/** 다크·라이트 바꾸기. 휴대폰에서 로그인했으면 상단바가 좁아 계정 메뉴 안에 둔다. */
+function ThemeToggle({ className = '' }: Readonly<{ className?: string }>) {
+  const [theme, setTheme] = useTheme();
+  const next = theme === 'dark' ? 'light' : 'dark';
+  const label = next === 'light' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기';
+  return (
+    <button type="button" className={`btn-quiet size-9 px-0 ${className}`} aria-label={label} title={label} onClick={() => setTheme(next)}>
+      <Icon name={next === 'light' ? 'sun' : 'moon'} size={18} />
+    </button>
+  );
+}
+
 /** 상단바 오른쪽: 로그인한 계정. 누르면 로그아웃. */
 function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
   const me = useMe();
+  const [theme, setTheme] = useTheme();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -247,8 +262,11 @@ function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
             <p className="truncate text-ui font-semibold">{me.name || me.email}</p>
             <p className="truncate text-caption text-dim">{temporary ? '임시 계정' : me.email}</p>
-            {me.editor && <p className="mt-1.5 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-micro font-semibold text-accent-text">편집 권한</p>}
+            {me.editor && <p className="mt-1.5 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-caption font-semibold text-accent-text">편집 권한</p>}
           </div>
+          <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-ui hover:bg-raised sm:hidden" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} /> {theme === 'dark' ? '라이트 모드' : '다크 모드'}
+          </button>
           <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-ui hover:bg-raised" onClick={onLogout}>
             로그아웃
           </button>
@@ -290,7 +308,7 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
           create.mutate();
         }}
       >
-        <h2 className="text-[17px] font-bold">새 문제</h2>
+        <h2 className="text-lead font-bold">새 문제</h2>
         <label className="mt-4 flex flex-col gap-1.5">
           <span className="text-caption font-bold text-dim">제목</span>
           <input className="field font-sans text-body" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예: 두 개 뽑아서 더하기" autoFocus />
@@ -307,7 +325,7 @@ function NewProblemDialog({ scope, onClose, onCreated }: Readonly<{ scope: Scope
               <label key={m} className={`cursor-pointer rounded-md border p-3 ${mode === m ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-dim'}`}>
                 <input type="radio" name="mode" className="sr-only" checked={mode === m} onChange={() => setMode(m)} />
                 <span className="block text-ui font-bold">{name}</span>
-                <span className="block text-micro text-faint">{hint}</span>
+                <span className="block text-caption text-faint">{hint}</span>
               </label>
             ))}
           </div>

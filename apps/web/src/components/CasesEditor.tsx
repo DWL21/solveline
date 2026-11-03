@@ -45,7 +45,7 @@ function Field({ value, label, multiline, readOnly, onChange }: Readonly<{ value
   if (value.length > BIG_FIELD)
     return (
       <div className="field cursor-default truncate text-faint" title={`${value.length.toLocaleString()}자 · 너무 커서 여기서는 편집할 수 없어요`} aria-label={label}>
-        {value.slice(0, 40)}… <span className="text-[11px]">({(value.length / 1024).toFixed(0)}KB)</span>
+        {value.slice(0, 40)}… <span className="text-caption">({(value.length / 1024).toFixed(0)}KB)</span>
       </div>
     );
   return multiline ? (
@@ -90,7 +90,7 @@ function CaseList({
         {cases.map((c, i) => (
           <div key={c.id} className="rounded-md border border-line bg-base/50 p-2.5">
             <div className="mb-1.5 flex items-center justify-between">
-              <b className="text-meta text-dim">
+              <b className="text-caption text-dim">
                 {label} {i + 1}
               </b>
               {del(i + 1, c.id)}
@@ -98,7 +98,7 @@ function CaseList({
             <div className="flex flex-col gap-1.5">
               {params.map((p, j) => (
                 <label key={p} className="flex flex-col gap-1">
-                  <span className="font-mono text-micro text-faint">{p}</span>
+                  <span className="font-mono text-caption text-faint">{p}</span>
                   <Field
                     readOnly={readOnly}
                     value={c.args[j] ?? ''}
@@ -108,7 +108,7 @@ function CaseList({
                 </label>
               ))}
               <label className="flex flex-col gap-1">
-                <span className="text-micro text-faint">기댓값 (return)</span>
+                <span className="text-caption text-faint">기댓값 (return)</span>
                 <Field readOnly={readOnly} value={c.expected} label={`${label} ${i + 1} 기댓값`} onChange={(v) => update(c.id, { expected: v })} />
               </label>
             </div>
@@ -119,7 +119,7 @@ function CaseList({
   if (mode === 'function')
     return (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[440px] border-separate border-spacing-y-1.5 text-meta">
+        <table className="w-full min-w-[440px] border-separate border-spacing-y-1.5 text-caption">
           <thead>
             <tr className="text-left text-dim">
               <th className="w-8 font-semibold">#</th>
@@ -242,7 +242,7 @@ export function CasesEditor({
         {cases.length > 0 ? (
           <CaseList mode={mode} params={params} cases={cases} label="테스트" readOnly={!editing} onChange={onCases} />
         ) : (
-          <p className="py-2 text-meta text-faint">기본 케이스가 없어요</p>
+          <p className="py-2 text-caption text-faint">기본 케이스가 없어요</p>
         )}
         {editing && (
           <button type="button" className="btn-ghost mt-2" disabled={cases.length >= MAX_CASES} onClick={() => onCases([...cases, newCase(params.length)])}>
@@ -352,16 +352,16 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
           {toggleLabel(open, count)}
         </button>
         {open && state !== 'saved' && (
-          <span className={`inline-flex items-center gap-1 text-micro ${state === 'error' ? 'text-bad' : 'text-faint'}`}>
+          <span className={`inline-flex items-center gap-1 text-caption ${state === 'error' ? 'text-bad' : 'text-faint'}`}>
             {state === 'error' ? '저장 실패' : <><Spinner size={11} /> 저장 중</>}
           </span>
         )}
       </div>
-      {!open && count === 0 && <p className="py-2 text-meta text-faint">히든 케이스가 없으면 기본 케이스로 채점해요.</p>}
+      {!open && count === 0 && <p className="py-2 text-caption text-faint">히든 케이스가 없으면 기본 케이스로 채점해요.</p>}
       {open && q.isPending && <LinesSkeleton />}
       {open && q.isError && (
         <div className="flex flex-wrap items-center gap-2 py-2">
-          <p className="text-meta text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>
+          <p className="text-caption text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>
           <button type="button" className="btn-quiet min-h-7 px-2 text-caption" onClick={() => void q.refetch()}>
             다시 시도
           </button>

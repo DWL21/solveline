@@ -496,10 +496,10 @@ function TitleBar({
           value={draft.title}
           onChange={(e) => patch({ title: e.target.value })}
           aria-label="문제 제목"
-          className="min-w-0 flex-1 basis-56 rounded bg-raised/60 px-1 py-1 text-body-lg font-bold outline-none focus:bg-raised"
+          className="min-w-0 flex-1 basis-56 rounded bg-raised/60 px-1 py-1 text-body font-bold outline-none focus:bg-raised"
         />
       ) : (
-        <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-body-lg font-bold">{draft.title}</h1>
+        <h1 className="min-w-0 flex-1 basis-56 truncate px-1 py-1 text-body font-bold">{draft.title}</h1>
       )}
       <BookmarkStar id={problem.id} bookmarked={summaries.data?.find((p) => p.id === problem.id)?.bookmarked} />
       {!guest && <SaveBadge state={saveState} onRetry={() => { if (queue) void queue.flush(problem.id); }} />}
@@ -530,7 +530,7 @@ function LastScore({ problem }: Readonly<{ problem: Problem }>) {
   if (!sub) return null;
   const solved = sub.score === 100;
   return (
-    <span className={`text-meta font-semibold whitespace-nowrap ${solved ? 'text-ok' : 'text-warn'}`} title={`최근 제출 ${new Date(sub.at).toLocaleString('ko-KR')}`}>
+    <span className={`text-caption font-semibold whitespace-nowrap ${solved ? 'text-ok' : 'text-warn'}`} title={`최근 제출 ${new Date(sub.at).toLocaleString('ko-KR')}`}>
       {solved ? '✓ 해결' : `${sub.score}점`}
     </span>
   );
@@ -591,7 +591,7 @@ function PaneTabs({ pane, onPane, compact, runner, unseen }: Readonly<{ pane: Pa
           type="button"
           aria-pressed={pane === p}
           onClick={() => onPane(p)}
-          className={`relative border-b-2 text-ui-lg font-semibold ${compact ? 'h-10' : 'h-11'} ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
+          className={`relative border-b-2 text-ui font-semibold ${compact ? 'h-10' : 'h-11'} ${pane === p ? 'border-accent text-text' : 'border-transparent text-dim'}`}
         >
           {label}
           {p === 'result' && <ResultDot pending={runner.pending} unseen={unseen} />}
@@ -739,7 +739,7 @@ function CodePane({
 function FolderName({ id }: Readonly<{ id: string | null }>) {
   const folders = useQuery({ queryKey: qk.folders, queryFn: api.folders });
   const name = folders.data?.find((f) => f.id === id)?.name;
-  return name ? <span className="max-w-40 truncate text-meta text-dim">{name}</span> : null;
+  return name ? <span className="max-w-40 truncate text-caption text-dim">{name}</span> : null;
 }
 
 function FolderSelect({ value, onChange }: Readonly<{ value: string | null; onChange: (id: string | null) => void }>) {
@@ -823,7 +823,7 @@ function CollectionsMenu({ problemId }: Readonly<{ problemId: string }>) {
                         onChange={() => toggle.mutate({ id: c.id, ids: checked ? c.problemIds.filter((x) => x !== problemId) : [...c.problemIds, problemId] })}
                       />
                       <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                      <span className="text-micro text-faint">{c.problemIds.length}</span>
+                      <span className="text-caption text-faint">{c.problemIds.length}</span>
                     </label>
                   </li>
                 );

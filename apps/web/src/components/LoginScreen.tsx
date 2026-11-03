@@ -59,8 +59,8 @@ export function LoginScreen() {
         </a>
       </header>
       <div className="flex flex-1 items-center justify-center px-4 pt-6 pb-16">
-        <main className="w-full max-w-[400px] rounded-xl border border-line bg-panel px-6 py-8 shadow-overlay shadow-black/30 sm:px-8">
-          <h1 className="text-title-lg font-bold tracking-tight">로그인</h1>
+        <main className="w-full max-w-[400px] rounded-xl border border-line bg-panel px-6 py-8 shadow-overlay sm:px-8">
+          <h1 className="text-headline font-bold tracking-tight">로그인</h1>
           <p className="mt-1.5 text-body text-dim">로그인하면 작성한 코드와 풀이 기록이 저장돼요.</p>
           {error && (
             <p role="alert" className="mt-5 rounded-md bg-bad/10 px-3 py-2.5 text-ui font-semibold text-bad">
@@ -70,11 +70,11 @@ export function LoginScreen() {
           <button
             type="button"
             onClick={startGoogleLogin}
-            className="mt-6 flex min-h-12 w-full items-center justify-center gap-2.5 rounded-md bg-white text-body-lg font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2]"
+            className="mt-6 flex min-h-12 w-full items-center justify-center gap-2.5 rounded-md border border-[#dadce0] bg-white text-body font-semibold text-[#1f1f1f] hover:bg-[#f2f2f2]"
           >
             <GoogleMark /> Google 계정으로 계속하기
           </button>
-          <p className="mt-3 text-center text-meta text-faint">
+          <p className="mt-3 text-center text-caption text-faint">
             {closed ? '지금은 신규 가입을 받지 않아요. 기존 회원은 로그인할 수 있어요.' : '처음이면 약관 동의 후 바로 가입돼요.'}
           </p>
           <div className="my-6 flex items-center gap-3 text-caption text-faint" aria-hidden>
@@ -82,10 +82,10 @@ export function LoginScreen() {
             <span>또는</span>
             <span className="h-px flex-1 bg-line" />
           </div>
-          <button type="button" disabled={pending || closed} onClick={temporaryLogin} className="btn-ghost min-h-12 w-full text-body-lg">
+          <button type="button" disabled={pending || closed} onClick={temporaryLogin} className="btn-ghost min-h-12 w-full text-body">
             {pending ? '시작하는 중…' : '임시 계정으로 둘러보기'}
           </button>
-          <p className="mt-3 text-center text-meta text-faint">임시 계정은 로그아웃하거나 24시간이 지나면 사라져요.</p>
+          <p className="mt-3 text-center text-caption text-faint">임시 계정은 로그아웃하거나 24시간이 지나면 사라져요.</p>
           {temporaryError && <p role="alert" className="mt-4 text-ui text-bad">{temporaryError}</p>}
         </main>
       </div>

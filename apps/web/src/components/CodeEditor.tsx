@@ -24,16 +24,16 @@ import { java } from '@codemirror/lang-java';
 import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { Language } from '@solveline/shared';
+import { useTheme, type Theme } from '../lib/theme.ts';
 
-const navy = EditorView.theme(
-  {
-    '&': { backgroundColor: 'var(--color-raised)' },
-    '.cm-gutters': { backgroundColor: 'var(--color-raised)', borderRight: '1px solid var(--color-line)', color: 'var(--color-faint)' },
-    '.cm-activeLine': { backgroundColor: 'var(--color-editor-active-line)' },
-    '.cm-activeLineGutter': { backgroundColor: 'var(--color-editor-active-gutter)' },
-  },
-  { dark: true },
-);
+/** 에디터 바탕·여백은 디자인 토큰을 따르고, 문법 색은 다크면 oneDark, 라이트면 CodeMirror 기본 색을 쓴다. */
+const chromeSpec = {
+  '&': { backgroundColor: 'var(--color-editor)', color: 'var(--color-text)' },
+  '.cm-gutters': { backgroundColor: 'var(--color-editor)', borderRight: '1px solid var(--color-line)', color: 'var(--color-faint)' },
+  '.cm-activeLine': { backgroundColor: 'var(--color-editor-active-line)' },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--color-editor-active-gutter)' },
+};
+const themeExt = (t: Theme): Extension => (t === 'dark' ? [oneDark, EditorView.theme(chromeSpec, { dark: true })] : EditorView.theme(chromeSpec, { dark: false }));
 
 const langExt = (l: Language) => (l === 'java' ? java() : python());
 
@@ -145,6 +145,8 @@ export function CodeEditor({
   const lang = useRef(new Compartment());
   const layout = useRef(new Compartment());
   const font = useRef(new Compartment());
+  const look = useRef(new Compartment());
+  const [theme] = useTheme();
   // 좁은 화면: 두 손가락으로 벌리고 오므려 글자 크기 조절(이 기기에 기억)
   const [fontPx, setFontPx] = useState(() => {
     try {
@@ -180,8 +182,7 @@ export function CodeEditor({
           indentUnit.of('    '),
           EditorState.tabSize.of(4),
           lang.current.of(langExt(language)),
-          oneDark,
-          navy,
+          look.current.of(themeExt(theme)),
           touchFriendly,
           EditorView.updateListener.of((u) => {
             if (u.focusChanged) cb.current.onFocusChange?.(u.view.hasFocus);
@@ -216,6 +217,10 @@ export function CodeEditor({
   useEffect(() => {
     view.current?.dispatch({ effects: layout.current.reconfigure(layoutFor(compact)) });
   }, [compact]);
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: look.current.reconfigure(themeExt(theme)) });
+  }, [theme]);
 
   useEffect(() => {
     const el = host.current;

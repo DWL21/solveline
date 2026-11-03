@@ -95,7 +95,7 @@ export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProble
           {query.data.items.map((item) => <li key={item.id} className="border-b border-line last:border-0">
             <button type="button" onClick={() => setSelected(item.id)} aria-pressed={selected === item.id} className={`w-full px-4 py-3 text-left hover:bg-raised ${selected === item.id ? 'bg-raised' : ''}`}>
               <span className="block truncate text-body font-semibold">{item.problemTitle ?? '삭제된 문제'}</span>
-              <span className="mt-1 flex items-center justify-between gap-2 text-meta text-dim"><span>{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'}</span><span className={`font-semibold ${statusColor(item)}`}>{statusText(item)}</span></span>
+              <span className="mt-1 flex items-center justify-between gap-2 text-caption text-dim"><span>{date(item.createdAt)} · {item.language === 'java' ? 'Java' : 'Python3'}</span><span className={`font-semibold ${statusColor(item)}`}>{statusText(item)}</span></span>
             </button>
           </li>)}
         </ol>
@@ -109,7 +109,7 @@ export function SubmissionHistoryPage({ onPickProblem }: Readonly<{ onPickProble
   return (
     <main className="pb-safe min-h-0 flex-1 overflow-y-auto px-4 pt-6 pb-10 sm:px-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
-        <h1 className="text-[24px] font-bold tracking-tight">제출 기록</h1>
+        <h1 className="text-title sm:text-headline font-bold tracking-tight">제출 기록</h1>
         <p className="mt-1.5 text-body text-dim">최근 30일 동안 제출한 코드와 채점 결과예요.</p>
         <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-start">
           {/* 좁은 화면: 제출을 고르면 목록 대신 상세를 크게 보여 준다 */}

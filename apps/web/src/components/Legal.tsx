@@ -41,9 +41,9 @@ function Page({ title, version, children }: Readonly<{ title: string; version: s
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-10">
-        <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
-        <p className="mt-1 text-meta text-faint">시행일 {version}</p>
-        <div className="legal mt-6 flex flex-col gap-6 text-body-lg leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-ui [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
+        <h1 className="text-title sm:text-headline font-bold tracking-tight">{title}</h1>
+        <p className="mt-1 text-caption text-faint">시행일 {version}</p>
+        <div className="legal mt-6 flex flex-col gap-6 text-body leading-[1.8] text-text/90 [&_h2]:mb-2 [&_h2]:text-lead [&_h2]:font-bold [&_li]:ml-5 [&_ol]:list-decimal [&_table]:w-full [&_table]:text-ui [&_td]:border [&_td]:border-line [&_td]:p-2 [&_td]:align-top [&_th]:border [&_th]:border-line [&_th]:bg-panel [&_th]:p-2 [&_th]:text-left [&_ul]:list-disc">
           {children}
         </div>
       </main>

@@ -1,94 +1,111 @@
 @import 'tailwindcss';
 
 /*
- * 디자인 토큰. 쓰임새와 규칙은 저장소 루트 DESIGN.md에 있다.
- * 기존 코딩 테스트 화면과 비슷한 어두운 남색 IDE 톤이 기본이다. 색은 모두 이 토큰으로만 쓴다.
+ * 디자인 토큰. 값을 고른 이유와 쓰임새는 저장소 루트 DESIGN.md에 있다.
+ * 색은 모두 이 토큰으로만 쓴다. 다크(기본값, 회색 층으로 면을 나누는 Discord풍)와
+ * 라이트(:root[data-theme='light'], 흰 바탕에 넉넉한 여백의 Toss풍) 두 테마를 같은 이름으로 정의한다.
+ * 테마는 index.html의 시작 스크립트와 lib/theme.ts가 html[data-theme]로 정한다.
  */
 @theme {
   --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: 'JetBrains Mono', 'D2Coding', 'SF Mono', Menlo, Consolas, monospace;
 
-  /* 표면: 어두운 것부터 밝은 것 순서 */
-  --color-ink: #0c151c;
-  --color-bar: #0f1922;
-  --color-base: #172334;
-  --color-panel: #1e2a38;
-  --color-raised: #263747;
+  /* 표면 */
+  --color-ink: #313338; /* 페이지 바탕(본문 영역) */
+  --color-bar: #1e1f22; /* 상단바·하단 실행 바 */
+  --color-panel: #2b2d31; /* 사이드바·카드·패널·대화상자 */
+  --color-base: #1e1f22; /* 오목한 칸: 입력·코드 블록 */
+  --color-editor: #1e1f22; /* 코드 에디터 */
+  --color-raised: #3a3c42; /* hover·선택된 항목 */
+  --color-fill: #43454b; /* 보조 버튼·진행 막대 트랙 */
+  --color-fill-hover: #4e5058;
   /* 경계선 */
-  --color-line: #2f4256;
-  --color-line-strong: #3d5468;
+  --color-line: #3f4147;
+  --color-line-strong: #4e5058;
+  --color-field-line: #74767f; /* 입력 칸 테두리: 바탕과 3:1 이상(WCAG 1.4.11) */
   /* 글자: 본문 > 보조 > 흐림 */
-  --color-text: #e6edf3;
-  --color-dim: #aab9c9;
-  --color-faint: #90a3b6;
+  --color-text: #f2f3f5;
+  --color-dim: #b5bac1;
+  --color-faint: #a3a9b1;
   /* 강조(주 행동)와 링크 */
-  --color-accent: #0066e0;
-  --color-accent-hover: #1a74e8;
-  --color-accent-text: #5aaeff;
+  --color-accent: #5865f2;
+  --color-accent-hover: #4752c4;
+  --color-accent-text: #a5acff;
+  --color-accent-soft: rgb(88 101 242 / 0.16);
   --color-on-accent: #ffffff;
-  --color-sky: #44c4f5;
+  --color-sky: #00a8fc;
   /* 상태: 색만으로 구분하지 않고 ✓/✗·문구를 같이 쓴다 */
-  --color-ok: #3ec27d;
-  --color-bad: #ff6b6b;
-  --color-warn: #f5b94a;
+  --color-ok: #4fd08a;
+  --color-bad: #ff8a8c;
+  --color-warn: #f0b232;
   /* 보조 */
-  --color-star: #f0a80e;
-  --color-star-hover: #e8a20c;
-  --color-scrim: rgb(0 0 0 / 0.6);
-  --color-selection: rgb(0 120 255 / 0.35);
+  --color-star: #f0b232;
+  --color-star-hover: #e3a21a;
+  --color-scrim: rgb(0 0 0 / 0.7);
+  --color-selection: rgb(88 101 242 / 0.4);
   --color-editor-active-line: rgb(255 255 255 / 0.04);
   --color-editor-active-gutter: rgb(255 255 255 / 0.06);
 
-  /* 글자 크기. 줄 높이는 정하지 않고 부모를 따른다(예전 text-[13px]과 같다). */
-  --text-micro: 11.5px;
+  /*
+   * 글자 크기: 12 · 14 · 16 · 18 · 22 · 28. 작은 쪽은 약 1.14배(장2도), 제목 쪽은 약 1.25배(장3도)로 커진다.
+   * 줄 높이는 정하지 않고 부모를 따른다(긴 글은 leading-*를 따로 준다).
+   */
   --text-caption: 12px;
-  --text-meta: 12.5px;
-  --text-ui: 13px;
-  --text-ui-lg: 13.5px;
-  --text-body: 14px;
-  --text-body-lg: 15px;
-  --text-lead: 16px;
-  --text-title: 20px;
-  --text-title-lg: 22px;
+  --text-ui: 14px;
+  --text-body: 16px;
+  --text-lead: 18px;
+  --text-title: 22px;
+  --text-headline: 28px;
 
-  /* 그림자: 떠 있는 층(메뉴·대화상자·카드형 화면)에만 쓴다. Tailwind가 값을 그대로 넣으므로 테마별로 바꾸지 않는다. */
-  --shadow-overlay: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  /* 모서리: 컨트롤 8 · 카드 12 · 대화상자 16 */
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* 그림자: 테마마다 값이 달라 --elev-*를 거친다 */
+  --shadow-card: var(--elev-card);
+  --shadow-overlay: var(--elev-overlay);
 }
 
 :root {
   color-scheme: dark;
+  --elev-card: 0 1px 2px rgb(0 0 0 / 0.2);
+  --elev-overlay: 0 8px 24px rgb(0 0 0 / 0.45);
 }
 
-/*
- * 라이트 팔레트(준비 단계). html에 data-theme="light"를 붙이면 적용된다.
- * 아직 화면에서 고르는 곳은 없다. 에디터 테마(oneDark)는 다크 고정이라 함께 바꿔야 한다(DESIGN.md).
- */
 :root[data-theme='light'] {
   color-scheme: light;
-  --color-ink: #eef2f6;
-  --color-bar: #e3e9ef;
-  --color-base: #f7f9fb;
+  --color-ink: #f9fafb;
+  --color-bar: #ffffff;
   --color-panel: #ffffff;
-  --color-raised: #e9eef3;
-  --color-line: #d5dde6;
-  --color-line-strong: #b8c4d1;
-  --color-text: #13202c;
-  --color-dim: #44566a;
-  --color-faint: #5a6b7d;
-  --color-accent: #0066e0;
-  --color-accent-hover: #0057c2;
-  --color-accent-text: #0058c4;
+  --color-base: #f2f4f6;
+  --color-editor: #ffffff;
+  --color-raised: #eef1f4;
+  --color-fill: #e5e8eb;
+  --color-fill-hover: #d1d6db;
+  --color-line: #e5e8eb;
+  --color-line-strong: #d1d6db;
+  --color-field-line: #848e9a;
+  --color-text: #191f28;
+  --color-dim: #4e5968;
+  --color-faint: #636e7b;
+  --color-accent: #1b64da;
+  --color-accent-hover: #1957c2;
+  --color-accent-text: #1b64da;
+  --color-accent-soft: #e8f3ff;
   --color-on-accent: #ffffff;
-  --color-sky: #0b6f9c;
-  --color-ok: #167443;
-  --color-bad: #c53030;
-  --color-warn: #8f5c00;
-  --color-star: #b07800;
-  --color-star-hover: #9a6900;
-  --color-scrim: rgb(15 25 34 / 0.45);
-  --color-selection: rgb(0 102 224 / 0.2);
-  --color-editor-active-line: rgb(0 0 0 / 0.04);
-  --color-editor-active-gutter: rgb(0 0 0 / 0.06);
+  --color-sky: #1b64da;
+  --color-ok: #067a46;
+  --color-bad: #d22030;
+  --color-warn: #a65200;
+  --color-star: #e19a00;
+  --color-star-hover: #c98500;
+  --color-scrim: rgb(0 0 0 / 0.4);
+  --color-selection: rgb(27 100 218 / 0.18);
+  --color-editor-active-line: rgb(0 0 0 / 0.03);
+  --color-editor-active-gutter: rgb(0 0 0 / 0.05);
+  --elev-card: 0 1px 3px rgb(0 27 55 / 0.05), 0 4px 16px rgb(0 27 55 / 0.04);
+  --elev-overlay: 0 12px 32px rgb(0 27 55 / 0.14);
 }
 
 /*
@@ -150,7 +167,7 @@ html {
     -webkit-tap-highlight-color: transparent;
   }
   .touch-target {
-    min-height: 40px;
+    min-height: 44px;
   }
 }
 .no-scrollbar {
@@ -177,21 +194,30 @@ body {
   scrollbar-color: var(--color-line-strong) transparent;
 }
 
+/* 키보드 초점: 모든 컨트롤에 같은 2px 강조색 테두리(WCAG 2.4.7). 마우스 클릭에는 보이지 않는다. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.cm-editor :focus-visible {
+  outline: none;
+}
+
 @utility btn {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 text-ui font-semibold whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
-  min-height: 34px;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-4 text-ui font-semibold whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  min-height: 36px;
 }
 @utility btn-primary {
   @apply btn bg-accent text-on-accent hover:bg-accent-hover;
 }
 @utility btn-ghost {
-  @apply btn border border-line-strong bg-panel text-text hover:border-faint hover:bg-raised;
+  @apply btn bg-fill text-text hover:bg-fill-hover;
 }
 @utility btn-quiet {
   @apply btn text-dim hover:bg-raised hover:text-text;
 }
 @utility field {
-  @apply w-full rounded-md border border-line-strong bg-base px-2.5 py-1.5 font-mono text-ui text-text outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/15;
+  @apply w-full rounded-md border border-field-line bg-base px-3 py-2 font-mono text-ui text-text outline-none transition-colors placeholder:text-faint focus:border-accent focus:ring-3 focus:ring-accent/20 aria-invalid:border-bad;
 }
 @utility pane-title {
   @apply flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-ui font-bold text-dim;

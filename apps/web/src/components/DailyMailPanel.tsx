@@ -116,9 +116,9 @@ function BankGrid({ data }: Readonly<{ data: DailyAdminOverview }>) {
   const cell = (topic: string, level: number) => data.bank.find((c) => c.topic === topic && c.level === level);
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-body-lg font-bold">문제은행</h2>
+      <h2 className="text-body font-bold">문제은행</h2>
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full text-meta">
+        <table className="w-full text-caption">
           <thead>
             <tr className="text-faint">
               <th className="py-1 pr-2 text-left font-semibold">유형</th>
@@ -181,12 +181,12 @@ function ProblemEditor({ onSaved }: Readonly<{ onSaved: () => void }>) {
   return (
     <form onSubmit={submit} className="rounded-lg border border-line bg-panel p-5">
       <div className="flex items-center gap-2">
-        <h2 className="text-body-lg font-bold">문제 직접 추가</h2>
+        <h2 className="text-body font-bold">문제 직접 추가</h2>
         <button type="button" className="btn-quiet ml-auto px-2 text-caption" onClick={() => setText(JSON.stringify(TEMPLATE, null, 2))}>
           예시 채우기
         </button>
       </div>
-      <p className="mt-1 text-meta text-dim">에이전트(MCP create_problem)와 같은 형식이에요. 기준 풀이로 예제와 채점 케이스를 모두 채점해 통과해야 저장돼요.</p>
+      <p className="mt-1 text-caption text-dim">에이전트(MCP create_problem)와 같은 형식이에요. 기준 풀이로 예제와 채점 케이스를 모두 채점해 통과해야 저장돼요.</p>
       <textarea className="field mt-3 min-h-64 font-mono text-caption" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="문제 JSON" required />
       <button type="submit" className="btn-primary mt-3" disabled={save.isPending || !text.trim()}>
         {save.isPending ? '채점하고 저장하는 중…' : '검증하고 저장하기'}
@@ -281,7 +281,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
 
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-body-lg font-bold">
+      <h2 className="text-body font-bold">
         문제 <span className="text-faint">{all.length}</span>
       </h2>
       <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
@@ -306,7 +306,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
 
       {/* 일괄 작업: 고른 문제가 있을 때만 쓸 수 있다 */}
       <div className="sticky top-0 z-10 mt-3 rounded-md border border-line bg-raised p-2" role="toolbar" aria-label="고른 문제 일괄 작업">
-        <div className="flex flex-wrap items-center gap-2 text-meta">
+        <div className="flex flex-wrap items-center gap-2 text-caption">
           <span className="font-semibold">{chosen.length}개 선택</span>
           {(Object.keys(PROBLEM_STATUS) as DailyProblemStatus[]).map((s) => (
             <button key={s} type="button" className="btn-quiet border border-line px-2 text-caption" disabled={!chosen.length || busy} onClick={() => setStatus.mutate({ ids: chosen.map((p) => p.id), s })}>
@@ -338,7 +338,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
             </button>
           )}
         </div>
-        <input className="field mt-2 py-1 text-meta" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} placeholder="시험 받을 주소(최대 5개, 쉼표로 구분)" aria-label="시험 받을 주소" autoComplete="off" />
+        <input className="field mt-2 py-1 text-caption" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} placeholder="시험 받을 주소(최대 5개, 쉼표로 구분)" aria-label="시험 받을 주소" autoComplete="off" />
       </div>
       {notice && <output className="mt-2 block text-ui text-dim">{notice}</output>}
       {action && <p role="alert" className="mt-2 text-ui text-bad">{errMsg(action)}</p>}
@@ -348,7 +348,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
       {list.data && all.length > 0 && filtered.length === 0 && <p className="mt-3 text-ui text-faint">조건에 맞는 문제가 없어요.</p>}
 
       {visible.length > 0 && (
-        <label className="mt-3 flex items-center gap-2 border-b border-line pb-2 text-meta text-dim">
+        <label className="mt-3 flex items-center gap-2 border-b border-line pb-2 text-caption text-dim">
           <input
             type="checkbox"
             checked={allVisibleChosen}
@@ -428,7 +428,7 @@ function ProblemPreview({ id }: Readonly<{ id: string }>) {
 function AgentInfo() {
   return (
     <section className="rounded-lg border border-line bg-panel p-5 text-ui">
-      <h2 className="text-body-lg font-bold">에이전트 자동 제작</h2>
+      <h2 className="text-body font-bold">에이전트 자동 제작</h2>
       <p className="mt-1 text-dim">
         pahidc의 타이머가 Codex CLI로 문제은행 MCP에 접속해, 부족한 유형·난이도부터 새 문제를 만들고 검증해 추가해요. 다른 모델도 같은 MCP에 연결하면 똑같이 동작해요.
       </p>
@@ -445,7 +445,7 @@ function SubscriberList({ subscribers, onChanged }: Readonly<{ subscribers: Dail
   const remove = useMutation({ mutationFn: adminApi.deleteDailySubscriber, onSuccess: onChanged });
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-body-lg font-bold">
+      <h2 className="text-body font-bold">
         구독자 <span className="text-faint">{subscribers.length}</span>
       </h2>
       {subscribers.length === 0 && <p className="mt-3 text-ui text-faint">아직 구독자가 없어요.</p>}

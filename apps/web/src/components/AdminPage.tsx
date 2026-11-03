@@ -53,7 +53,7 @@ function AdminLogin() {
           <img src="/icon.svg" alt="" className="size-8" />
           <span className="text-title font-extrabold tracking-tight">Solveline</span>
         </a>
-        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-overlay shadow-black/30">
+        <form onSubmit={submit} className="rounded-xl border border-line bg-panel px-6 py-7 shadow-overlay">
           <h1 className="text-title font-bold">관리자 모드</h1>
           <input type="text" name="username" autoComplete="username" value="solveline-admin" readOnly hidden />
           <label className="mt-5 flex flex-col gap-1.5">
@@ -101,9 +101,9 @@ function Dashboard() {
       <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 border-b border-line bg-bar px-4 sm:h-12 sm:flex-nowrap">
         <a href="/" className="flex items-center gap-2">
           <img src="/icon.svg" alt="" className="size-6" />
-          <span className="text-body-lg font-extrabold tracking-tight">Solveline</span>
+          <span className="text-body font-extrabold tracking-tight">Solveline</span>
         </a>
-        <span className="shrink-0 whitespace-nowrap rounded bg-warn/15 px-2 py-0.5 text-micro font-bold text-warn">관리자 모드</span>
+        <span className="shrink-0 whitespace-nowrap rounded bg-warn/15 px-2 py-0.5 text-caption font-bold text-warn">관리자 모드</span>
         <nav className="order-last flex h-10 w-full gap-1 sm:order-none sm:ml-4 sm:h-full sm:w-auto">
           {(
             [
@@ -181,7 +181,7 @@ function UserList({ selected, onSelect }: Readonly<{ selected: string | null; on
             >
               <Avatar picture={u.picture} email={u.email} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-ui-lg font-semibold">{u.name || u.email}</span>
+                <span className="block truncate text-ui font-semibold">{u.name || u.email}</span>
                 <span className="block truncate text-caption text-dim">{u.email}</span>
               </span>
               <Badges user={u} />
@@ -200,7 +200,7 @@ function UserList({ selected, onSelect }: Readonly<{ selected: string | null; on
 function Badges({ user }: Readonly<{ user: AdminUser }>) {
   return (
     <span className="flex shrink-0 gap-1">
-      {user.editor && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-bold text-accent-text">편집</span>}
+      {user.editor && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-caption font-bold text-accent-text">편집</span>}
     </span>
   );
 }
@@ -237,13 +237,13 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
       <div className="flex items-center gap-3">
         <Avatar picture={u.picture} email={u.email} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-body-lg font-bold">{u.name || u.email}</p>
-          <p className="truncate text-meta text-dim">{u.email}</p>
+          <p className="truncate text-body font-bold">{u.name || u.email}</p>
+          <p className="truncate text-caption text-dim">{u.email}</p>
         </div>
         <Badges user={u} />
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-meta sm:grid-cols-4">
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-caption sm:grid-cols-4">
         {(
           [
             ['가입', day(u.createdAt)],
@@ -258,7 +258,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
           </div>
         ))}
       </dl>
-      <p className="mt-2 text-micro text-faint">
+      <p className="mt-2 text-caption text-faint">
         약관 {u.termsVersion} · 개인정보 {u.privacyVersion} 동의 <span className="whitespace-nowrap">({time(u.agreedAt)})</span>
       </p>
 
@@ -278,10 +278,10 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
 
       <h2 className="mt-5 mb-2 text-ui font-bold">풀이 현황 {u.problems.length}</h2>
       {u.problems.length === 0 ? (
-        <p className="text-meta text-faint">아직 연 문제가 없어요</p>
+        <p className="text-caption text-faint">아직 연 문제가 없어요</p>
       ) : (
         <div className="max-h-72 overflow-y-auto rounded-md border border-line">
-          <table className="w-full text-meta">
+          <table className="w-full text-caption">
             <thead className="sticky top-0 bg-base text-left text-dim">
               <tr>
                 <th className="px-2 py-1.5 font-semibold">문제</th>
@@ -306,9 +306,9 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
 
       <h2 className="mt-5 mb-2 text-ui font-bold">최근 제출</h2>
       {u.recentSubmissions.length === 0 ? (
-        <p className="text-meta text-faint">제출 기록이 없어요</p>
+        <p className="text-caption text-faint">제출 기록이 없어요</p>
       ) : (
-        <ul className="max-h-60 overflow-y-auto rounded-md border border-line text-meta">
+        <ul className="max-h-60 overflow-y-auto rounded-md border border-line text-caption">
           {u.recentSubmissions.map((s) => (
             <li key={s.id} className="border-b border-line px-2.5 py-2 last:border-0">
               <div className="flex items-center gap-2">
@@ -317,7 +317,7 @@ function UserDetail({ id, onDeleted }: Readonly<{ id: string; onDeleted: () => v
                   {s.kind === 'submit' && s.score !== null && (s.score === 100 ? '✓' : `${s.score}점`)}
                 </span>
               </div>
-              <p className="mt-0.5 text-micro whitespace-nowrap text-faint tabular-nums">
+              <p className="mt-0.5 text-caption whitespace-nowrap text-faint tabular-nums">
                 {time(s.createdAt)} · {s.kind === 'submit' ? '제출' : '실행'} · {s.language === 'java' ? 'Java' : 'Python'}
               </p>
             </li>
