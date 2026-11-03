@@ -1,4 +1,4 @@
--- 일일 미니 문제 은행(#165). 날짜별 회차 대신 사람마다 다른 문제를 고른다. db-node.ts의 dailyBankMigration과 같게 유지한다(테스트가 비교한다).
+-- 일일 미니 문제 은행(#164). 날짜별 회차 대신 사람마다 다른 문제를 고른다. db-node.ts의 dailyBankMigration과 같게 유지한다(테스트가 비교한다).
 DROP TABLE daily_inbox_reads;
 DROP TABLE daily_deliveries;
 DROP TABLE daily_issues;
