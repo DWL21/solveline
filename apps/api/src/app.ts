@@ -50,6 +50,7 @@ import {
   DAILY_AUTHOR_GUIDE,
   DAILY_BANK_PATH,
   DAILY_TOPICS,
+  dailyBatchTask,
   DailyBankCall,
   DailyBankTools,
   DailyBulkInput,
@@ -594,7 +595,7 @@ export function createApp(deps: AppDeps) {
     const a = parsed.data as Record<string, unknown>;
     switch (tool) {
       case 'bank_guide':
-        return { data: { guide: DAILY_AUTHOR_GUIDE, topics: DAILY_TOPICS } };
+        return { data: { guide: DAILY_AUTHOR_GUIDE, workflow: dailyBatchTask(), topics: DAILY_TOPICS } };
       case 'bank_overview': {
         // 0인 칸도 보여 준다(에이전트가 빈 칸을 따로 추측하지 않게)
         const have = await daily.bankCells();
