@@ -133,6 +133,9 @@ export function pickProblem(candidates: PickCandidate[], stats: PickStat[], rece
   return best.problem_id;
 }
 
+/** 바인딩 수 제한 안에 들도록 나눈다 */
+const chunks = <T>(items: T[], size = 50) => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
+
 export class DailyStore {
   constructor(private sql: Sql) {}
 
@@ -382,6 +385,31 @@ export class DailyStore {
 
   async setStatus(id: string, status: DailyProblemStatus, now: number) {
     return (await this.sql.run('UPDATE daily_bank SET status = ?, updated_at = ? WHERE problem_id = ?', status, new Date(now).toISOString(), id)).changes > 0;
+  }
+
+  /** 여러 문제의 상태를 한 번에 바꾼다. D1의 쿼리당 바인딩 수 제한(100) 때문에 나눠서 쓴다 */
+  async setStatusMany(ids: string[], status: DailyProblemStatus, now: number) {
+    const at = new Date(now).toISOString();
+    const results = await this.sql.batch(
+      chunks(ids).map((part) => stmt(`UPDATE daily_bank SET status = ?, updated_at = ? WHERE problem_id IN (${part.map(() => '?').join(',')})`, status, at, ...part)),
+    );
+    const changed = results.reduce((n, r) => n + r.changes, 0);
+    return { changed, skipped: ids.length - changed };
+  }
+
+  /** 받은 사람이 없는 문제만 한꺼번에 지운다 */
+  async deleteMany(ids: string[]) {
+    const results = await this.sql.batch(
+      chunks(ids).map((part) => {
+        const marks = part.map(() => '?').join(',');
+        return stmt(
+          `DELETE FROM problems WHERE id IN (${marks}) AND id IN (SELECT problem_id FROM daily_bank) AND id NOT IN (SELECT problem_id FROM daily_picks)`,
+          ...part,
+        );
+      }),
+    );
+    const changed = results.reduce((n, r) => n + r.changes, 0);
+    return { changed, skipped: ids.length - changed };
   }
 
   /** 받은 사람이 없는 문제만 지운다(받은 문제는 retired로 둔다) */

@@ -49,6 +49,7 @@ These documents are in Korean.
 | [API](docs/api.md) | Endpoint list, access permissions |
 | [Architecture and deployment](docs/architecture.md) | Runtime environment, deployment layout, grading flow, renaming history |
 | [Decision records](docs/decisions) | Sandbox, grading pipeline, login and permissions, and more |
+| [Problem bank MCP](docs/daily-bank-mcp.md) | MCP server that lets agents build daily mini problems: design, connection, scheduled generation (Korean) |
 | [Roadmap](docs/roadmap.md) | Upcoming work |
 | [Quality engineering](docs/quality/README.md) | Test strategy, quality metrics, team adoption guide, automation (Playwright API and UI), SonarQube, CI (GitHub Actions) |
 | [AGENTS.md](AGENTS.md) | Working rules for people and agents |

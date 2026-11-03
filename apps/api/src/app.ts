@@ -52,6 +52,9 @@ import {
   DAILY_TOPICS,
   DailyBankCall,
   DailyBankTools,
+  DailyBulkInput,
+  DailyBulkResult,
+  DailyBulkStatusInput,
   DailyProblemDetail,
   DailyProblemInput,
   DailyProblemStatus,
@@ -592,8 +595,13 @@ export function createApp(deps: AppDeps) {
     switch (tool) {
       case 'bank_guide':
         return { data: { guide: DAILY_AUTHOR_GUIDE, topics: DAILY_TOPICS } };
-      case 'bank_overview':
-        return { data: { cells: await daily.bankCells(), topics: DAILY_TOPICS, levels: [1, 2, 3, 4, 5] } };
+      case 'bank_overview': {
+        // 0인 칸도 보여 준다(에이전트가 빈 칸을 따로 추측하지 않게)
+        const have = await daily.bankCells();
+        const cells = DAILY_TOPICS.flatMap((topic) => [1, 2, 3, 4, 5].map((level) => have.find((c) => c.topic === topic && c.level === level) ?? { topic, level, ready: 0, draft: 0 }));
+        const least = Math.min(...cells.map((c) => c.ready));
+        return { data: { cells, emptiest: cells.filter((c) => c.ready === least).map(({ topic, level }) => ({ topic, level })), totalReady: cells.reduce((n, c) => n + c.ready, 0) } };
+      }
       case 'list_problems':
         return { data: await daily.listProblems(a as { topic?: string; status?: string; limit: number }) };
       case 'get_problem': {
@@ -659,6 +667,19 @@ export function createApp(deps: AppDeps) {
     if (!input) return fail(c, 400, 'invalid_request', '상태를 확인해 주세요.');
     if (!(await daily.setStatus(c.req.param('id'), input.status, now()))) return fail(c, 404, 'not_found', '없는 문제예요.');
     return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
+  });
+
+  // 일괄 작업: 경로를 /problems/:id와 겹치지 않게 따로 둔다
+  app.put('/api/admin/daily/problems-bulk/status', async (c) => {
+    const input = await readJson(c, DailyBulkStatusInput);
+    if (!input) return fail(c, 400, 'invalid_request', '고른 문제와 상태를 확인해 주세요.');
+    return ok(c, DailyBulkResult, await daily.setStatusMany([...new Set(input.ids)], input.status, now()));
+  });
+
+  app.post('/api/admin/daily/problems-bulk/delete', async (c) => {
+    const input = await readJson(c, DailyBulkInput);
+    if (!input) return fail(c, 400, 'invalid_request', '고른 문제를 확인해 주세요.');
+    return ok(c, DailyBulkResult, await daily.deleteMany([...new Set(input.ids)]));
   });
 
   app.delete('/api/admin/daily/problems/:id', async (c) => {

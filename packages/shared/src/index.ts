@@ -488,6 +488,12 @@ export const DailyProblemDetail = DailyProblemSummary.extend({
 export type DailyProblemDetail = z.infer<typeof DailyProblemDetail>;
 export const DailyBankCell = z.object({ topic: DailyTopic, level: z.number(), ready: z.number(), draft: z.number() });
 export type DailyBankCell = z.infer<typeof DailyBankCell>;
+/** 관리자 일괄 작업: 고른 문제들(한 번에 200개까지) */
+export const DailyBulkInput = z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(200) });
+export const DailyBulkStatusInput = DailyBulkInput.extend({ status: DailyProblemStatus });
+/** changed: 바뀐(지운) 수, skipped: 없거나 받은 사람이 있어 남긴 수 */
+export const DailyBulkResult = z.object({ changed: z.number(), skipped: z.number() });
+export type DailyBulkResult = z.infer<typeof DailyBulkResult>;
 /** 기준 풀이 검증 결과. 실패하면 어떤 케이스가 어떻게 틀렸는지 돌려준다 */
 export const DailyVerifyResult = z.object({
   ok: z.boolean(),
@@ -518,7 +524,7 @@ export const DAILY_AUTHOR_GUIDE = `Solveline 일일 미니 문제 작성 지침
  */
 export const DailyBankTools = {
   bank_guide: { description: '미니 문제 작성 지침. 문제를 만들기 전에 먼저 읽는다.', input: z.object({}) },
-  bank_overview: { description: '문제은행 현황: 유형(topic)×난이도(level)별 공개(ready)·작성 중(draft) 문제 수. 수가 적은 칸부터 채운다.', input: z.object({}) },
+  bank_overview: { description: '문제은행 현황: 모든 유형(topic)×난이도(level) 칸의 공개(ready)·작성 중(draft) 문제 수(0인 칸 포함)와 공개 문제가 가장 적은 칸 목록. 그 칸부터 채운다.', input: z.object({}) },
   list_problems: {
     description: '문제 목록(제목·유형·난이도·받은 사람·맞힌 사람). 겹치는 문제를 만들지 않도록 같은 유형의 제목을 먼저 확인한다.',
     input: z.object({ topic: DailyTopic.optional(), status: DailyProblemStatus.optional(), limit: z.number().int().min(1).max(200).default(50) }),

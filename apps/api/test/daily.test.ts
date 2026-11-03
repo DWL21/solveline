@@ -412,6 +412,35 @@ describe('관리자 일일 메일', () => {
     expect(db.prepare('SELECT COUNT(*) FROM daily_deliveries').pluck().get()).toBe(0);
   });
 
+  it('고른 문제들의 상태를 한 번에 바꾸고, 받은 사람이 없는 문제만 한꺼번에 지운다', async () => {
+    const app = build();
+    const ids = [];
+    for (let i = 0; i < 3; i++) ids.push(await addProblem(app, { title: `문제 ${i}` }));
+    await subscribe(app, 'a@example.com');
+    await tick(); // 셋 중 하나를 받는다
+    const picked = db.prepare('SELECT problem_id FROM daily_picks').pluck().get() as string;
+    expect(await data(await app.request('/api/admin/daily/problems-bulk/status', admin('PUT', { ids: [...ids, 'nope'], status: 'draft' })))).toEqual({ changed: 3, skipped: 1 });
+    expect(db.prepare("SELECT COUNT(*) FROM daily_bank WHERE status = 'draft'").pluck().get()).toBe(3);
+    expect(await data(await app.request('/api/admin/daily/problems-bulk/delete', admin('POST', { ids })))).toEqual({ changed: 2, skipped: 1 });
+    expect(db.prepare('SELECT problem_id FROM daily_bank').pluck().all()).toEqual([picked]);
+    expect((await app.request('/api/admin/daily/problems-bulk/delete', admin('POST', { ids: [] }))).status).toBe(400);
+    expect((await app.request('/api/admin/daily/problems-bulk/status', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, status: 'ready' }) })).status).toBe(401);
+  });
+
+  it('한 번에 100개가 넘는 문제도 나눠서 바꾼다', async () => {
+    const app = build();
+    await adminLogin(app);
+    const insertP = db.prepare("INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, 't', NULL, 'function', 'python', '{}', 'now', 'now')");
+    const insertB = db.prepare("INSERT INTO daily_bank (problem_id, topic, level, hint, hint_token, status, source, created_at, updated_at) VALUES (?, '해시', 1, '', ?, 'ready', 'admin', 'now', 'now')");
+    const ids = Array.from({ length: 120 }, (_, i) => `p${i}`);
+    for (const id of ids) {
+      insertP.run(id);
+      insertB.run(id, `t-${id}`);
+    }
+    expect(await data(await app.request('/api/admin/daily/problems-bulk/status', admin('PUT', { ids, status: 'retired' })))).toEqual({ changed: 120, skipped: 0 });
+    expect(await data(await app.request('/api/admin/daily/problems-bulk/delete', admin('POST', { ids })))).toEqual({ changed: 120, skipped: 0 });
+  });
+
   it('현황에 유형·난이도별 문제 수와 문제 목록을 보여 주고, 구독자는 완전히 지운다', async () => {
     const app = build();
     await addProblem(app);
@@ -445,7 +474,11 @@ describe('문제은행 에이전트(MCP)', () => {
     expect(await data(await call(app, 'bank_guide', {}))).toMatchObject({ guide: expect.stringContaining('referenceSolution') });
     const saved = await data<{ saved: boolean; id: string }>(await call(app, 'create_problem', problemInput({ topic: '그리디', level: 2 })));
     expect(saved.saved).toBe(true);
-    expect(await data(await call(app, 'bank_overview', {}))).toMatchObject({ cells: [{ topic: '그리디', level: 2, ready: 1, draft: 0 }] });
+    const ov = await data<{ cells: { topic: string; level: number; ready: number }[]; emptiest: unknown[]; totalReady: number }>(await call(app, 'bank_overview', {}));
+    expect(ov.cells).toHaveLength(14 * 5);
+    expect(ov.cells.find((c) => c.topic === '그리디' && c.level === 2)).toMatchObject({ ready: 1, draft: 0 });
+    expect(ov.totalReady).toBe(1);
+    expect(ov.emptiest).not.toContainEqual({ topic: '그리디', level: 2 });
     expect(await data(await call(app, 'list_problems', { topic: '그리디' }))).toMatchObject([{ id: saved.id, source: 'agent:codex' }]);
     expect(await data(await call(app, 'get_problem', { id: saved.id }))).toMatchObject({ title: '두 수의 합', cases: [{ id: 'e1' }] });
     expect(await data(await call(app, 'set_status', { id: saved.id, status: 'draft' }))).toEqual({ updated: true });
