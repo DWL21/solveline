@@ -64,6 +64,9 @@ const parse = <T>(v: string | null | undefined): T | null => (v ? (JSON.parse(v)
  * 문제 저장소. 문제 내용은 모두가 같이 보는 공용이고(관리자만 바꾼다), 작성 코드·언어·풀이 시간·마지막 제출은 user_problems에 사용자별로 둔다.
  * 히든 케이스는 body가 아니라 judge(해시 파일·R2)에 두고 body에는 해시·개수만 남긴다.
  */
+/** 일일 미니 문제(daily_bank)가 아닌 문제. 미니 문제는 일반 목록·카탈로그에 나오지 않는다 */
+const NOT_DAILY = 'NOT EXISTS (SELECT 1 FROM daily_bank d WHERE d.problem_id = p.id)';
+
 export class ProblemStore {
   constructor(private readonly sql: Sql) {}
 
@@ -132,9 +135,15 @@ export class ProblemStore {
     return row ? this.toCatalog(row) : null;
   }
 
-  /** 모든 공용 문제(제목순). 카탈로그 게시에 쓴다. */
+  /** 모든 공용 문제(제목순). 카탈로그 게시에 쓴다. 일일 미니 문제는 받은 사람만 링크로 열므로 뺀다. */
   async catalogProblems(): Promise<CatalogProblem[]> {
-    return (await this.sql.all<Row>('SELECT * FROM problems ORDER BY title')).map((r) => this.toCatalog(r));
+    return (await this.sql.all<Row>(`SELECT * FROM problems p WHERE ${NOT_DAILY} ORDER BY title`)).map((r) => this.toCatalog(r));
+  }
+
+  /** 카탈로그에 게시할 문제 하나(일일 미니 문제면 null → 목록에서 뺀다) */
+  async publicCatalogProblem(id: string): Promise<CatalogProblem | null> {
+    const row = await this.sql.get<Row>(`SELECT * FROM problems p WHERE id = ? AND ${NOT_DAILY}`, id);
+    return row ? this.toCatalog(row) : null;
   }
 
   /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
@@ -146,6 +155,7 @@ export class ProblemStore {
        LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = ?
        LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = ?
        LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = ?
+       WHERE ${NOT_DAILY}
        ORDER BY p.title`,
       ...new Array<string | null>(4).fill(userId),
     );
@@ -258,6 +268,26 @@ export class ProblemStore {
       folder,
     ]);
     return (await this.get(id, userId))!;
+  }
+
+  /** 사용자 상태 없이 공용 문제만 만든다(일일 미니 문제: 관리자·에이전트가 만든다) */
+  async createShared(input: ProblemInput, hiddenRef: TestsetRef | null, also: (id: string) => Stmt[] = () => [], now = new Date()): Promise<string> {
+    const id = crypto.randomUUID();
+    const ts = now.toISOString();
+    await this.sql.batch([
+      stmt('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)', id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null, hiddenRef)), ts, ts),
+      ...also(id),
+    ]);
+    return id;
+  }
+
+  /** 공용 문제 내용만 바꾼다(사용자 상태는 건드리지 않는다) */
+  async updateShared(id: string, input: ProblemInput, hiddenRef: TestsetRef | null, now = new Date()): Promise<boolean> {
+    const row = await this.row(id);
+    if (!row) return false;
+    const body = this.toBody(input, this.body(row), hiddenRef);
+    await this.sql.run('UPDATE problems SET title = ?, mode = ?, language = ?, body = ?, updated_at = ? WHERE id = ?', input.title, input.mode, input.language, JSON.stringify(body), now.toISOString(), id);
+    return true;
   }
 
   /**

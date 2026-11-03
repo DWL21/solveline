@@ -3,7 +3,7 @@ import type { Db } from './db-node.ts';
 /** D1 마이그레이션 파일(migrations/0001_schema.sql)의 경로. wrangler.toml의 migrations_dir와 맞춘다 */
 export const D1_SCHEMA_FILE = 'migrations/0001_schema.sql';
 /** 운영 D1에 적용한 순서대로의 전체 마이그레이션 파일. 0001은 이미 적용했으므로 새 표는 다음 번호 파일로 더한다 */
-export const D1_MIGRATION_FILES = [D1_SCHEMA_FILE, 'migrations/0002_daily_mail.sql'];
+export const D1_MIGRATION_FILES = [D1_SCHEMA_FILE, 'migrations/0002_daily_mail.sql', 'migrations/0003_daily_bank.sql'];
 
 /** 마이그레이션이 넣는 기본 행(데이터라 스키마에 나오지 않는다). 마이그레이션에 기본 행을 더하면 여기도 더한다 */
 const SEED = ['INSERT INTO signup_settings (id, enabled) VALUES (1, 1);'];

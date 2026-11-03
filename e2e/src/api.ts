@@ -3,7 +3,15 @@ import { z } from 'zod';
 import {
   AdminSession,
   Bookmark,
+  CatalogIndex,
+  CatalogProblem,
   Collection,
+  DailyInbox,
+  DailyProblemSummary,
+  DailySaveResult,
+  DailySettings,
+  type DailyProblemInput,
+  type DailySettingsInput,
   Folder,
   HiddenCases,
   Problem,
@@ -76,6 +84,15 @@ export class Api {
   collections = () => this.ok(this.request.get('/api/collections'), z.array(Collection));
   createCollection = (c: CollectionInput) => this.ok(this.request.post('/api/collections', { data: c }), Collection);
   setCollectionItems = (id: string, problemIds: string[]) => this.ok(this.request.put(`/api/collections/${id}/items`, { data: { problemIds } }), Collection);
+
+  // ─── 일일 미니 문제 ───
+  /** 관리자 모드(masterLogin 뒤): 기준 풀이로 채점해 통과하면 저장 */
+  createDailyProblem = (p: DailyProblemInput) => this.ok(this.request.post('/api/admin/daily/problems', { data: p }), DailySaveResult);
+  dailyProblems = () => this.ok(this.request.get('/api/admin/daily/problems'), z.array(DailyProblemSummary));
+  dailyProblem = (id: string) => this.ok(this.request.get(`/api/public/daily/problems/${id}`), CatalogProblem);
+  catalogIndex = () => this.ok(this.request.get('/api/catalog/index'), CatalogIndex);
+  saveDailySettings = (s: DailySettingsInput) => this.ok(this.request.put('/api/me/daily/settings', { data: s }), DailySettings);
+  inbox = () => this.ok(this.request.get('/api/me/daily/inbox'), DailyInbox);
 
   // ─── 제출 ───
   submit = (s: SubmissionRequest) => this.ok(this.request.post('/api/submissions', { data: s }), Submission);

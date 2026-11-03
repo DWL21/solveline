@@ -425,20 +425,117 @@ export type SignupSettings = z.infer<typeof SignupSettings>;
 // ─── 일일 메일 ───
 export const DailySubscribeInput = z.object({ email: z.email().max(254), consent: z.literal(true) });
 export const DailySubscribeResult = z.object({ status: z.literal('pending') });
-export const DailyIssueInput = z.object({
-  problemId: z.string().regex(/^[\w-]+$/).max(200),
-  title: z.string().trim().min(1).max(120),
-  body: z.string().trim().min(1).max(5000),
-  difficulty: z.string().trim().min(1).max(20),
-  hint: z.string().trim().max(1000),
-  status: z.enum(['draft', 'ready']),
+/** 미니 문제의 유형. 사람마다 정답률이 낮은 유형을 더 자주 고른다 */
+export const DAILY_TOPICS = ['배열·문자열', '해시', '스택·큐', '정렬', '이분 탐색', '투 포인터', '그리디', '완전 탐색', 'DFS·BFS', '동적 계획법', '그래프', '트리', '수학', '구현'] as const;
+export const DailyTopic = z.enum(DAILY_TOPICS);
+export type DailyTopic = z.infer<typeof DailyTopic>;
+export const DailyProblemStatus = z.enum(['draft', 'ready', 'retired']);
+export type DailyProblemStatus = z.infer<typeof DailyProblemStatus>;
+
+/**
+ * 메일·인박스 전용 미니 문제. 풀이는 일반 문제와 같은 IDE·채점을 쓰고, 일반 문제 목록에는 나오지 않는다.
+ * cases는 예제(hidden=false, 1~5개)와 채점 케이스(hidden=true)를 함께 넣는다. 저장 전에 referenceSolution으로 모든 케이스를 채점해
+ * 100점일 때만 받는다(틀린 정답·케이스가 들어가지 않게).
+ */
+export const DailyProblemInput = z
+  .object({
+    topic: DailyTopic,
+    level: z.number().int().min(1).max(5),
+    title: z.string().trim().min(1).max(60),
+    description: z.string().trim().min(1).max(4000),
+    mode: ProblemMode,
+    params: z.array(z.string().trim().min(1).max(64)).max(10),
+    timeLimitMs: z.number().int().min(100).max(5000).default(2000),
+    cases: z.array(TestCase).min(4).max(60),
+    starterCode: CodeSet,
+    referenceSolution: z.object({ language: Language, code: z.string().min(1).max(20_000) }),
+    hint: z.string().trim().max(500).default(''),
+    status: DailyProblemStatus.default('ready'),
+  })
+  .superRefine((p, ctx) => {
+    const shown = p.cases.filter((c) => !c.hidden).length;
+    if (shown < 1 || shown > 5) ctx.addIssue({ code: 'custom', path: ['cases'], message: '예제(hidden=false)는 1~5개예요' });
+    if (p.cases.length - shown < 3) ctx.addIssue({ code: 'custom', path: ['cases'], message: '채점 케이스(hidden=true)는 3개 이상이에요' });
+    if (new Set(p.cases.map((c) => c.id)).size !== p.cases.length) ctx.addIssue({ code: 'custom', path: ['cases'], message: '케이스 id가 겹쳐요' });
+  });
+export type DailyProblemInput = z.input<typeof DailyProblemInput>;
+export type DailyProblemData = z.output<typeof DailyProblemInput>;
+
+export const DailyProblemSummary = z.object({
+  id: z.string(),
+  topic: DailyTopic,
+  level: z.number(),
+  title: z.string(),
+  status: DailyProblemStatus,
+  /** 만든 곳: admin 또는 agent:<이름> */
+  source: z.string(),
+  /** 이 문제를 받은 사람 수와 그중 맞힌 사람 수 */
+  picks: z.number(),
+  solved: z.number(),
+  createdAt: z.string(),
 });
-export type DailyIssueInput = z.infer<typeof DailyIssueInput>;
-export const DailyIssue = DailyIssueInput.extend({
-  issueDate: z.string(),
-  delivery: z.object({ pending: z.number(), sent: z.number(), failed: z.number(), skipped: z.number() }),
+export type DailyProblemSummary = z.infer<typeof DailyProblemSummary>;
+export const DailyProblemDetail = DailyProblemSummary.extend({
+  description: z.string(),
+  mode: ProblemMode,
+  params: z.array(z.string()),
+  timeLimitMs: z.number(),
+  /** 예제만. 채점 케이스는 judge에 있다 */
+  cases: z.array(TestCase),
+  starterCode: CodeSet,
+  hint: z.string(),
 });
-export type DailyIssue = z.infer<typeof DailyIssue>;
+export type DailyProblemDetail = z.infer<typeof DailyProblemDetail>;
+export const DailyBankCell = z.object({ topic: DailyTopic, level: z.number(), ready: z.number(), draft: z.number() });
+export type DailyBankCell = z.infer<typeof DailyBankCell>;
+/** 기준 풀이 검증 결과. 실패하면 어떤 케이스가 어떻게 틀렸는지 돌려준다 */
+export const DailyVerifyResult = z.object({
+  ok: z.boolean(),
+  score: z.number().nullable(),
+  failures: z.array(z.object({ id: z.string(), status: z.string(), expected: z.string(), actual: z.string().nullable(), stderr: z.string() })),
+  error: z.string().nullable(),
+});
+export type DailyVerifyResult = z.infer<typeof DailyVerifyResult>;
+export const DailySaveResult = z.object({ saved: z.boolean(), id: z.string().nullable(), verify: DailyVerifyResult });
+export type DailySaveResult = z.infer<typeof DailySaveResult>;
+
+/** 에이전트가 문제를 만들 때 따르는 지침. bank_guide 도구로 그대로 준다(지침을 바꾸면 모든 모델에 함께 적용된다) */
+export const DAILY_AUTHOR_GUIDE = `Solveline 일일 미니 문제 작성 지침
+- 대상: 코딩 테스트를 준비하는 사람. 메일로 받아 IDE에서 10~20분 안에 푸는 짧은 문제.
+- 형식: 기본은 함수형(mode=function). params는 매개변수 이름, 케이스 args는 매개변수별 JSON 리터럴 텍스트, expected는 반환값 JSON.
+- 설명(description, 마크다운): 상황 1~3문장, 입력·출력 조건, 제한(크기·값 범위)을 분명히. 예제는 cases의 hidden=false로만 둔다.
+- 케이스: 예제 1~5개 + 채점 케이스(hidden=true) 6개 이상. 빈 입력·최솟값·최댓값·중복·음수 같은 경계를 넣는다. 정답이 하나로 정해지게.
+- 난이도(level): 1 기초 구현, 2 자료구조 한 가지, 3 대표 알고리즘 한 번 응용, 4 두 가지 결합·최적화, 5 실전 고난도.
+- 시작 코드(starterCode): java는 class Solution { public <타입> solution(...) { } }, python은 def solution(...): 형태로 기존 문제와 같게.
+- 기준 풀이(referenceSolution)는 모든 케이스를 통과해야 저장된다. 실패하면 돌려받은 failures를 보고 케이스나 풀이를 고친다.
+- 기존 문제와 겹치지 않게 list_problems로 같은 유형의 제목을 먼저 본다. 저작권이 있는 문제를 옮기지 않고 새로 만든다.
+- 문체: 한국어, 존댓말 없이 간결한 문제 문체.`;
+
+/**
+ * 문제은행 에이전트 도구(MCP). pahidc의 stdio MCP 서버가 이 목록을 그대로 내보내고, 호출은 서명해 Worker로 넘긴다.
+ * 모델과 무관하게 MCP를 쓰는 에이전트라면 누구나 같은 도구로 문제를 만든다.
+ */
+export const DailyBankTools = {
+  bank_guide: { description: '미니 문제 작성 지침. 문제를 만들기 전에 먼저 읽는다.', input: z.object({}) },
+  bank_overview: { description: '문제은행 현황: 유형(topic)×난이도(level)별 공개(ready)·작성 중(draft) 문제 수. 수가 적은 칸부터 채운다.', input: z.object({}) },
+  list_problems: {
+    description: '문제 목록(제목·유형·난이도·받은 사람·맞힌 사람). 겹치는 문제를 만들지 않도록 같은 유형의 제목을 먼저 확인한다.',
+    input: z.object({ topic: DailyTopic.optional(), status: DailyProblemStatus.optional(), limit: z.number().int().min(1).max(200).default(50) }),
+  },
+  get_problem: { description: '문제 하나의 설명·예제·시작 코드·힌트.', input: z.object({ id: z.string().max(64) }) },
+  verify_problem: { description: '저장하지 않고 기준 풀이로 모든 케이스를 채점해 본다.', input: DailyProblemInput },
+  create_problem: { description: '미니 문제를 만든다. 기준 풀이가 모든 케이스를 통과해야 저장되고, status=ready면 바로 발송 대상이 된다.', input: DailyProblemInput },
+  update_problem: {
+    description: '문제 내용을 고친다(기준 풀이 검증을 다시 한다). 이미 받은 사람이 있으면 설명·힌트 같은 문구만 고치고 케이스는 바꾸지 않는 편이 좋다.',
+    input: z.object({ id: z.string().max(64), problem: DailyProblemInput }),
+  },
+  set_status: { description: '문제 상태를 바꾼다. ready는 발송 대상, draft는 작성 중, retired는 더 보내지 않음.', input: z.object({ id: z.string().max(64), status: DailyProblemStatus }) },
+} as const;
+export type DailyBankToolName = keyof typeof DailyBankTools;
+export const DAILY_BANK_TOOL_NAMES = Object.keys(DailyBankTools) as [DailyBankToolName, ...DailyBankToolName[]];
+export const DailyBankCall = z.object({ agent: z.string().regex(/^[\w.-]{1,40}$/), tool: z.enum(DAILY_BANK_TOOL_NAMES), args: z.unknown() });
+/** pahidc의 MCP 서버가 서명해 부르는 Worker 경로 */
+export const DAILY_BANK_PATH = '/api/internal/daily/bank';
 export const DailySubscriber = z.object({
   id: z.string(),
   email: z.string(),
@@ -454,7 +551,10 @@ export const DailyAdminOverview = z.object({
   maxSubscribers: z.number(),
   today: z.string(),
   subscribers: z.array(DailySubscriber),
-  issues: z.array(DailyIssue),
+  /** 유형·난이도별 문제 수 */
+  bank: z.array(DailyBankCell),
+  /** 오늘 발송 현황 */
+  delivery: z.object({ pending: z.number(), sent: z.number(), failed: z.number(), skipped: z.number() }),
 });
 export type DailyAdminOverview = z.infer<typeof DailyAdminOverview>;
 export const DailyPauseInput = z.object({ paused: z.boolean() });
@@ -476,13 +576,17 @@ export const DailySettings = DailySettingsInput.extend({
 });
 export type DailySettings = z.infer<typeof DailySettings>;
 export const DailyInboxItem = z.object({
-  issueDate: z.string(),
+  date: z.string(),
   problemId: z.string(),
+  topic: DailyTopic,
+  level: z.number(),
   title: z.string(),
-  body: z.string(),
-  difficulty: z.string(),
+  /** 설명 앞부분(전체는 IDE에서 본다) */
+  excerpt: z.string(),
   hint: z.string(),
   read: z.boolean(),
+  /** 내 제출 결과: none(안 풀었음), tried(제출했지만 100점 아님), solved */
+  progress: z.enum(['none', 'tried', 'solved']),
 });
 export type DailyInboxItem = z.infer<typeof DailyInboxItem>;
 export const DailyInbox = z.object({ items: z.array(DailyInboxItem), unread: z.number() });

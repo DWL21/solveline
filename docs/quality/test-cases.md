@@ -1,6 +1,6 @@
 # 요구사항과 테스트 케이스
 
-어떤 기능을 어떤 테스트가 지키는지 한 표로 본다. 테스트에는 요구사항 태그(`@R1`…`@R11`)를 달고, 품질 리포트가 요구사항별 통과 수를 집계한다. 태그가 없는 자동화 테스트는 CI에서 실패한다(`scripts/quality-report.mjs --strict`).
+어떤 기능을 어떤 테스트가 지키는지 한 표로 본다. 테스트에는 요구사항 태그(`@R1`…`@R12`)를 달고, 품질 리포트가 요구사항별 통과 수를 집계한다. 태그가 없는 자동화 테스트는 CI에서 실패한다(`scripts/quality-report.mjs --strict`).
 
 ```bash
 pnpm --filter @solveline/e2e exec playwright test --grep @R3     # 채점 요구사항만
@@ -22,6 +22,7 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 | R9 | 주요 화면에 치명적인 접근성 위반이 없다 | 중간 | UI 3 |
 | R10 | API는 공유 계약·오류 형식·보안 헤더를 지킨다 | 큼 | API 3 |
 | R11 | 운영 사이트의 핵심 경로가 살아 있다 | 큼 | 스모크 4 |
+| R12 | 일일 미니 문제는 검증된 문제만 은행에 들어가고, 사람마다 받은 문제를 같은 채점으로 푼다 | 큼 | API 4 |
 
 수는 실행 단위(기기 프로젝트별 실행 포함)로 센다. 테스트 하나가 두 요구사항을 지키면 양쪽에 센다. 실행할 때마다 실제 수는 품질 리포트의 "요구사항별" 표를 기준으로 한다.
 
@@ -60,6 +61,10 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 | TC-26 | R10 | 없는 경로·없는 문제·잘못된 본문을 보낸다 | `{ error: { code, message } }`와 401·404·400 | 부정 테스트 | `api/contract.spec.ts` |
 | TC-27 | R10 | API 응답 헤더를 본다 | nosniff·DENY·frame-ancestors 'none' | 보안 관점 | `api/contract.spec.ts` |
 | TC-28 | R11 | 운영 API·첫 화면·문제 화면·약관을 연다 | 모두 열린다(읽기 전용, 매일) | 스모크 | `smoke/production.spec.ts` |
+| TC-32 | R12 | 기준 풀이가 틀린 미니 문제를 저장한다 | 실제 채점에서 걸러 저장하지 않고 틀린 케이스를 돌려준다 | 부정 테스트 | `api/daily.spec.ts` |
+| TC-33 | R12 | 미니 문제를 저장하고 목록·카탈로그·공개 경로를 본다 | 목록·카탈로그에는 없고 링크로만 열리며 히든 케이스는 judge에 있다 | 상태 확인 | `api/daily.spec.ts` |
+| TC-34 | R12 | 구독한 뒤 인박스의 문제를 제출한다 | 첫 문제가 바로 오고, 100점이면 해결로 바뀐다 | 사용자 여정 | `api/daily.spec.ts` |
+| TC-35 | R12 | 비회원·회원이 관리자·내부 경로를 부른다 | 401 | 권한 | `api/daily.spec.ts` |
 
 ## 실행하는 기기
 

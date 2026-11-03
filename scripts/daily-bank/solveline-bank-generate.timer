@@ -1,0 +1,10 @@
+[Unit]
+Description=Solveline 일일 미니 문제 자동 제작(매일 04:00 KST)
+
+[Timer]
+OnCalendar=*-*-* 19:00:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
