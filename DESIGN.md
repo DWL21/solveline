@@ -3,7 +3,7 @@
 Solveline 웹(`apps/web`) 화면의 시각 규칙입니다. 사람과 에이전트가 같은 기준으로 작업하도록 토큰의 **값·쓰임새·근거**를 함께 적습니다.
 
 - 토큰 원본: [`apps/web/src/index.css`](apps/web/src/index.css)의 `@theme`(Tailwind v4). 이 문서와 코드가 다르면 코드가 맞고, 문서를 고친다.
-- 테마 전환: [`apps/web/src/lib/theme.ts`](apps/web/src/lib/theme.ts), 첫 그리기 전 결정은 `apps/web/index.html`의 시작 스크립트.
+- 테마 전환: [`apps/web/src/lib/theme.ts`](apps/web/src/lib/theme.ts), 첫 그리기 전 결정은 [`apps/web/public/theme-init.js`](apps/web/public/theme-init.js)(운영 CSP가 인라인 스크립트를 막아 파일로 둔다).
 - 스택: React 19 + Tailwind v4 유틸리티. 별도 컴포넌트 라이브러리 없이 `@utility`(btn·field·pane-title)와 클래스 조합을 쓴다.
 - 근거로 쓴 디자인 스킬: `.claude/skills/impeccable`(audit·critique·extract), `.claude/skills/ui-ux-pro-max`(디자인시스템 추천·UX 가이드라인). Impeccable hook은 쓰지 않는다.
 - 전후 비교 스크린샷: [`docs/design/`](docs/design/).

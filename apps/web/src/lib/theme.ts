@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 /**
  * 화면 테마. html[data-theme]에 'dark' | 'light'를 둔다(index.css의 토큰이 이 값을 따른다).
- * 처음 값은 index.html의 시작 스크립트가 정한다(깜빡임 방지): 고른 적이 있으면 그 값, 없으면 기기 설정.
+ * 처음 값은 public/theme-init.js가 정한다(깜빡임 방지): 고른 적이 있으면 그 값, 없으면 기기 설정.
  * 직접 고르면 이 기기에 기억하고, 고르지 않았으면 기기 설정이 바뀔 때 따라간다.
  */
 export type Theme = 'dark' | 'light';
