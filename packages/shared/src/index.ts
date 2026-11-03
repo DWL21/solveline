@@ -423,6 +423,9 @@ export const SignupSettings = z.object({ signupEnabled: z.boolean() });
 export type SignupSettings = z.infer<typeof SignupSettings>;
 
 // ─── 일일 메일 ───
+/** 임시 계정의 이메일 도메인. 실제로 받을 수 없는 주소라 메일을 보내지 않는다 */
+export const TEMPORARY_EMAIL_DOMAIN = 'temporary.invalid';
+export const isTemporaryEmail = (email: string) => email.endsWith(`@${TEMPORARY_EMAIL_DOMAIN}`);
 export const DailySubscribeInput = z.object({ email: z.email().max(254), consent: z.literal(true) });
 export const DailySubscribeResult = z.object({ status: z.literal('pending') });
 /** 미니 문제의 유형. 사람마다 정답률이 낮은 유형을 더 자주 고른다 */
@@ -620,6 +623,8 @@ export const DailySettings = DailySettingsInput.extend({
   email: z.string(),
   mailAvailable: z.boolean(),
   mailBlocked: z.boolean(),
+  /** 임시 계정: 인박스로만 받고, 메일은 Google 계정으로 가입해야 받는다 */
+  temporary: z.boolean(),
 });
 export type DailySettings = z.infer<typeof DailySettings>;
 export const DailyInboxItem = z.object({

@@ -1,9 +1,9 @@
 import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Language, ProblemMode, Session } from '@solveline/shared';
+import { isTemporaryEmail, type Language, type ProblemMode, type Session } from '@solveline/shared';
 import { ApiError, api, qk } from './lib/api.ts';
 import { useRoute, type Route, type Scope } from './lib/route.ts';
-import { LoginScreen } from './components/LoginScreen.tsx';
+import { LoginScreen, startGoogleLogin } from './components/LoginScreen.tsx';
 import { LegalFooter, PrivacyPage, TermsPage } from './components/Legal.tsx';
 import { SignupScreen } from './components/SignupScreen.tsx';
 import { AdminPage } from './components/AdminPage.tsx';
@@ -249,7 +249,7 @@ function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
         로그인
       </a>
     );
-  const temporary = me.email.endsWith('@temporary.invalid');
+  const temporary = isTemporaryEmail(me.email);
   const label = me.name || me.email;
   return (
     <div className="relative" data-user-menu>
@@ -267,6 +267,11 @@ function UserMenu({ onLogout }: Readonly<{ onLogout: () => void }>) {
           <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-ui hover:bg-raised sm:hidden" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} /> {theme === 'dark' ? '라이트 모드' : '다크 모드'}
           </button>
+          {temporary && (
+            <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-ui font-semibold text-accent-text hover:bg-raised" onClick={startGoogleLogin}>
+              Google 계정으로 가입하기
+            </button>
+          )}
           <button type="button" className="mt-1 w-full rounded-md px-2.5 py-2 text-left text-ui hover:bg-raised" onClick={onLogout}>
             로그아웃
           </button>
