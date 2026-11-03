@@ -102,7 +102,7 @@ export function DailyMailPanel() {
         <AgentInfo />
       </div>
       <div className="flex min-w-0 flex-col gap-4">
-        <ProblemList onChanged={apply} />
+        <ProblemList onChanged={() => void qc.invalidateQueries({ queryKey: qk.adminDaily })} />
         <SubscriberList subscribers={data.subscribers} onChanged={apply} />
       </div>
     </div>
@@ -210,72 +210,217 @@ function ProblemEditor({ onSaved }: Readonly<{ onSaved: () => void }>) {
   );
 }
 
-function ProblemList({ onChanged }: Readonly<{ onChanged: (d: DailyAdminOverview) => void }>) {
+const PAGE = 50;
+
+/**
+ * 문제 목록: 검색·유형·상태로 걸러 보고, 여러 문제를 골라 한 번에 상태를 바꾸거나 시험 발송·삭제한다.
+ * 받은 사람이 있는 문제는 지우지 않고 남긴다(그만 보내려면 상태를 '그만 보냄'으로).
+ */
+function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
+  const qc = useQueryClient();
   const list = useQuery({ queryKey: qk.adminDailyProblems, queryFn: adminApi.dailyProblems });
+  const [query, setQuery] = useState('');
+  const [topic, setTopic] = useState('');
+  const [statusFilter, setStatusFilter] = useState<DailyProblemStatus | ''>('');
+  const [shown, setShown] = useState(PAGE);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [openId, setOpenId] = useState<string | null>(null);
   const [testEmails, setTestEmails] = useState('');
-  const status = useMutation({ mutationFn: ({ id, s }: { id: string; s: DailyProblemStatus }) => adminApi.setDailyProblemStatus(id, s), onSuccess: onChanged });
-  const remove = useMutation({ mutationFn: adminApi.deleteDailyProblem, onSuccess: onChanged });
-  const test = useMutation({ mutationFn: (id: string) => adminApi.testDailyProblem(id, testEmails.split(/[\s,]+/).filter(Boolean)) });
-  const action = status.error ?? remove.error ?? test.error;
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const all = list.data ?? [];
+  const q = query.trim().toLowerCase();
+  const filtered = all.filter((p) => (!q || p.title.toLowerCase().includes(q)) && (!topic || p.topic === topic) && (!statusFilter || p.status === statusFilter));
+  const visible = filtered.slice(0, shown);
+  const chosen = all.filter((p) => selected.has(p.id));
+  const allVisibleChosen = visible.length > 0 && visible.every((p) => selected.has(p.id));
+  const someVisibleChosen = visible.some((p) => selected.has(p.id));
+
+  const toggle = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleVisible = () =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      for (const p of visible) {
+        if (allVisibleChosen) next.delete(p.id);
+        else next.add(p.id);
+      }
+      return next;
+    });
+  const done = (message: string) => {
+    setNotice(message);
+    setSelected(new Set());
+    onChanged();
+    void qc.invalidateQueries({ queryKey: qk.adminDailyProblems });
+  };
+
+  const setStatus = useMutation({
+    mutationFn: ({ ids, s }: { ids: string[]; s: DailyProblemStatus }) => adminApi.setDailyProblemsStatus(ids, s),
+    onSuccess: (r, v) => done(`${r.changed}개를 '${PROBLEM_STATUS[v.s]}'(으)로 바꿨어요.${r.skipped ? ` ${r.skipped}개는 없는 문제였어요.` : ''}`),
+  });
+  const remove = useMutation({
+    mutationFn: adminApi.deleteDailyProblems,
+    onSuccess: (r) => done(`${r.changed}개를 지웠어요.${r.skipped ? ` ${r.skipped}개는 받은 사람이 있어 남겼어요.` : ''}`),
+  });
+  const test = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const emails = testEmails.split(/[\s,]+/).filter(Boolean);
+      for (const id of ids) await adminApi.testDailyProblem(id, emails);
+      return ids.length * emails.length;
+    },
+    onSuccess: (n) => setNotice(`시험 메일 ${n}통을 보냈어요.`),
+  });
+  const busy = setStatus.isPending || remove.isPending || test.isPending;
+  const action = setStatus.error ?? remove.error ?? test.error;
+  const deletable = chosen.filter((p) => p.picks === 0).length;
+
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
       <h2 className="text-[15px] font-bold">
-        문제 <span className="text-faint">{list.data?.length ?? ''}</span>
+        문제 <span className="text-faint">{all.length}</span>
       </h2>
-      <label className="mt-3 flex flex-col gap-1.5">
-        <span className="text-[12px] font-bold text-dim">시험 받을 주소(최대 5개, 쉼표로 구분)</span>
-        <input className="field" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} autoComplete="off" />
-      </label>
+      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <input className="field" type="search" placeholder="제목 검색" aria-label="문제 제목 검색" value={query} onChange={(e) => { setQuery(e.target.value); setShown(PAGE); }} />
+        <select className="field w-auto" aria-label="유형으로 거르기" value={topic} onChange={(e) => { setTopic(e.target.value); setShown(PAGE); }}>
+          <option value="">모든 유형</option>
+          {DAILY_TOPICS.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <select className="field w-auto" aria-label="상태로 거르기" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as DailyProblemStatus | ''); setShown(PAGE); }}>
+          <option value="">모든 상태</option>
+          {(Object.keys(PROBLEM_STATUS) as DailyProblemStatus[]).map((s) => (
+            <option key={s} value={s}>
+              {PROBLEM_STATUS[s]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* 일괄 작업: 고른 문제가 있을 때만 쓸 수 있다 */}
+      <div className="sticky top-0 z-10 mt-3 rounded-md border border-line bg-raised p-2" role="toolbar" aria-label="고른 문제 일괄 작업">
+        <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+          <span className="font-semibold">{chosen.length}개 선택</span>
+          {(Object.keys(PROBLEM_STATUS) as DailyProblemStatus[]).map((s) => (
+            <button key={s} type="button" className="btn-quiet border border-line px-2 text-[12px]" disabled={!chosen.length || busy} onClick={() => setStatus.mutate({ ids: chosen.map((p) => p.id), s })}>
+              {PROBLEM_STATUS[s]}(으)로
+            </button>
+          ))}
+          <button
+            type="button"
+            className="btn-quiet border border-line px-2 text-[12px]"
+            disabled={!chosen.length || chosen.length > 5 || !testEmails.trim() || busy}
+            title={chosen.length > 5 ? '시험 발송은 한 번에 5문제까지' : undefined}
+            onClick={() => test.mutate(chosen.map((p) => p.id))}
+          >
+            시험 발송
+          </button>
+          <button
+            type="button"
+            className="btn-quiet border border-line px-2 text-[12px] text-bad"
+            disabled={!deletable || busy}
+            onClick={() => {
+              if (window.confirm(`고른 문제 중 받은 사람이 없는 ${deletable}개를 지울까요?`)) remove.mutate(chosen.map((p) => p.id));
+            }}
+          >
+            지우기{chosen.length && deletable < chosen.length ? `(${deletable}개)` : ''}
+          </button>
+          {chosen.length > 0 && (
+            <button type="button" className="btn-quiet ml-auto px-2 text-[12px]" onClick={() => setSelected(new Set())}>
+              선택 해제
+            </button>
+          )}
+        </div>
+        <input className="field mt-2 py-1 text-[12.5px]" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} placeholder="시험 받을 주소(최대 5개, 쉼표로 구분)" aria-label="시험 받을 주소" autoComplete="off" />
+      </div>
+      {notice && <output className="mt-2 block text-[13px] text-dim">{notice}</output>}
+      {action && <p role="alert" className="mt-2 text-[13px] text-bad">{errMsg(action)}</p>}
       {list.isPending && <LinesSkeleton />}
       {list.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(list.error)}</p>}
-      {list.data?.length === 0 && <p className="mt-3 text-[13px] text-faint">아직 문제가 없어요. 직접 추가하거나 에이전트로 채워 주세요.</p>}
-      {test.isSuccess && <output className="mt-3 block text-[13px] text-dim">시험 메일 {test.data.sent}통을 보냈어요.</output>}
-      {action && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(action)}</p>}
-      <ol className="mt-2 divide-y divide-line">
-        {list.data?.map((p) => (
-          <li key={p.id} className="py-2 text-[13px]">
+      {list.data && all.length === 0 && <p className="mt-3 text-[13px] text-faint">아직 문제가 없어요. 직접 추가하거나 에이전트로 채워 주세요.</p>}
+      {list.data && all.length > 0 && filtered.length === 0 && <p className="mt-3 text-[13px] text-faint">조건에 맞는 문제가 없어요.</p>}
+
+      {visible.length > 0 && (
+        <label className="mt-3 flex items-center gap-2 border-b border-line pb-2 text-[12.5px] text-dim">
+          <input
+            type="checkbox"
+            checked={allVisibleChosen}
+            ref={(el) => {
+              if (el) el.indeterminate = someVisibleChosen && !allVisibleChosen;
+            }}
+            onChange={toggleVisible}
+          />
+          보이는 {visible.length}개 모두 선택{filtered.length > visible.length ? ` (전체 ${filtered.length}개)` : ''}
+        </label>
+      )}
+      <ol className="divide-y divide-line">
+        {visible.map((p) => (
+          <li key={p.id} className={`py-2 text-[13px] ${selected.has(p.id) ? 'bg-accent/5' : ''}`}>
             <div className="flex items-center gap-2">
-              <a href={`#/p/${encodeURIComponent(p.id)}`} className="min-w-0 flex-1 truncate font-semibold hover:underline">
+              <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} aria-label={`${p.title} 선택`} />
+              <button type="button" aria-expanded={openId === p.id} className="min-w-0 flex-1 truncate text-left font-semibold hover:underline" onClick={() => setOpenId(openId === p.id ? null : p.id)}>
                 {p.title}
-              </a>
-              <select
-                className="field w-auto py-0.5 text-[12px]"
-                value={p.status}
-                aria-label={`${p.title} 상태`}
-                disabled={status.isPending}
-                onChange={(e) => status.mutate({ id: p.id, s: e.target.value as DailyProblemStatus })}
-              >
-                {(Object.keys(PROBLEM_STATUS) as DailyProblemStatus[]).map((s) => (
-                  <option key={s} value={s}>
-                    {PROBLEM_STATUS[s]}
-                  </option>
-                ))}
-              </select>
+              </button>
+              <span className={`shrink-0 text-[12px] font-semibold ${p.status === 'ready' ? 'text-ok' : p.status === 'draft' ? 'text-warn' : 'text-faint'}`}>{PROBLEM_STATUS[p.status]}</span>
             </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-faint">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 pl-6 text-[12px] text-faint">
               <span>
                 {p.topic} · {p.level}단계 · {p.source} · 받음 {p.picks} · 해결 {p.solved}
               </span>
-              <button type="button" className="btn-quiet px-1 text-[12px]" disabled={!testEmails.trim() || test.isPending} onClick={() => test.mutate(p.id)}>
-                시험 발송
-              </button>
-              {p.picks === 0 && (
-                <button
-                  type="button"
-                  className="btn-quiet px-1 text-[12px] text-bad"
-                  disabled={remove.isPending}
-                  onClick={() => {
-                    if (window.confirm(`'${p.title}' 문제를 지울까요?`)) remove.mutate(p.id);
-                  }}
-                >
-                  지우기
-                </button>
-              )}
+              <a href={`/#/p/${encodeURIComponent(p.id)}`} target="_blank" rel="noopener" className="btn-quiet px-1 text-[12px]">
+                IDE에서 열기
+              </a>
             </div>
+            {openId === p.id && (
+              <div className="pl-6">
+                <ProblemPreview id={p.id} />
+              </div>
+            )}
           </li>
         ))}
       </ol>
+      {filtered.length > visible.length && (
+        <button type="button" className="btn-quiet mt-2 w-full border border-line text-[13px]" onClick={() => setShown(shown + PAGE)}>
+          {Math.min(PAGE, filtered.length - visible.length)}개 더 보기
+        </button>
+      )}
     </section>
+  );
+}
+
+/** 문제 내용 미리보기: 설명·예제·힌트. 채점 케이스는 judge에 있어 보이지 않는다 */
+function ProblemPreview({ id }: Readonly<{ id: string }>) {
+  const detail = useQuery({ queryKey: [...qk.adminDailyProblems, id], queryFn: () => adminApi.dailyProblem(id) });
+  if (detail.isPending) return <LinesSkeleton lines={3} />;
+  if (detail.isError) return <p role="alert" className="mt-2 text-[12px] text-bad">{errMsg(detail.error)}</p>;
+  const d = detail.data;
+  return (
+    <div className="mt-2 rounded-md border border-line bg-raised p-3 text-[13px]">
+      <p className="text-[12px] text-faint">
+        {d.mode === 'function' ? `함수형 · solution(${d.params.join(', ')})` : '입출력형'} · 시간 제한 {d.timeLimitMs}ms
+      </p>
+      <p className="mt-2 whitespace-pre-wrap leading-relaxed">{d.description}</p>
+      <h3 className="mt-3 text-[12px] font-bold text-dim">예제</h3>
+      <ul className="mt-1 space-y-1 font-mono text-[12px]">
+        {d.cases.map((c) => (
+          <li key={c.id} className="break-all">
+            {d.mode === 'function' ? `(${c.args.join(', ')})` : c.stdin} → {c.expected}
+          </li>
+        ))}
+      </ul>
+      {d.hint && (
+        <p className="mt-3 text-[12px] text-dim">
+          <span className="font-bold">힌트</span> {d.hint}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -289,6 +434,9 @@ function AgentInfo() {
       </p>
       <p className="mt-2 text-dim">SSH로 접속할 수 있는 곳에서 직접 연결:</p>
       <pre className="mt-1 overflow-x-auto rounded bg-raised p-2 font-mono text-[12px]">ssh pahidc solveline-bank-mcp --agent 이름</pre>
+      <a href="https://github.com/DWL21/solveline/blob/main/docs/daily-bank-mcp.md" target="_blank" rel="noopener" className="mt-2 inline-block text-accent-text underline">
+        MCP 서버 구조와 연결 방법
+      </a>
     </section>
   );
 }

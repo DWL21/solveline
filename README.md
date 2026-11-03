@@ -47,6 +47,7 @@
 | [API](docs/api.md) | 엔드포인트 목록, 접근 권한 |
 | [구조와 배포](docs/architecture.md) | 실행 환경, 배포 구조, 채점 흐름, 이름 이전 |
 | [결정 기록](docs/decisions) | 샌드박스, 채점 파이프라인, 로그인·권한 등 |
+| [문제은행 MCP](docs/daily-bank-mcp.md) | 에이전트가 일일 미니 문제를 만드는 MCP 서버의 구조·연결·자동 제작 |
 | [로드맵](docs/roadmap.md) | 앞으로 할 일 |
 | [품질 엔지니어링](docs/quality/README.md) | 테스트 전략·품질 지표·팀 적용 가이드, 자동화(Playwright API·UI)·SonarQube·CI(GitHub Actions) |
 | [AGENTS.md](AGENTS.md) | 작업 규칙(사람·에이전트 공통) |

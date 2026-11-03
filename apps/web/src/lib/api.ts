@@ -27,6 +27,7 @@ import {
   SignupSettings,
   DailyAdminOverview,
   DailySendResult,
+  DailyBulkResult,
   DailyProblemDetail,
   DailyProblemSummary,
   DailySaveResult,
@@ -222,6 +223,8 @@ export const adminApi = {
   saveDailyProblem: (id: string | null, input: DailyProblemInput) =>
     request(DailySaveResult, id ? `/api/admin/daily/problems/${encodeURIComponent(id)}` : '/api/admin/daily/problems', json(id ? 'PUT' : 'POST', input)),
   setDailyProblemStatus: (id: string, status: DailyProblemStatus) => request(DailyAdminOverview, `/api/admin/daily/problems/${encodeURIComponent(id)}/status`, json('PUT', { status })),
+  setDailyProblemsStatus: (ids: string[], status: DailyProblemStatus) => request(DailyBulkResult, '/api/admin/daily/problems-bulk/status', json('PUT', { ids, status })),
+  deleteDailyProblems: (ids: string[]) => request(DailyBulkResult, '/api/admin/daily/problems-bulk/delete', json('POST', { ids })),
   deleteDailyProblem: (id: string) => request(DailyAdminOverview, `/api/admin/daily/problems/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testDailyProblem: (id: string, emails: string[]) => request(DailySendResult, `/api/admin/daily/problems/${encodeURIComponent(id)}/test`, json('POST', { emails })),
   sendDaily: () => request(DailySendResult, '/api/admin/daily/send', json('POST')),
