@@ -10,6 +10,9 @@ import {
   DailyProblemSummary,
   DailySaveResult,
   DailySettings,
+  DAILY_BANK_PATH,
+  judgeHeaders,
+  type DailyBankToolName,
   type DailyProblemInput,
   type DailySettingsInput,
   Folder,
@@ -86,9 +89,14 @@ export class Api {
   setCollectionItems = (id: string, problemIds: string[]) => this.ok(this.request.put(`/api/collections/${id}/items`, { data: { problemIds } }), Collection);
 
   // ─── 일일 미니 문제 ───
-  /** 관리자 모드(masterLogin 뒤): 기준 풀이로 채점해 통과하면 저장 */
-  createDailyProblem = (p: DailyProblemInput) => this.ok(this.request.post('/api/admin/daily/problems', { data: p }), DailySaveResult);
-  dailyProblems = () => this.ok(this.request.get('/api/admin/daily/problems'), z.array(DailyProblemSummary));
+  /** 문제은행 에이전트 경로(pahidc의 MCP 서버가 judge 비밀로 서명해 부르는 길). 관리자 로그인 제한을 쓰지 않는다 */
+  async bankTool(tool: DailyBankToolName, args: unknown) {
+    const data = JSON.stringify({ agent: 'e2e', tool, args });
+    return this.request.post(DAILY_BANK_PATH, { headers: { 'content-type': 'application/json', ...(await judgeHeaders(env.judgeSecret, 'POST', DAILY_BANK_PATH, data)) }, data });
+  }
+  /** 기준 풀이로 실제 채점해 통과하면 저장 */
+  createDailyProblem = async (p: DailyProblemInput) => this.ok(this.bankTool('create_problem', p), DailySaveResult);
+  dailyProblems = async () => this.ok(this.bankTool('list_problems', { limit: 200 }), z.array(DailyProblemSummary));
   dailyProblem = (id: string) => this.ok(this.request.get(`/api/public/daily/problems/${id}`), CatalogProblem);
   catalogIndex = () => this.ok(this.request.get('/api/catalog/index'), CatalogIndex);
   saveDailySettings = (s: DailySettingsInput) => this.ok(this.request.put('/api/me/daily/settings', { data: s }), DailySettings);

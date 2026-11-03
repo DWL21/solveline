@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/main.ts'],
+      exclude: ['src/main.ts', 'src/bank-mcp-main.ts'],
       reporter: ['text-summary', 'lcov', 'json-summary'],
       reportsDirectory: 'coverage',
       // 래칫: 내려가면 실패. 올라가면 기준도 올린다.

@@ -1,17 +1,16 @@
-import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import { DAILY_BANK_PATH, DailyBankTools, judgeHeaders, type DailyBankToolName } from '@solveline/shared';
 
 /**
  * 일일 미니 문제 은행 MCP 서버(stdio). pahidc의 judge 컨테이너 안에서만 실행하고 외부 포트를 열지 않는다.
- *   ssh pahidc solveline-bank-mcp --agent <이름>   (scripts/daily-bank/solveline-bank-mcp)
+ *   ssh pahidc solveline-bank-mcp --agent <이름>   (scripts/daily-bank/solveline-bank-mcp → src/bank-mcp-main.ts)
  * 도구 목록·입력 형식은 @solveline/shared의 DailyBankTools 그대로이고, 호출은 judge 비밀로 서명해 Worker API로 넘긴다.
  * MCP를 쓰는 에이전트(Codex, Claude 등)라면 모델과 무관하게 같은 도구로 문제를 만든다.
  */
 
 const PROTOCOL_VERSION = '2025-06-18';
 
-type Rpc = { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: Record<string, unknown> };
+export type Rpc = { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: Record<string, unknown> };
 export type BankCaller = (tool: DailyBankToolName, args: unknown) => Promise<{ ok: true; data: unknown } | { ok: false; message: string }>;
 
 export const toolList = () =>
@@ -70,39 +69,3 @@ export function workerCaller(opts: { origin: string; secret: string; agent: stri
     }
   };
 }
-
-function agentName(argv: string[]) {
-  const i = argv.indexOf('--agent');
-  const name = i >= 0 ? argv[i + 1] : process.env.BANK_AGENT;
-  return name && /^[\w.-]{1,40}$/.test(name) ? name : 'agent';
-}
-
-async function main() {
-  const secret = process.env.JUDGE_SECRET;
-  const origin = (process.env.WEB_ORIGIN ?? '').replace(/\/$/, '');
-  if (!secret || !origin) {
-    process.stderr.write('JUDGE_SECRET·WEB_ORIGIN이 없어 시작하지 않습니다.\n');
-    process.exit(1);
-  }
-  const call = workerCaller({ origin, secret, agent: agentName(process.argv) });
-  const rl = createInterface({ input: process.stdin });
-  // 응답은 받은 순서대로 쓴다(긴 검증 중에도 다음 줄을 받아 둔다)
-  let chain = Promise.resolve();
-  rl.on('line', (line) => {
-    if (!line.trim()) return;
-    chain = chain.then(async () => {
-      let msg: Rpc;
-      try {
-        msg = JSON.parse(line) as Rpc;
-      } catch {
-        process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'JSON을 읽지 못했어요' } })}\n`);
-        return;
-      }
-      const out = await handle(msg, call);
-      if (out) process.stdout.write(`${JSON.stringify(out)}\n`);
-    });
-  });
-  rl.on('close', () => void chain.then(() => process.exit(0)));
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) void main();

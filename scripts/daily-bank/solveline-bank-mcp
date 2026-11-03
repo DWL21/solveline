@@ -3,4 +3,4 @@
 # judge 컨테이너 안에서 실행해 컨테이너의 JUDGE_SECRET으로 Worker API를 부른다. 포트를 열지 않으므로 SSH로만 접속한다.
 #   로컬 에이전트에서: ssh pahidc solveline-bank-mcp --agent claude
 set -euo pipefail
-exec sudo -n docker exec -i solveline-production-judge-1 node --import tsx src/bank-mcp.ts "$@"
+exec sudo -n docker exec -i solveline-production-judge-1 node --import tsx src/bank-mcp-main.ts "$@"
