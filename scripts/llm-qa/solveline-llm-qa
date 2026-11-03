@@ -16,6 +16,7 @@ EFFORT=${LLM_QA_EFFORT:-medium}
 PORT=${LLM_QA_PORT:-8091}
 REPO_URL=https://github.com/DWL21/solveline.git
 PROJECT=solveline-qa
+CACHE_KEEP=${LLM_QA_CACHE_KEEP:-2gb}
 
 read -r verb pr sha extra <<<"${SSH_ORIGINAL_COMMAND:-$*}" || true
 if [[ "${verb:-}" != run || ! "${pr:-}" =~ ^[1-9][0-9]{0,6}$ || ! "${sha:-}" =~ ^[0-9a-f]{40}$ || -n "${extra:-}" ]]; then
@@ -34,6 +35,9 @@ down() {
   if [ -f "$WORK/src/scripts/test-env.sh" ]; then
     (cd "$WORK/src" && COMPOSE_PROJECT_NAME=$PROJECT E2E_PORT=$PORT scripts/test-env.sh down >/dev/null 2>&1) || true
   fi
+  # 운영에 필요한 공간만 남긴다: QA 이미지는 지우고, 빌드 캐시는 다음 빌드가 빨라질 만큼만 둔다
+  docker image ls -q "$PROJECT-*" | xargs -r docker image rm -f >/dev/null 2>&1 || true
+  docker builder prune -f --keep-storage "$CACHE_KEEP" >/dev/null 2>&1 || true
 }
 fail() {
   echo "$1" >"$OUT/error.txt"
