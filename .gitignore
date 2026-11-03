@@ -8,7 +8,9 @@ dist
 data/
 .wrangler
 .DS_Store
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/**/data/
 # 접근 개인키 — 절대 커밋 금지
 *.key
 *.pem

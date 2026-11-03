@@ -9,7 +9,9 @@
         document.querySelector('meta[name=viewport]').content += ', maximum-scale=1';
       }
     </script>
-    <meta name="theme-color" content="#0f1922" />
+    <meta name="theme-color" content="#1e1f22" />
+    <!-- 테마: 그리기 전에 정한다(public/theme-init.js). 운영 CSP가 인라인 스크립트를 막으므로 파일로 둔다 -->
+    <script src="/theme-init.js"></script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="robots" content="noindex, nofollow" />

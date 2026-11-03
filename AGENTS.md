@@ -119,6 +119,7 @@
 - API 계약 변경 시 `packages/shared`의 스키마를 먼저 고치고 api·web을 함께 맞춘다.
 - 응답 형식: 성공 `{ data }`, 실패 `{ error: { code, message } }` + 적절한 4xx/5xx.
 - 사용자에게 보이는 문구는 한국어, 짧고 구체적으로.
+- 화면 스타일은 [DESIGN.md](DESIGN.md)의 토큰(`apps/web/src/index.css` `@theme`)으로만 쓴다. hex·`text-[Npx]`를 새로 적지 않는다.
 - 통과/실패는 색만으로 구분하지 않는다(✓/✗와 문구 병기).
 
 ## 검증 명령

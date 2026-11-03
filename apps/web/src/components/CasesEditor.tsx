@@ -45,7 +45,7 @@ function Field({ value, label, multiline, readOnly, onChange }: Readonly<{ value
   if (value.length > BIG_FIELD)
     return (
       <div className="field cursor-default truncate text-faint" title={`${value.length.toLocaleString()}자 · 너무 커서 여기서는 편집할 수 없어요`} aria-label={label}>
-        {value.slice(0, 40)}… <span className="text-[11px]">({(value.length / 1024).toFixed(0)}KB)</span>
+        {value.slice(0, 40)}… <span className="text-caption">({(value.length / 1024).toFixed(0)}KB)</span>
       </div>
     );
   return multiline ? (
@@ -90,7 +90,7 @@ function CaseList({
         {cases.map((c, i) => (
           <div key={c.id} className="rounded-md border border-line bg-base/50 p-2.5">
             <div className="mb-1.5 flex items-center justify-between">
-              <b className="text-[12.5px] text-dim">
+              <b className="text-caption text-dim">
                 {label} {i + 1}
               </b>
               {del(i + 1, c.id)}
@@ -98,7 +98,7 @@ function CaseList({
             <div className="flex flex-col gap-1.5">
               {params.map((p, j) => (
                 <label key={p} className="flex flex-col gap-1">
-                  <span className="font-mono text-[11.5px] text-faint">{p}</span>
+                  <span className="font-mono text-caption text-faint">{p}</span>
                   <Field
                     readOnly={readOnly}
                     value={c.args[j] ?? ''}
@@ -108,7 +108,7 @@ function CaseList({
                 </label>
               ))}
               <label className="flex flex-col gap-1">
-                <span className="text-[11.5px] text-faint">기댓값 (return)</span>
+                <span className="text-caption text-faint">기댓값 (return)</span>
                 <Field readOnly={readOnly} value={c.expected} label={`${label} ${i + 1} 기댓값`} onChange={(v) => update(c.id, { expected: v })} />
               </label>
             </div>
@@ -119,7 +119,7 @@ function CaseList({
   if (mode === 'function')
     return (
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[440px] border-separate border-spacing-y-1.5 text-[12.5px]">
+        <table className="w-full min-w-[440px] border-separate border-spacing-y-1.5 text-caption">
           <thead>
             <tr className="text-left text-dim">
               <th className="w-8 font-semibold">#</th>
@@ -161,18 +161,18 @@ function CaseList({
       {cases.map((c, i) => (
         <div key={c.id} className="rounded-md border border-line bg-base/50 p-3">
           <div className="mb-2 flex items-center justify-between">
-            <b className="text-[13px]">
+            <b className="text-ui">
               {label} {i + 1}
             </b>
             {del(i + 1, c.id)}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
-              <span className="text-[12px] text-dim">입력</span>
+              <span className="text-caption text-dim">입력</span>
               <Field multiline readOnly={readOnly} value={c.stdin} label={`${label} ${i + 1} 입력`} onChange={(v) => update(c.id, { stdin: v })} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[12px] text-dim">기대 출력</span>
+              <span className="text-caption text-dim">기대 출력</span>
               <Field multiline readOnly={readOnly} value={c.expected} label={`${label} ${i + 1} 기대 출력`} onChange={(v) => update(c.id, { expected: v })} />
             </label>
           </div>
@@ -223,7 +223,7 @@ export function CasesEditor({
       {editing && <TimeLimit value={timeLimitMs} onChange={onTimeLimit} />}
       {mode === 'function' && editing && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[12px] font-bold text-dim">매개변수 (쉼표로 구분)</span>
+          <span className="text-caption font-bold text-dim">매개변수 (쉼표로 구분)</span>
           <ParamsInput
             params={params}
             onChange={(next) => {
@@ -236,13 +236,13 @@ export function CasesEditor({
       )}
 
       <section>
-        <h3 className="mb-1 text-[12px] font-bold text-dim">
+        <h3 className="mb-1 text-caption font-bold text-dim">
           기본 케이스 {cases.length}
         </h3>
         {cases.length > 0 ? (
           <CaseList mode={mode} params={params} cases={cases} label="테스트" readOnly={!editing} onChange={onCases} />
         ) : (
-          <p className="py-2 text-[12.5px] text-faint">기본 케이스가 없어요</p>
+          <p className="py-2 text-caption text-faint">기본 케이스가 없어요</p>
         )}
         {editing && (
           <button type="button" className="btn-ghost mt-2" disabled={cases.length >= MAX_CASES} onClick={() => onCases([...cases, newCase(params.length)])}>
@@ -253,7 +253,7 @@ export function CasesEditor({
 
       {!guest && (
       <section className="border-t border-line pt-3">
-        <h3 className="mb-1 text-[12px] font-bold text-dim">
+        <h3 className="mb-1 text-caption font-bold text-dim">
           내 테스트 케이스 {myCases.length}
         </h3>
         {myCases.length > 0 && <CaseList mode={mode} params={params} cases={myCases} label="내 테스트" onChange={onMyCases} />}
@@ -281,7 +281,7 @@ function TimeLimit({ value, onChange }: Readonly<{ value: number; onChange: (ms:
   };
   return (
     <label className="flex flex-wrap items-center gap-2">
-      <span className="text-[12px] font-bold text-dim">시간 제한</span>
+      <span className="text-caption font-bold text-dim">시간 제한</span>
       <input
         className="field w-20 text-right"
         inputMode="decimal"
@@ -291,7 +291,7 @@ function TimeLimit({ value, onChange }: Readonly<{ value: number; onChange: (ms:
         onKeyDown={(e) => e.key === 'Enter' && commit()}
         aria-label="시간 제한(초)"
       />
-      <span className="text-[12px] text-dim">초</span>
+      <span className="text-caption text-dim">초</span>
     </label>
   );
 }
@@ -345,24 +345,24 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
   return (
     <section className="border-t border-line pt-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-[12px] font-bold text-dim">
+        <h3 className="text-caption font-bold text-dim">
           히든 케이스 {count} <span className="font-normal text-faint">· 제출할 때만 써요</span>
         </h3>
-        <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <button type="button" className="btn-quiet min-h-7 px-2 text-caption" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
           {toggleLabel(open, count)}
         </button>
         {open && state !== 'saved' && (
-          <span className={`inline-flex items-center gap-1 text-[11.5px] ${state === 'error' ? 'text-bad' : 'text-faint'}`}>
+          <span className={`inline-flex items-center gap-1 text-caption ${state === 'error' ? 'text-bad' : 'text-faint'}`}>
             {state === 'error' ? '저장 실패' : <><Spinner size={11} /> 저장 중</>}
           </span>
         )}
       </div>
-      {!open && count === 0 && <p className="py-2 text-[12.5px] text-faint">히든 케이스가 없으면 기본 케이스로 채점해요.</p>}
+      {!open && count === 0 && <p className="py-2 text-caption text-faint">히든 케이스가 없으면 기본 케이스로 채점해요.</p>}
       {open && q.isPending && <LinesSkeleton />}
       {open && q.isError && (
         <div className="flex flex-wrap items-center gap-2 py-2">
-          <p className="text-[12.5px] text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>
-          <button type="button" className="btn-quiet min-h-7 px-2 text-[12px]" onClick={() => void q.refetch()}>
+          <p className="text-caption text-bad">{q.error instanceof ApiError ? q.error.message : '불러오지 못했어요'}</p>
+          <button type="button" className="btn-quiet min-h-7 px-2 text-caption" onClick={() => void q.refetch()}>
             다시 시도
           </button>
         </div>
@@ -370,7 +370,7 @@ function HiddenCases({ problemId, mode, params, summary }: Readonly<{ problemId:
       {open && cases && (
         <div className="mt-1">
           {cases.length > 0 && <CaseList mode={mode} params={params} cases={cases} label="히든 테스트" onChange={change} />}
-          <button type="button" className="btn-quiet mt-1 px-2 text-[12px]" disabled={cases.length >= MAX_HIDDEN} onClick={() => change([...cases, newCase(params.length, true)])}>
+          <button type="button" className="btn-quiet mt-1 px-2 text-caption" disabled={cases.length >= MAX_HIDDEN} onClick={() => change([...cases, newCase(params.length, true)])}>
             히든 케이스 추가
           </button>
         </div>

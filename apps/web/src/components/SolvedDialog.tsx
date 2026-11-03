@@ -26,31 +26,31 @@ export function SolvedDialog({
     // 배경 클릭은 뒤에 깐 버튼이 받는다(키보드로는 Esc·닫기 버튼을 쓰므로 탭 순서와 읽기 대상에서 뺀다).
     <dialog
       open
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 h-auto max-h-none w-auto max-w-none text-inherit"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 h-auto max-h-none w-auto max-w-none text-inherit"
       aria-modal="true"
       aria-labelledby="solved-title"
     >
       <button type="button" tabIndex={-1} aria-hidden="true" className="absolute inset-0 cursor-default" onClick={onClose} />
-      <div className="relative w-full max-w-sm rounded-xl border border-line bg-panel px-6 pt-8 pb-6 text-center shadow-2xl">
+      <div className="relative w-full max-w-sm rounded-xl border border-line bg-panel px-6 pt-8 pb-6 text-center shadow-overlay">
         <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-ok/15 text-ok" aria-hidden>
           <Icon name="check" size={24} strokeWidth={2.2} />
         </span>
-        <p id="solved-title" className="mt-4 text-[20px] font-bold">
+        <p id="solved-title" className="mt-4 text-title font-bold">
           정답입니다
         </p>
         {solvedMs !== null && (
-          <p className="mt-2 text-[13px] text-dim">
+          <p className="mt-2 text-ui text-dim">
             풀이 시간 <b className="font-mono text-text tabular-nums">{formatDuration(solvedMs)}</b>
           </p>
         )}
-        {!onNext && <p className="mt-1 text-[13px] text-faint">이 목록의 마지막 문제예요.</p>}
+        {!onNext && <p className="mt-1 text-ui text-faint">이 목록의 마지막 문제예요.</p>}
         <div className="mt-6 flex flex-col gap-2">
           {onNext ? (
-            <button type="button" className="btn-primary min-h-11 text-[15px]" onClick={onNext} autoFocus>
+            <button type="button" className="btn-primary min-h-11 text-body" onClick={onNext} autoFocus>
               다음 문제
             </button>
           ) : (
-            <button type="button" className="btn-primary min-h-11 text-[15px]" onClick={onList} autoFocus>
+            <button type="button" className="btn-primary min-h-11 text-body" onClick={onList} autoFocus>
               문제 목록으로
             </button>
           )}

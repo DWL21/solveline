@@ -57,7 +57,7 @@ export function DailyMailPanel() {
   const pause = useMutation({ mutationFn: adminApi.setDailyPaused, onSuccess: apply });
   const send = useMutation({ mutationFn: adminApi.sendDaily, onSettled: () => void qc.invalidateQueries({ queryKey: qk.adminDaily }) });
   if (overview.isPending) return <LinesSkeleton />;
-  if (overview.isError) return <p role="alert" className="text-[13px] text-bad">{errMsg(overview.error)}</p>;
+  if (overview.isError) return <p role="alert" className="text-ui text-bad">{errMsg(overview.error)}</p>;
   const data = overview.data;
   const active = data.subscribers.filter((s) => s.status === 'active').length;
   const ready = data.bank.reduce((n, c) => n + c.ready, 0);
@@ -66,13 +66,13 @@ export function DailyMailPanel() {
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
         <section className="rounded-lg border border-line bg-panel p-5">
-          <h1 className="text-[16px] font-bold">일일 메일</h1>
+          <h1 className="text-lead font-bold">일일 메일</h1>
           <output className={`mt-3 block font-semibold ${data.configured && !data.paused && ready ? 'text-ok' : 'text-warn'}`}>
             {!data.configured && '✗ 발송 설정이 없어 구독과 발송이 꺼져 있어요'}
             {data.configured && data.paused && '✗ 발송을 멈춘 상태예요'}
             {data.configured && !data.paused && (ready ? '✓ 평일 07시에 사람마다 다른 문제를 보내요' : '✗ 발송할 문제가 없어요')}
           </output>
-          <p className="mt-2 text-[13px] text-dim">
+          <p className="mt-2 text-ui text-dim">
             구독 중 {active}명 / 상한 {data.maxSubscribers}명 · 오늘({data.today}) 보냄 {data.delivery.sent} · 대기 {data.delivery.pending} · 실패 {data.delivery.failed} · 제외 {data.delivery.skipped}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -81,7 +81,7 @@ export function DailyMailPanel() {
             </button>
             <button
               type="button"
-              className="btn-quiet border border-line px-3 text-[13px]"
+              className="btn-quiet border border-line px-3 text-ui"
               disabled={send.isPending || !data.configured}
               onClick={() => {
                 if (window.confirm('오늘 문제를 구독자에게 지금 한 묶음 보낼까요?')) send.mutate();
@@ -91,11 +91,11 @@ export function DailyMailPanel() {
             </button>
           </div>
           {send.isSuccess && (
-            <output className="mt-3 block text-[13px] text-dim">
+            <output className="mt-3 block text-ui text-dim">
               {send.data.outcome === 'paused' ? '발송을 멈춘 상태라 보내지 않았어요.' : `보냄 ${send.data.sent}통, 실패 ${send.data.failed}통, 남음 ${send.data.remaining}통`}
             </output>
           )}
-          {action && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(action)}</p>}
+          {action && <p role="alert" className="mt-3 text-ui text-bad">{errMsg(action)}</p>}
         </section>
         <BankGrid data={data} />
         <ProblemEditor onSaved={() => void qc.invalidateQueries({ queryKey: qk.adminDaily })} />
@@ -116,9 +116,9 @@ function BankGrid({ data }: Readonly<{ data: DailyAdminOverview }>) {
   const cell = (topic: string, level: number) => data.bank.find((c) => c.topic === topic && c.level === level);
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-[15px] font-bold">문제은행</h2>
+      <h2 className="text-body font-bold">문제은행</h2>
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full text-[12.5px]">
+        <table className="w-full text-caption">
           <thead>
             <tr className="text-faint">
               <th className="py-1 pr-2 text-left font-semibold">유형</th>
@@ -181,23 +181,23 @@ function ProblemEditor({ onSaved }: Readonly<{ onSaved: () => void }>) {
   return (
     <form onSubmit={submit} className="rounded-lg border border-line bg-panel p-5">
       <div className="flex items-center gap-2">
-        <h2 className="text-[15px] font-bold">문제 직접 추가</h2>
-        <button type="button" className="btn-quiet ml-auto px-2 text-[12px]" onClick={() => setText(JSON.stringify(TEMPLATE, null, 2))}>
+        <h2 className="text-body font-bold">문제 직접 추가</h2>
+        <button type="button" className="btn-quiet ml-auto px-2 text-caption" onClick={() => setText(JSON.stringify(TEMPLATE, null, 2))}>
           예시 채우기
         </button>
       </div>
-      <p className="mt-1 text-[12.5px] text-dim">에이전트(MCP create_problem)와 같은 형식이에요. 기준 풀이로 예제와 채점 케이스를 모두 채점해 통과해야 저장돼요.</p>
-      <textarea className="field mt-3 min-h-64 font-mono text-[12px]" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="문제 JSON" required />
+      <p className="mt-1 text-caption text-dim">에이전트(MCP create_problem)와 같은 형식이에요. 기준 풀이로 예제와 채점 케이스를 모두 채점해 통과해야 저장돼요.</p>
+      <textarea className="field mt-3 min-h-64 font-mono text-caption" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="문제 JSON" required />
       <button type="submit" className="btn-primary mt-3" disabled={save.isPending || !text.trim()}>
         {save.isPending ? '채점하고 저장하는 중…' : '검증하고 저장하기'}
       </button>
-      {parseError && <p role="alert" className="mt-3 text-[13px] text-bad">{parseError}</p>}
-      {save.isError && <p role="alert" className="mt-3 whitespace-pre-wrap text-[13px] text-bad">{errMsg(save.error)}</p>}
-      {result?.saved && <output className="mt-3 block text-[13px] text-ok">저장했어요.</output>}
+      {parseError && <p role="alert" className="mt-3 text-ui text-bad">{parseError}</p>}
+      {save.isError && <p role="alert" className="mt-3 whitespace-pre-wrap text-ui text-bad">{errMsg(save.error)}</p>}
+      {result?.saved && <output className="mt-3 block text-ui text-ok">저장했어요.</output>}
       {result && !result.saved && (
-        <div role="alert" className="mt-3 text-[13px] text-bad">
+        <div role="alert" className="mt-3 text-ui text-bad">
           <p>{result.verify.error ?? `기준 풀이가 ${result.verify.score ?? 0}점이에요. 아래 케이스를 확인해 주세요.`}</p>
-          <ul className="mt-1 list-disc pl-5 font-mono text-[12px]">
+          <ul className="mt-1 list-disc pl-5 font-mono text-caption">
             {result.verify.failures.map((f) => (
               <li key={f.id} className="break-all">
                 {f.id}: {f.status} · 기대 {f.expected} · 실제 {f.actual ?? '-'} {f.stderr && `· ${f.stderr}`}
@@ -281,7 +281,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
 
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-[15px] font-bold">
+      <h2 className="text-body font-bold">
         문제 <span className="text-faint">{all.length}</span>
       </h2>
       <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
@@ -306,16 +306,16 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
 
       {/* 일괄 작업: 고른 문제가 있을 때만 쓸 수 있다 */}
       <div className="sticky top-0 z-10 mt-3 rounded-md border border-line bg-raised p-2" role="toolbar" aria-label="고른 문제 일괄 작업">
-        <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        <div className="flex flex-wrap items-center gap-2 text-caption">
           <span className="font-semibold">{chosen.length}개 선택</span>
           {(Object.keys(PROBLEM_STATUS) as DailyProblemStatus[]).map((s) => (
-            <button key={s} type="button" className="btn-quiet border border-line px-2 text-[12px]" disabled={!chosen.length || busy} onClick={() => setStatus.mutate({ ids: chosen.map((p) => p.id), s })}>
+            <button key={s} type="button" className="btn-quiet border border-line px-2 text-caption" disabled={!chosen.length || busy} onClick={() => setStatus.mutate({ ids: chosen.map((p) => p.id), s })}>
               {PROBLEM_STATUS[s]}(으)로
             </button>
           ))}
           <button
             type="button"
-            className="btn-quiet border border-line px-2 text-[12px]"
+            className="btn-quiet border border-line px-2 text-caption"
             disabled={!chosen.length || chosen.length > 5 || !testEmails.trim() || busy}
             title={chosen.length > 5 ? '시험 발송은 한 번에 5문제까지' : undefined}
             onClick={() => test.mutate(chosen.map((p) => p.id))}
@@ -324,7 +324,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
           </button>
           <button
             type="button"
-            className="btn-quiet border border-line px-2 text-[12px] text-bad"
+            className="btn-quiet border border-line px-2 text-caption text-bad"
             disabled={!deletable || busy}
             onClick={() => {
               if (window.confirm(`고른 문제 중 받은 사람이 없는 ${deletable}개를 지울까요?`)) remove.mutate(chosen.map((p) => p.id));
@@ -333,22 +333,22 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
             지우기{chosen.length && deletable < chosen.length ? `(${deletable}개)` : ''}
           </button>
           {chosen.length > 0 && (
-            <button type="button" className="btn-quiet ml-auto px-2 text-[12px]" onClick={() => setSelected(new Set())}>
+            <button type="button" className="btn-quiet ml-auto px-2 text-caption" onClick={() => setSelected(new Set())}>
               선택 해제
             </button>
           )}
         </div>
-        <input className="field mt-2 py-1 text-[12.5px]" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} placeholder="시험 받을 주소(최대 5개, 쉼표로 구분)" aria-label="시험 받을 주소" autoComplete="off" />
+        <input className="field mt-2 py-1 text-caption" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} placeholder="시험 받을 주소(최대 5개, 쉼표로 구분)" aria-label="시험 받을 주소" autoComplete="off" />
       </div>
-      {notice && <output className="mt-2 block text-[13px] text-dim">{notice}</output>}
-      {action && <p role="alert" className="mt-2 text-[13px] text-bad">{errMsg(action)}</p>}
+      {notice && <output className="mt-2 block text-ui text-dim">{notice}</output>}
+      {action && <p role="alert" className="mt-2 text-ui text-bad">{errMsg(action)}</p>}
       {list.isPending && <LinesSkeleton />}
-      {list.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(list.error)}</p>}
-      {list.data && all.length === 0 && <p className="mt-3 text-[13px] text-faint">아직 문제가 없어요. 직접 추가하거나 에이전트로 채워 주세요.</p>}
-      {list.data && all.length > 0 && filtered.length === 0 && <p className="mt-3 text-[13px] text-faint">조건에 맞는 문제가 없어요.</p>}
+      {list.isError && <p role="alert" className="mt-3 text-ui text-bad">{errMsg(list.error)}</p>}
+      {list.data && all.length === 0 && <p className="mt-3 text-ui text-faint">아직 문제가 없어요. 직접 추가하거나 에이전트로 채워 주세요.</p>}
+      {list.data && all.length > 0 && filtered.length === 0 && <p className="mt-3 text-ui text-faint">조건에 맞는 문제가 없어요.</p>}
 
       {visible.length > 0 && (
-        <label className="mt-3 flex items-center gap-2 border-b border-line pb-2 text-[12.5px] text-dim">
+        <label className="mt-3 flex items-center gap-2 border-b border-line pb-2 text-caption text-dim">
           <input
             type="checkbox"
             checked={allVisibleChosen}
@@ -362,19 +362,19 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
       )}
       <ol className="divide-y divide-line">
         {visible.map((p) => (
-          <li key={p.id} className={`py-2 text-[13px] ${selected.has(p.id) ? 'bg-accent/5' : ''}`}>
+          <li key={p.id} className={`py-2 text-ui ${selected.has(p.id) ? 'bg-accent/5' : ''}`}>
             <div className="flex items-center gap-2">
               <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} aria-label={`${p.title} 선택`} />
               <button type="button" aria-expanded={openId === p.id} className="min-w-0 flex-1 truncate text-left font-semibold hover:underline" onClick={() => setOpenId(openId === p.id ? null : p.id)}>
                 {p.title}
               </button>
-              <span className={`shrink-0 text-[12px] font-semibold ${p.status === 'ready' ? 'text-ok' : p.status === 'draft' ? 'text-warn' : 'text-faint'}`}>{PROBLEM_STATUS[p.status]}</span>
+              <span className={`shrink-0 text-caption font-semibold ${p.status === 'ready' ? 'text-ok' : p.status === 'draft' ? 'text-warn' : 'text-faint'}`}>{PROBLEM_STATUS[p.status]}</span>
             </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 pl-6 text-[12px] text-faint">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 pl-6 text-caption text-faint">
               <span>
                 {p.topic} · {p.level}단계 · {p.source} · 받음 {p.picks} · 해결 {p.solved}
               </span>
-              <a href={`/#/p/${encodeURIComponent(p.id)}`} target="_blank" rel="noopener" className="btn-quiet px-1 text-[12px]">
+              <a href={`/#/p/${encodeURIComponent(p.id)}`} target="_blank" rel="noopener" className="btn-quiet px-1 text-caption">
                 IDE에서 열기
               </a>
             </div>
@@ -387,7 +387,7 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
         ))}
       </ol>
       {filtered.length > visible.length && (
-        <button type="button" className="btn-quiet mt-2 w-full border border-line text-[13px]" onClick={() => setShown(shown + PAGE)}>
+        <button type="button" className="btn-quiet mt-2 w-full border border-line text-ui" onClick={() => setShown(shown + PAGE)}>
           {Math.min(PAGE, filtered.length - visible.length)}개 더 보기
         </button>
       )}
@@ -399,16 +399,16 @@ function ProblemList({ onChanged }: Readonly<{ onChanged: () => void }>) {
 function ProblemPreview({ id }: Readonly<{ id: string }>) {
   const detail = useQuery({ queryKey: [...qk.adminDailyProblems, id], queryFn: () => adminApi.dailyProblem(id) });
   if (detail.isPending) return <LinesSkeleton lines={3} />;
-  if (detail.isError) return <p role="alert" className="mt-2 text-[12px] text-bad">{errMsg(detail.error)}</p>;
+  if (detail.isError) return <p role="alert" className="mt-2 text-caption text-bad">{errMsg(detail.error)}</p>;
   const d = detail.data;
   return (
-    <div className="mt-2 rounded-md border border-line bg-raised p-3 text-[13px]">
-      <p className="text-[12px] text-faint">
+    <div className="mt-2 rounded-md border border-line bg-raised p-3 text-ui">
+      <p className="text-caption text-faint">
         {d.mode === 'function' ? `함수형 · solution(${d.params.join(', ')})` : '입출력형'} · 시간 제한 {d.timeLimitMs}ms
       </p>
       <p className="mt-2 whitespace-pre-wrap leading-relaxed">{d.description}</p>
-      <h3 className="mt-3 text-[12px] font-bold text-dim">예제</h3>
-      <ul className="mt-1 space-y-1 font-mono text-[12px]">
+      <h3 className="mt-3 text-caption font-bold text-dim">예제</h3>
+      <ul className="mt-1 space-y-1 font-mono text-caption">
         {d.cases.map((c) => (
           <li key={c.id} className="break-all">
             {d.mode === 'function' ? `(${c.args.join(', ')})` : c.stdin} → {c.expected}
@@ -416,7 +416,7 @@ function ProblemPreview({ id }: Readonly<{ id: string }>) {
         ))}
       </ul>
       {d.hint && (
-        <p className="mt-3 text-[12px] text-dim">
+        <p className="mt-3 text-caption text-dim">
           <span className="font-bold">힌트</span> {d.hint}
         </p>
       )}
@@ -427,13 +427,13 @@ function ProblemPreview({ id }: Readonly<{ id: string }>) {
 /** 에이전트 연결 안내. MCP는 pahidc 안에서만 실행되고 외부에 열려 있지 않다 */
 function AgentInfo() {
   return (
-    <section className="rounded-lg border border-line bg-panel p-5 text-[13px]">
-      <h2 className="text-[15px] font-bold">에이전트 자동 제작</h2>
+    <section className="rounded-lg border border-line bg-panel p-5 text-ui">
+      <h2 className="text-body font-bold">에이전트 자동 제작</h2>
       <p className="mt-1 text-dim">
         pahidc의 타이머가 Codex CLI로 문제은행 MCP에 접속해, 부족한 유형·난이도부터 새 문제를 만들고 검증해 추가해요. 다른 모델도 같은 MCP에 연결하면 똑같이 동작해요.
       </p>
       <p className="mt-2 text-dim">SSH로 접속할 수 있는 곳에서 직접 연결:</p>
-      <pre className="mt-1 overflow-x-auto rounded bg-raised p-2 font-mono text-[12px]">ssh pahidc solveline-bank-mcp --agent 이름</pre>
+      <pre className="mt-1 overflow-x-auto rounded bg-raised p-2 font-mono text-caption">ssh pahidc solveline-bank-mcp --agent 이름</pre>
       <a href="https://github.com/DWL21/solveline/blob/main/docs/daily-bank-mcp.md" target="_blank" rel="noopener" className="mt-2 inline-block text-accent-text underline">
         MCP 서버 구조와 연결 방법
       </a>
@@ -445,19 +445,19 @@ function SubscriberList({ subscribers, onChanged }: Readonly<{ subscribers: Dail
   const remove = useMutation({ mutationFn: adminApi.deleteDailySubscriber, onSuccess: onChanged });
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-[15px] font-bold">
+      <h2 className="text-body font-bold">
         구독자 <span className="text-faint">{subscribers.length}</span>
       </h2>
-      {subscribers.length === 0 && <p className="mt-3 text-[13px] text-faint">아직 구독자가 없어요.</p>}
-      {remove.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(remove.error)}</p>}
+      {subscribers.length === 0 && <p className="mt-3 text-ui text-faint">아직 구독자가 없어요.</p>}
+      {remove.isError && <p role="alert" className="mt-3 text-ui text-bad">{errMsg(remove.error)}</p>}
       <ol className="mt-2 divide-y divide-line">
         {subscribers.map((s) => (
-          <li key={s.id} className="flex items-center gap-2 py-2 text-[13px]">
+          <li key={s.id} className="flex items-center gap-2 py-2 text-ui">
             <span className="min-w-0 flex-1 truncate">{s.email}</span>
-            <span className={`shrink-0 text-[12px] font-semibold ${STATUS_COLOR[s.status]}`}>{STATUS_LABEL[s.status]}</span>
+            <span className={`shrink-0 text-caption font-semibold ${STATUS_COLOR[s.status]}`}>{STATUS_LABEL[s.status]}</span>
             <button
               type="button"
-              className="btn-quiet shrink-0 px-2 text-[12px]"
+              className="btn-quiet shrink-0 px-2 text-caption"
               disabled={remove.isPending}
               onClick={() => {
                 if (window.confirm(`${s.email} 구독자 정보를 완전히 지울까요?`)) remove.mutate(s.id);

@@ -48,13 +48,13 @@ export function SolvedMark({ p }: Readonly<{ p: ProblemSummary }>) {
   if (!sub) return null;
   if (sub.score === 100)
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-semibold text-ok" title={new Date(sub.at).toLocaleString('ko-KR')} aria-label="해결">
+      <span className="inline-flex shrink-0 items-center gap-1 text-ui font-semibold text-ok" title={new Date(sub.at).toLocaleString('ko-KR')} aria-label="해결">
         <Icon name="check" size={14} />
         <span className="max-sm:hidden">해결</span>
       </span>
     );
   return (
-    <span className="shrink-0 text-[13px] font-semibold text-warn tabular-nums" title="최근 제출 점수">
+    <span className="shrink-0 text-ui font-semibold text-warn tabular-nums" title="최근 제출 점수">
       {sub.score}점
     </span>
   );
@@ -98,19 +98,19 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
   let listBody: ReactNode;
   if (all.length === 0)
     listBody = (
-      <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel py-16 text-center">
-        <p className="text-[15px] font-semibold">아직 문제가 없어요</p>
-        {editor && <p className="text-[13px] text-dim">새 문제를 추가해 보세요.</p>}
+      <div className="flex flex-col items-center gap-1.5 rounded-lg border border-line bg-panel shadow-card py-16 text-center">
+        <p className="text-body font-semibold">아직 문제가 없어요</p>
+        {editor && <p className="text-ui text-dim">새 문제를 추가해 보세요.</p>}
       </div>
     );
   else if (shown.length === 0)
     listBody = (
-      <p className="rounded-lg border border-line bg-panel py-14 text-center text-[14px] text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
+      <p className="rounded-lg border border-line bg-panel shadow-card py-14 text-center text-body text-faint">{emptyMessage({ q, bookmarksOnly, kind: effective.kind, signedIn, inCollection, hasCards: cards.length > 0 })}</p>
     );
   else
     listBody = (
       <>
-      <ol className="overflow-hidden rounded-lg border border-line bg-panel" aria-label="문제 목록">
+      <ol className="overflow-hidden rounded-lg border border-line bg-panel shadow-card" aria-label="문제 목록">
         {shown.slice(0, limit).map((p) => (
           <ProblemRow
             key={p.id}
@@ -140,7 +140,7 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl flex-1 px-4 pt-6 pb-10 sm:px-8 sm:pt-8">
           {effective.kind === 'all' && (
-            <nav className="mb-2 text-[13px]" aria-label="컬렉션 경로">
+            <nav className="mb-2 text-ui" aria-label="컬렉션 경로">
               <button type="button" className="text-dim hover:text-text hover:underline" onClick={() => onScope({ kind: 'collections' })}>
                 컬렉션
               </button>
@@ -153,8 +153,8 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
                 <Icon name="left" size={18} />
               </button>
             )}
-            <h1 className="min-w-0 text-[22px] font-bold tracking-tight sm:text-[24px]">
-              {title} <span className="text-[16px] font-semibold text-faint tabular-nums">{overview ? cards.length : list.length}</span>
+            <h1 className="min-w-0 text-title sm:text-headline font-bold tracking-tight">
+              {title} <span className="text-lead font-semibold text-faint tabular-nums">{overview ? cards.length : list.length}</span>
             </h1>
             {overview && <button type="button" className="btn-ghost ml-auto" onClick={() => onScope({ kind: 'all' })}>전체 보기</button>}
             {(siblings || (folder && signedIn) || (collection && editor)) && (
@@ -165,17 +165,17 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
               </div>
             )}
           </div>
-          {collection?.description && <p className="mt-2 max-w-2xl text-[14px] leading-relaxed whitespace-pre-wrap text-dim">{collection.description}</p>}
+          {collection?.description && <p className="mt-2 max-w-2xl text-body leading-relaxed whitespace-pre-wrap text-dim">{collection.description}</p>}
           {!overview && list.length > 0 && signedIn && <Progress solved={solved} total={list.length} done={inCollection && progress.cleared} />}
           {overview && <DailyPromo signedIn={signedIn} />}
           {cards.length > 0 && <CollectionCards cards={cards} all={all} signedIn={signedIn} overview={overview} onScope={onScope} />}
-          {overview && cards.length === 0 && <p className="py-16 text-center text-[14px] text-faint">아직 컬렉션이 없어요</p>}
+          {overview && cards.length === 0 && <p className="py-16 text-center text-body text-faint">아직 컬렉션이 없어요</p>}
           {!overview && <>
           <div className="mt-6 mb-3 flex flex-wrap items-center gap-2">
             <label className="relative w-full sm:w-72">
               <Icon name="search" size={15} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
               <input
-                className="field h-10 pl-9 font-sans text-[14px]"
+                className="field h-10 pl-9 font-sans text-body"
                 placeholder="문제 제목 검색"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
@@ -211,7 +211,7 @@ function levelLabelOf(node: CollectionNode | null): string {
 
 function CollectionPath({ node, tree, onScope }: Readonly<{ node: CollectionNode; tree: CollectionNode[]; onScope: (s: Scope) => void }>) {
   return (
-    <nav className="mb-2 flex flex-wrap items-center gap-1 text-[13px] text-dim" aria-label="컬렉션 경로">
+    <nav className="mb-2 flex flex-wrap items-center gap-1 text-ui text-dim" aria-label="컬렉션 경로">
       <button type="button" className="hover:text-text hover:underline" onClick={() => onScope({ kind: 'collections' })}>컬렉션</button>
       {ancestors(node.path)
         .slice(0, -1)
@@ -246,10 +246,10 @@ function DailyPromo({ signedIn }: Readonly<{ signedIn: boolean }>) {
   if (signedIn && (!settings.data || settings.data.subscribed)) return null;
   const href = signedIn ? '#/inbox' : `/login?next=${encodeURIComponent('/#/inbox')}`;
   return (
-    <aside className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-line bg-panel px-5 py-4" aria-label="일일 문제 구독">
+    <aside className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-line bg-panel px-5 py-4 shadow-card" aria-label="일일 문제 구독">
       <div className="min-w-0 flex-1">
-        <p className="text-[15px] font-bold">평일마다 나에게 맞춘 한 문제</p>
-        <p className="mt-0.5 text-[13px] text-dim">풀이 기록을 보고 약한 유형과 알맞은 난이도로 골라 아침 7시에 메일과 인박스로 보내 드려요. 구독하면 첫 문제는 바로 받아요.</p>
+        <p className="text-body font-bold">평일마다 나에게 맞춘 한 문제</p>
+        <p className="mt-0.5 text-ui text-dim">풀이 기록을 보고 약한 유형과 알맞은 난이도로 골라 아침 7시에 메일과 인박스로 보내 드려요. 구독하면 첫 문제는 바로 받아요.</p>
       </div>
       <a href={href} className="btn-primary shrink-0">
         {signedIn ? '구독하러 가기' : '로그인하고 구독하기'}
@@ -280,8 +280,8 @@ function CollectionCards({ cards, all, signedIn, overview, onScope }: Readonly<{
 /** 이 범위에서 맞힌 문제 수 */
 function Progress({ solved, total, done }: Readonly<{ solved: number; total: number; done: boolean }>) {
   return (
-    <div className="mt-4 flex max-w-md items-center gap-3 text-[13px]" title="100점을 받은 문제">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
+    <div className="mt-4 flex max-w-md items-center gap-3 text-ui" title="100점을 받은 문제">
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-fill" aria-hidden>
         <div className="h-full rounded-full bg-ok" style={{ width: `${total ? (solved / total) * 100 : 0}%` }} />
       </div>
       <span className={`shrink-0 font-semibold tabular-nums ${done ? 'text-ok' : 'text-dim'}`}>
@@ -293,7 +293,7 @@ function Progress({ solved, total, done }: Readonly<{ solved: number; total: num
 
 function LoadError({ error, onRetry }: Readonly<{ error: unknown; onRetry: () => Promise<unknown> }>) {
   return (
-    <div className="p-6 text-[13px]">
+    <div className="p-6 text-ui">
       <p className="font-semibold text-bad">{errMsg(error)}</p>
       <button type="button" className="btn-ghost mt-3" onClick={() => void onRetry()}>
         다시 시도
@@ -340,9 +340,9 @@ function ProblemRow({ p, order, folderLabel, onPick }: Readonly<{ p: ProblemSumm
   return (
     <li className="flex items-center border-b border-line last:border-b-0 hover:bg-raised/60">
       <button type="button" onClick={() => onPick(p.id)} className="flex min-h-13 min-w-0 flex-1 items-center gap-4 py-3 pl-5 text-left">
-        {order !== null && <span className="w-5 shrink-0 text-right text-[13px] text-faint tabular-nums">{order}</span>}
-        <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{p.title}</span>
-        {folderLabel && <span className="hidden max-w-32 shrink-0 truncate rounded bg-raised px-2 py-0.5 text-[12px] text-dim sm:inline">{folderLabel}</span>}
+        {order !== null && <span className="w-5 shrink-0 text-right text-ui text-faint tabular-nums">{order}</span>}
+        <span className="min-w-0 flex-1 truncate text-body font-medium">{p.title}</span>
+        {folderLabel && <span className="hidden max-w-32 shrink-0 truncate rounded bg-raised px-2 py-0.5 text-caption text-dim sm:inline">{folderLabel}</span>}
         <SolvedMark p={p} />
       </button>
       <BookmarkStar id={p.id} bookmarked={p.bookmarked} />
@@ -395,10 +395,10 @@ function Sidebar({
         onClick={() => onScope(s.scope)}
         aria-current={current === s.key ? 'page' : undefined}
         style={s.depth ? { paddingLeft: `${12 + s.depth * 14}px` } : undefined}
-        className={`flex w-full items-center gap-2 rounded-md px-3 py-[7px] text-left text-[14px] ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised hover:text-text'}`}
+        className={`flex w-full items-center gap-2 rounded-md px-3 py-[7px] text-left text-body ${current === s.key ? 'bg-raised font-semibold text-text' : 'text-dim hover:bg-raised hover:text-text'}`}
       >
         <span className="min-w-0 flex-1 truncate">{s.label}</span>
-        <span className={`text-[12px] tabular-nums text-faint`}>{s.count}</span>
+        <span className={`text-caption tabular-nums text-faint`}>{s.count}</span>
       </button>
     </li>
   );
@@ -416,7 +416,7 @@ function Sidebar({
                 type="button"
                 aria-current={chip === s.key ? 'page' : undefined}
                 onClick={() => onScope(s.scope)}
-                className={`h-9 shrink-0 rounded-full border px-3.5 text-[13.5px] font-semibold whitespace-nowrap ${chip === s.key ? 'border-text bg-text text-base' : 'border-line-strong text-dim'}`}
+                className={`h-9 shrink-0 rounded-full border px-3.5 text-ui font-semibold whitespace-nowrap ${chip === s.key ? 'border-text bg-text text-base' : 'border-line-strong text-dim'}`}
               >
                 {s.label} <span className="font-normal opacity-70">{s.count}</span>
               </button>
@@ -469,7 +469,7 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
   });
   return (
     <form
-      className="flex flex-col gap-2 rounded-lg border border-line bg-panel p-3"
+      className="flex flex-col gap-2 rounded-lg border border-line bg-panel shadow-card p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (name.trim()) create.mutate();
@@ -485,7 +485,7 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
           ).map(([k, label]) => (
             <label
               key={k}
-              className={`flex h-9 cursor-pointer items-center justify-center rounded text-[13px] font-semibold has-focus-visible:outline-2 has-focus-visible:outline-accent ${kind === k ? 'bg-panel text-text shadow-sm' : 'text-dim'}`}
+              className={`flex h-9 cursor-pointer items-center justify-center rounded text-ui font-semibold has-focus-visible:outline-2 has-focus-visible:outline-accent ${kind === k ? 'bg-panel text-text shadow-sm' : 'text-dim'}`}
             >
               <input type="radio" name="quick-create-kind" value={k} checked={kind === k} onChange={() => setKind(k)} className="sr-only" />
               {label}
@@ -495,7 +495,7 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
       )}
       <div className="flex gap-2">
         <input
-          className="field h-10 min-w-0 flex-1 font-sans text-[14px]"
+          className="field h-10 min-w-0 flex-1 font-sans text-body"
           placeholder={kind === 'folder' ? '폴더 이름' : '컬렉션 이름 (하위는 / 로 구분)'}
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -505,7 +505,7 @@ function QuickCreate({ editor, onDone }: Readonly<{ editor: boolean; onDone: () 
           만들기
         </button>
       </div>
-      {create.isError && <p className="text-[12px] text-bad">{errMsg(create.error)}</p>}
+      {create.isError && <p className="text-caption text-bad">{errMsg(create.error)}</p>}
     </form>
   );
 }
@@ -534,7 +534,7 @@ function SectionHeader({ kind }: Readonly<{ kind: 'folder' | 'collection' }>) {
   return (
     <div className="mb-1">
       <div className="flex h-7 items-center pr-1 pl-3">
-        <h2 className="flex-1 text-[12px] font-semibold text-faint">{kind === 'folder' && me ? '내 폴더' : label}</h2>
+        <h2 className="flex-1 text-caption font-semibold text-faint">{kind === 'folder' && me ? '내 폴더' : label}</h2>
         {canAdd && (
         <button
           type="button"
@@ -557,7 +557,7 @@ function SectionHeader({ kind }: Readonly<{ kind: 'folder' | 'collection' }>) {
             onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
             autoFocus
           />
-          {create.isError && <p className="mt-1 text-[12px] text-bad">{errMsg(create.error)}</p>}
+          {create.isError && <p className="mt-1 text-caption text-bad">{errMsg(create.error)}</p>}
         </form>
       )}
     </div>
@@ -623,20 +623,20 @@ function CollectionCard({ node, all, signedIn, onOpen, compact = false, stretch 
     <button
       type="button"
       onClick={onOpen}
-      className={`group flex w-full flex-col rounded-lg border border-line bg-panel text-left transition hover:border-line-strong hover:bg-raised/40 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
+      className={`group flex w-full flex-col rounded-lg border border-line bg-panel shadow-card text-left transition hover:border-line-strong hover:bg-raised/40 ${compact ? 'gap-3 px-3.5 py-3 sm:px-4 sm:py-3.5' : 'gap-4 p-5 sm:p-6'} ${stretch ? 'h-full' : ''}`}
     >
       <span className="flex items-start gap-3">
         <span className="min-w-0 flex-1">
-          <span className={`block truncate font-bold ${compact ? 'text-[15px]' : 'text-[18px]'}`}>{node.name}</span>
-          {!compact && desc ? <span className="mt-1 line-clamp-1 text-[14px] text-dim">{desc}</span> : null}
+          <span className={`block truncate font-bold ${compact ? 'text-body' : 'text-lead'}`}>{node.name}</span>
+          {!compact && desc ? <span className="mt-1 line-clamp-1 text-body text-dim">{desc}</span> : null}
         </span>
         <Icon name="right" size={compact ? 14 : 16} className="mt-1 shrink-0 text-faint transition group-hover:translate-x-0.5 group-hover:text-text" />
       </span>
-      <span className={`mt-auto flex min-w-0 items-center text-faint ${compact ? 'flex-wrap gap-x-2 gap-y-1 text-[12.5px]' : 'gap-3 text-[13px]'}`}>
+      <span className={`mt-auto flex min-w-0 items-center text-faint ${compact ? 'flex-wrap gap-x-2 gap-y-1 text-caption' : 'gap-3 text-ui'}`}>
         <span className={compact ? 'min-w-0 basis-full break-words' : 'shrink-0'}>{meta}</span>
         {signedIn && total > 0 && (
           <>
-            <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden>
+            <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-fill" aria-hidden>
               <span className="block h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
             </span>
             <span className={`shrink-0 tabular-nums ${solved === total ? 'font-semibold text-ok' : ''}`}>
