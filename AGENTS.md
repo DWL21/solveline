@@ -40,6 +40,7 @@
 | `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` (일일 메일) | `apps/api/.env` | GitHub Environment `production` **secrets** → Pages 비밀, `RESEND_API_KEY`는 발송 Worker 비밀에도 넣는다 |
 | `DAILY_FROM`, `DAILY_MAX_SUBSCRIBERS` (일일 메일) | `apps/api/.env` | GitHub Environment `production` **variables**. `DAILY_FROM`이 없으면 구독·발송이 꺼진다 |
 | `SESSION_TTL_DAYS` (선택) | `apps/api/.env` | GitHub Environment `production` **variables** |
+| `LLM_QA_SSH_KEY`, `LLM_QA_SSH_HOST` (LLM QA, [0010](docs/decisions/0010-llm-e2e-qa.md)) | — | 저장소 **secrets**. 키는 pahidc `authorized_keys`의 `command="/usr/local/bin/solveline-llm-qa",restrict` 전용(셸 불가). `LLM_QA_SSH_KNOWN_HOSTS`는 저장소 **variables** |
 
 - 배포 워크플로는 `production` 환경에서 **이름을 지정한 값만** 꺼낸다.
   - Worker API가 쓰는 값은 Pages 비밀로 넣는다("Sync Pages secrets").
@@ -59,6 +60,7 @@
 - `deploy` 잡은 `github.repository == 'DWL21/solveline' && github.ref == 'refs/heads/main'`일 때만 돈다.
 - 외부 기여자 PR의 워크플로는 **항상 승인 후 실행**(저장소 설정 `all_external_contributors`). 외부 PR이 `.github/workflows`를 바꾸면 승인 전에 반드시 내용을 읽는다.
 - CI(`ci.yml`)는 GitHub-hosted runner만 쓴다.
+- LLM QA(`llm-qa.yml`)도 GitHub-hosted runner에서 돌고, pahidc에는 SSH 강제 명령으로만 닿는다. PR 코드는 pahidc의 테스트 환경 컨테이너 안에서만 돌고, 호스트에서 도는 `compose.test.yaml`·`scripts/test-env.sh`는 main 것을 쓴다([0010](docs/decisions/0010-llm-e2e-qa.md)).
 
 ## 코드 실행 샌드박스 규칙
 

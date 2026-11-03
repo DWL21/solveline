@@ -48,6 +48,7 @@ function measures(m) {
     rows.push(['Static analysis', 'Duplication · Technical debt', `${fmt(s.duplicated_lines_density)} · ${s.sqale_index ? `${Math.round(s.sqale_index / 60)}h` : '—'}`]);
   }
   for (const a of m.e2e?.a11y ?? []) rows.push(['Accessibility', a.title.replace(/^접근성: /, ''), a.violations]);
+  if (m.llmQa) rows.push(['LLM e2e QA (advisory)', 'Scenarios', llmLine(m.llmQa)]);
   return rows;
 }
 
@@ -59,6 +60,12 @@ const reusable = [
   ['Traceability · register', 'docs/quality/test-cases.md, docs/quality/qa-register.json', 'Requirements, defects, residual risks'],
   ['Bug report template', '.github/ISSUE_TEMPLATE/bug_report.yml', 'Steps, severity, where found'],
 ];
+
+const LLM = { pass: 'Pass', fail: 'Fail', blocked: 'Not verified' };
+const llmLine = (q) =>
+  q.status === 'error'
+    ? `Error: ${q.error}`
+    : `Pass ${q.passed} · Fail ${q.failed} · Not verified ${q.blocked}${q.model ? ` · ${q.model}${q.effort ? `/${q.effort}` : ''}` : ''}${q.seconds ? ` · ${Math.round(q.seconds / 6) / 10} min` : ''}`;
 
 const foundSummary = (m) => Object.entries(m.foundIn).map(([k, v]) => `${en(FOUND, k)} ${v}`).join(', ') || '—';
 const byRequirement = (a, b) => (Number(a.requirements[0]?.slice(1) ?? 99) - Number(b.requirements[0]?.slice(1) ?? 99)) || a.title.localeCompare(b.title, 'ko');
@@ -106,6 +113,15 @@ export function toMarkdown(m, links = {}) {
   L.push('**Results by device**', '', '| Project | Engine | Passed | Failed | Flaky | Duration |', '|---|---|---|---|---|---|');
   for (const [key, s] of Object.entries(m.projects)) L.push(`| ${PROJECTS[key]?.[0] ?? key} | ${PROJECTS[key]?.[1] ?? '—'} | ${s.passed} | ${s.failed} | ${s.flaky} | ${sec(s.durationMs)} |`);
   L.push('');
+  if (m.llmQa) {
+    L.push(`**LLM e2e QA (advisory)** — ${md(llmLine(m.llmQa))}${links.llm ? ` · [run](${links.llm})` : ''}`, '');
+    L.push('LLM이 PR의 변경 사항·완료 기준으로 시나리오를 만들어 테스트 환경 브라우저로 확인했다. 참고 체크라 판정(Verdict)에는 넣지 않고, 실패는 재현 정보와 함께 이슈로 올린다.', '');
+    if (m.llmQa.scenarios.length) {
+      L.push('| Result | Scenario | Criterion |', '|---|---|---|');
+      for (const x of m.llmQa.scenarios) L.push(`| ${LLM[x.verdict] ?? md(x.verdict)} | ${md(x.title)} | ${md(x.criterion)} |`);
+      L.push('');
+    }
+  }
   L.push('<details><summary><b>6. Defects · 7. Residual Risks · 8. Test Deliverables · 9. Reusable Test Assets · 10. Lessons Learned</b></summary>', '');
   L.push('### 6. Defects');
   L.push(`Register ${m.defects.length} (resolved ${m.defects.filter((d) => d.status === '해결').length}) · Open bug issues ${m.openBugs.length} · Found in: ${foundSummary(m)}`, '');
@@ -147,7 +163,7 @@ export function toHtml(m, links = {}, image = () => null) {
   const total = (m.unit?.tests ?? 0) + (m.e2e?.total ?? 0) + (m.smoke?.total ?? 0);
   const link = (url) => (url ? `<a href="${h(url)}">${h(url)}</a>` : '—');
   // 저장된 이전 판(qa-reports 브랜치의 history.json) + 이번 판
-  const history = [...m.history.filter((x) => x.version !== m.version), { version: m.version, date: m.generatedAt, note: m.kind === 'pr' ? `PR stage report (CI #${m.run?.id ?? '—'})` : `Post-merge: deployment and production smoke (CI #${m.run?.id ?? '—'})` }];
+  const history = [...m.history.filter((x) => x.version !== m.version), { version: m.version, date: m.generatedAt, note: m.note ?? (m.kind === 'pr' ? `PR stage report (CI #${m.run?.id ?? '—'})` : `Post-merge: deployment and production smoke (CI #${m.run?.id ?? '—'})`) }];
 
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${h(m.id)} Test Completion Report</title>
 <style>${CSS}</style></head><body>
@@ -211,6 +227,7 @@ export function toHtml(m, links = {}, image = () => null) {
   <h3>6.2 Results by Device</h3>
   ${table(['Project', 'Engine', 'Passed', 'Failed', 'Flaky', 'Duration'], Object.entries(m.projects).map(([k, s]) => [h(PROJECTS[k]?.[0] ?? k), h(PROJECTS[k]?.[1] ?? '—'), s.passed, s.failed, s.flaky, sec(s.durationMs)]), [2, 3, 4, 5])}
   ${m.e2e?.slowest?.length ? `<h3>6.3 Slowest Tests</h3><ul>${m.e2e.slowest.map((t) => `<li>${sec(t.durationMs)} · ${h(t.project)} · ${h(t.title)}</li>`).join('')}</ul>` : ''}
+  ${m.llmQa ? `<h3>6.4 LLM e2e QA (Advisory)</h3><p>${h(llmLine(m.llmQa))}${links.llm ? ` · ${link(links.llm)}` : ''}</p><p>LLM이 PR의 변경 사항·완료 기준으로 시나리오를 만들어 테스트 환경 브라우저로 확인했다. 참고 체크라 판정에는 넣지 않고, 실패는 재현 정보와 함께 이슈로 올린다.</p>${m.llmQa.summary ? `<p class="muted">${h(m.llmQa.summary)}</p>` : ''}${m.llmQa.scenarios.length ? table(['Result', 'Scenario', 'Criterion', 'Observed'], m.llmQa.scenarios.map((x) => [ok(x.verdict !== 'fail', LLM[x.verdict] ?? h(x.verdict)), h(x.title), h(x.criterion), h(x.actual)])) : ''}` : ''}
 </section>
 
 <section>

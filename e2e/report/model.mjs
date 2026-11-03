@@ -66,6 +66,25 @@ const count = (list) => ({
   skipped: list.filter((c) => c.status === 'skipped').length,
 });
 
+/** LLM QA 아티팩트(llm-qa/request.json, llm-qa/out/result.json·meta.json·error.txt) → 보고서 절. 참고 체크라 판정에는 넣지 않는다(0010). */
+export function parseLlmQa({ request, result, meta, error }) {
+  if (!request && !result && !error) return null;
+  const scenarios = (result?.scenarios ?? []).map((x) => ({ title: x.title, criterion: x.criterion, verdict: x.verdict, actual: x.actual }));
+  const n = (v) => scenarios.filter((x) => x.verdict === v).length;
+  return {
+    status: error ? 'error' : 'done',
+    error: error ? String(error).trim().slice(0, 300) : null,
+    summary: result?.summary ?? '',
+    model: meta?.model ?? null,
+    effort: meta?.effort ?? null,
+    seconds: meta?.seconds ?? null,
+    passed: n('pass'),
+    failed: n('fail'),
+    blocked: n('blocked'),
+    scenarios,
+  };
+}
+
 const smokeStats = (smoke) => {
   const s = smoke?.stats;
   if (!s) return null;
@@ -82,13 +101,20 @@ export function loadReport(input, repo) {
   const metrics = readJson(join(input, 'quality-report/metrics.json'));
   const results = readJson(join(input, 'e2e/results.json'));
   const smoke = readJson(join(input, 'smoke.json'));
+  const errorFile = join(input, 'llm-qa/out/error.txt');
+  const llmQa = parseLlmQa({
+    request: readJson(join(input, 'llm-qa/request.json')),
+    result: readJson(join(input, 'llm-qa/out/result.json')),
+    meta: readJson(join(input, 'llm-qa/out/meta.json')),
+    error: existsSync(errorFile) ? readFileSync(errorFile, 'utf8') : null,
+  });
   const register = readJson(join(repo, 'docs/quality/qa-register.json')) ?? { defects: [], risks: [], lessons: [] };
   const requirementsMd = existsSync(join(repo, 'docs/quality/test-cases.md')) ? readFileSync(join(repo, 'docs/quality/test-cases.md'), 'utf8') : '';
   const vitest = existsSync(join(repo, 'apps/api/vitest.config.ts')) ? readFileSync(join(repo, 'apps/api/vitest.config.ts'), 'utf8') : '';
-  return buildModel({ context, metrics, results, smoke, register, requirements: parseRequirements(requirementsMd), thresholds: parseThresholds(vitest) });
+  return buildModel({ context, metrics, results, smoke, llmQa, register, requirements: parseRequirements(requirementsMd), thresholds: parseThresholds(vitest) });
 }
 
-export function buildModel({ context, metrics, results, smoke, register, requirements, thresholds }) {
+export function buildModel({ context, metrics, results, smoke, llmQa = null, register, requirements, thresholds }) {
   const kind = context.kind === 'final' ? 'final' : 'pr';
   const cases = parseCases(results);
   const smokeResult = smokeStats(smoke);
@@ -131,6 +157,7 @@ export function buildModel({ context, metrics, results, smoke, register, require
     deviations.push(r.id === 'R11' && kind === 'pr' ? `${r.id}(운영 가용성)은 머지 후 배포가 끝난 뒤 운영 스모크로 확인한다` : `${r.id}를 확인한 테스트가 없다`);
   if (kind === 'final' && !cases.some((c) => c.evidence.length)) deviations.push('시연 증거(스크린샷)가 없다');
   if (kind === 'final' && !smokeResult) deviations.push('배포 후 운영 스모크 결과가 없다');
+  if (llmQa?.status === 'error') deviations.push(`LLM QA를 끝내지 못했다: ${llmQa.error}`);
 
   const blockers = [
     ...jobs.filter((j) => j.conclusion !== 'success').map((j) => `CI job ${j.conclusion ?? 'in progress'}: ${j.name}`),
@@ -161,6 +188,7 @@ export function buildModel({ context, metrics, results, smoke, register, require
     id: `QA-TCR-${pr ? `PR${pr.number}` : (context.sha ?? 'local').slice(0, 7)}`,
     version: context.version ?? (kind === 'final' ? '1.0' : '0.1'),
     history: context.history ?? [],
+    note: context.note ?? null,
     links: context.links ?? {},
     generatedAt: context.generatedAt ?? new Date().toISOString(),
     repo: context.repo ?? null,
@@ -177,6 +205,7 @@ export function buildModel({ context, metrics, results, smoke, register, require
     e2e,
     sonar,
     smoke: smokeResult,
+    llmQa,
     requirements: reqRows,
     projects: e2e?.byProject ?? {},
     cases,

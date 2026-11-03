@@ -1,6 +1,6 @@
 # 0010. PR마다 LLM이 하는 e2e QA (pahidc Codex)
 
-상태: 제안. 단계별로 구현하며, 처음에는 머지를 막지 않는 참고 체크로 시작한다.
+상태: 1차 구현(2026-11-03, `llm-qa.yml`·`scripts/llm-qa/`). 머지를 막지 않는 참고 체크다. 처음 설계(서버가 GitHub를 당겨 오는 작업자)는 시험 뒤 "Actions가 SSH 강제 명령으로 부른다"로 바꿨다(아래 고려한 길).
 
 ## 배경
 
@@ -28,79 +28,84 @@
 | Actions에서 `openai/codex-action` + `OPENAI_API_KEY` | API 종량 과금이라 무료 조건에 맞지 않는다. **안 씀** |
 | Actions 비밀에 ChatGPT `auth.json`을 넣고 Codex 실행 | 문제가 세 가지라 **안 씀**. ① 공개 저장소 워크플로에 개인 세션을 노출한다. ② 포크 PR에는 비밀이 없다. ③ 토큰 갱신 결과가 일회용 러너와 함께 사라져 로그인이 풀린다 |
 | pahidc를 self-hosted runner로 PR 이벤트에 붙임 | AGENTS.md 규칙(self-hosted는 `deploy.yml`의 main 푸시만) 위반. 외부 PR 코드가 운영 서버에서 돈다. **금지** |
-| **pahidc가 GitHub를 당겨 오는 작업자(poller) + Docker 격리** | 들어오는 포트·러너 등록 없이 나가는 HTTPS만 쓴다. Codex 로그인은 이미 있다. **채택** |
+| pahidc가 GitHub를 당겨 오는 작업자(poller) | 들어오는 접속은 없지만, 댓글·이슈를 쓰려면 pahidc에 GitHub 토큰(쓰기 권한)을 둬야 한다. 처음 설계였으나 **바꿈** |
+| **Actions가 SSH 강제 명령으로 pahidc QA 명령을 부름** | GitHub 쓰기는 Actions의 기본 토큰(`GITHUB_TOKEN`)이 하고, pahidc에는 GitHub 토큰이 없다. Actions 비밀의 SSH 키는 `authorized_keys`의 `command=…,restrict`로 QA 명령 하나만 실행한다(셸·포워딩 불가). 기다리는 동안의 Actions 시간은 공개 저장소라 무료. **채택** |
 | Actions에서 GitHub Models(무료 한도) + 정해진 단계만 실행하는 실행기 | 비밀 없이 돌아서 포크 PR에도 쓸 수 있다. 다만 무료 한도(요청 수·토큰)가 작아 탐색형 QA는 어렵다. **3단계 보조안**(pahidc가 바쁘거나 꺼졌을 때 계획·판정만) |
 
 ## 흐름
 
 ```
-PR push ─▶ CI(ci.yml, Actions 무료) ─ 완료 ─▶ llm-qa-request.yml(Actions, 비밀 없음)
-                                              │ 대상 판정 + 요청서(JSON) 아티팩트 + 상태 llm-qa=pending
-                                              ▼
-pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitHub API, 나가는 HTTPS)
-   │  flock으로 한 번에 하나, nice/CPU·메모리 제한, 전체 30분 제한
-   ├─ ① PR head SHA를 빈 폴더에 받기(git fetch, 실행 권한 없음)
-   ├─ ② 테스트 환경: compose.test.yaml을 프로젝트 이름 solveline-qa-<PR>로 띄움(tmpfs, 새 임의 비밀)
-   ├─ ③ 기본 체크: 기존 e2e 중 변경 파일에 걸린 @R 태그만 돌림(빠른 회귀)
-   ├─ ④ LLM QA: qa-agent 컨테이너(Codex) + 브라우저 컨테이너(Playwright MCP) + qa MCP
-   ├─ ⑤ 결과: PR 댓글 1개 갱신, 커밋 상태 llm-qa, 스크린샷은 qa-reports 브랜치
-   └─ ⑥ 정리: compose down --volumes, 작업 폴더 삭제
+PR push ─▶ CI(ci.yml) ─ 성공 ─▶ llm-qa.yml(Actions, 기본 브랜치 코드만 실행)
+              │ ① 대상 판정(작성자·qa:llm 레이블·변경 경로)
+              │ ② 요청서 JSON(PR 제목·변경 사항·연결 이슈 완료 기준·변경 파일)
+              │ ③ 상태 llm-qa=pending
+              ▼
+   ssh ubuntu@pahidc "run <PR> <SHA>" < request.json   (키는 강제 명령 전용)
+              ▼
+pahidc  /usr/local/bin/solveline-llm-qa
+   │  flock으로 한 번에 하나, 남은 메모리(실메모리+스왑) 3GB 미만이면 미룸, nice 10
+   ├─ PR head를 빈 폴더에 받고 SHA 확인. 호스트에서 도는 compose.test.yaml·test-env.sh는 main 것으로 바꿔 씀
+   ├─ 테스트 환경(compose 프로젝트 solveline-qa, 127.0.0.1:8091, tmpfs, 새 임의 비밀)
+   ├─ 예제 데이터·로그인 쿠키(seed.mjs, 토큰은 모델에 안 감)
+   ├─ Codex(gpt-6.1-terra) + Playwright MCP(테스트 환경 주소만 허용), 20분 제한
+   └─ 결과 tar.gz(result.json·스크린샷·codex.log)를 표준 출력으로, 테스트 환경 내림
+              ▼
+llm-qa.yml  스크린샷 → qa-reports 브랜치 llm-qa/pr-<n>/<sha7>/
+            PR 댓글(표식으로 하나만 갱신) · 상태 llm-qa · 실패 시나리오 이슈
 ```
 
-### 대상 판정 (llm-qa-request.yml)
+### 대상 판정 (llm-qa.yml)
 
-- `workflow_run`(CI 완료)으로 돈다. 기본 브랜치의 코드만 실행하고 PR 코드는 실행하지 않는다(`qa-report.yml`과 같은 방식).
-- 아래를 모두 만족해야 요청서를 만든다.
-  - 작성자가 `OWNER`·`MEMBER`·`COLLABORATOR`이거나, 관리자가 `qa:llm` 레이블을 붙였다. 외부 PR은 사람이 내용을 읽고 레이블로 허락한다.
-  - 변경이 화면·API 동작에 닿는다(`apps/web`·`apps/api`·`apps/judge`·`packages/shared`·`runner`). 문서·워크플로만 바꾼 PR은 건너뛰고 상태를 `success`("대상 아님")로 단다.
-  - CI의 `check`가 통과했다. 빌드가 깨진 PR에 LLM 사용량을 쓰지 않는다.
-- 요청서(`llm-qa-request.json`)에 담는 것:
-  - PR 번호, head SHA
-  - 제목·본문, 연결된 이슈의 `## 완료 기준`
-  - 변경 파일 목록과 diff 통계, 변경 파일에 해당하는 요구사항 태그(@R…)
-  - 이전 실행 결과(재실행이면)
+- `workflow_run`(CI 완료, 성공)으로 돈다. 기본 브랜치의 코드만 실행하고 PR 코드는 Actions에서 실행하지 않는다(`qa-report.yml`과 같은 방식). PR 글은 파일로만 넘긴다.
+- 아래를 모두 만족해야 QA를 부른다.
+  - 작성자가 `OWNER`·`MEMBER`·`COLLABORATOR`이거나, 관리자가 `qa:llm` 레이블을 붙였다. 외부 PR은 사람이 내용을 읽고 레이블로 허락한다. 레이블을 붙인 뒤에는 Actions 탭에서 `LLM QA`를 PR 번호로 직접 실행한다(`workflow_dispatch`).
+  - 변경이 화면·API 동작에 닿는다(`apps/web`·`apps/api`·`apps/judge`·`packages/shared`·`runner`·`docker`). 아니면 상태를 `success`("대상 아님")로 단다.
+  - CI 전체가 성공했다. 빌드가 깨진 PR에 LLM 사용량을 쓰지 않는다.
+  - 그 사이 새 커밋이 올라왔으면 건너뛴다(새 커밋의 CI가 다시 부른다).
+- 요청서(`scripts/llm-qa-report.mjs request`): PR 번호·head SHA·제목, PR 본문의 `## 변경 사항`(그림 제외, 4000자), 연결 이슈(`Closes`)의 `## 완료 기준` 항목, 변경 파일(80개까지). 모두 **신뢰하지 않는 입력**이다.
 
-  모두 **신뢰하지 않는 입력**으로 다룬다.
+### pahidc QA 명령
 
-### pahidc 작업자
-
-- `scripts/llm-qa/worker.sh`가 systemd 타이머로 2분마다 돈다. `solveline-bank-generate`와 같은 설치 방식이다.
-- 할 일을 찾는 법: `llm-qa=pending` 상태인 열린 PR의 최신 요청서 아티팩트를 받는다. 같은 SHA에 이미 결과가 있으면 건너뛰고, 새 커밋이 오면 이전 작업을 버린다.
-- GitHub 토큰: 이 저장소 하나만 쓰는 fine-grained 토큰을 `/etc/solveline/llm-qa.env`(root, 600)에 둔다.
-  - 권한은 Pull requests 쓰기, Issues 쓰기, Commit statuses 쓰기, Actions 읽기, Contents 쓰기다. Contents 쓰기는 `qa-reports` 브랜치 업로드에만 쓴다. main은 브랜치 보호로 막혀 있어야 한다.
-  - 토큰은 작업자 프로세스만 갖고 컨테이너에는 넘기지 않는다.
+- 설치: 저장소 main을 받아 `scripts/llm-qa/install.sh <Actions 공개 키>`. `/opt/solveline-llm-qa`(지침·결과 형식·seed, Playwright MCP 0.0.83, Chromium)와 `/usr/local/bin/solveline-llm-qa`를 둔다. 지침(`guide.md`)을 고치면 다시 설치해야 반영된다.
+- 접속 설정(사람이 한다):
+  - pahidc `~/.ssh/authorized_keys`: `command="/usr/local/bin/solveline-llm-qa",restrict ssh-ed25519 …` (install.sh가 공개 키를 받으면 더한다)
+  - 저장소 비밀 `LLM_QA_SSH_KEY`(그 키의 비공개 키)·`LLM_QA_SSH_HOST`, 저장소 변수 `LLM_QA_SSH_KNOWN_HOSTS`(`ssh-keyscan` 결과). 없으면 상태가 `error`("접속 설정 없음")가 된다.
+- PR 코드는 테스트 환경 이미지 빌드와 컨테이너 안에서만 돈다. 호스트에서 도는 정의(`compose.test.yaml`, `scripts/test-env.sh`)는 main 것을 쓰므로, PR이 이 두 파일을 바꾸면 바뀐 내용은 QA에 반영되지 않는다.
 - 자원: 운영 judge·runner가 우선이다.
   - 2026-11-03 시험에서 잰 양: 테스트 환경 컨테이너 넷 약 350MB, 브라우저·Codex·MCP 약 1.6GB, 이미지 약 1.3GB.
-  - 같은 날 pahidc는 메모리 3GB 중 여유 2GB, 디스크 94%(여유 3GB)였고 다른 서비스(never-ai)도 돈다. **지금 상태로는 운영과 함께 돌릴 수 없다.** 1단계 전에 둘 중 하나를 정한다.
-    - pahidc를 늘린다(메모리 8GB 이상, 디스크 여유 10GB 이상).
-    - QA 전용 일반 인스턴스를 둔다. 같은 작업자·compose를 그대로 쓰고, Codex 로그인만 그 인스턴스에 한다. runner 이미지가 x86_64 전용이라(JDK 21.0.2) x86_64 인스턴스여야 한다.
-  - QA 컨테이너 전체를 `--cpus 1.5`·메모리 3GB로 제한하고 `nice 10`으로 돌린다.
-  - judge 대기열이 길면(`/health`의 queued > 5) 시작을 미룬다.
-  - 하루 최대 횟수(`LLM_QA_DAILY_MAX`, 기본 20)를 넘기면 `success`("확인 못 함: 오늘 한도 초과")로 끝낸다(판정과 결과 참고). 0009의 문제 자동 제작(04:00)과 Codex 사용량을 나눠 쓴다.
+  - 같은 날 pahidc를 정리했다: never-ai 서비스와 배포 러너를 멈춤(데이터·이미지는 남김), 빌드 캐시·예전 이미지·러너 예전 버전·캐시·로그를 지움(디스크 94% → 73%), 스왑 4GB → 8GB(`/swapfile2`, `vm.swappiness=10`).
+  - 남은 메모리(MemAvailable + SwapFree)가 3GB 미만이면 시작하지 않고 `error`로 끝낸다. 한 번에 하나만 돌고(30분까지 기다림), `nice 10`으로 돈다.
+  - 0009의 문제 자동 제작(04:00)과 Codex 사용량을 나눠 쓴다. 하루 한도는 아직 두지 않았다(다음 단계).
 
 ### LLM QA 실행 (격리)
 
-세 컨테이너로 나눠 **LLM이 인터넷과 비밀에 동시에 닿지 않게** 한다.
+**1차 구현**은 Codex와 Playwright MCP를 pahidc 호스트의 `ubuntu` 프로세스로 띄우고 아래로 막는다.
+
+- Codex: `codex exec --ignore-user-config --skip-git-repo-check --sandbox read-only --ephemeral`, 빈 작업 폴더, `approval_policy="never"`, 20분 제한.
+  - 셸은 읽기 전용 샌드박스라 네트워크·쓰기가 막힌다.
+  - `--ignore-user-config`로 사용자 `config.toml`의 모델·MCP 서버·hook을 읽지 않고 로그인(`auth.json`)만 쓴다. 시험에서 이 옵션 없이 돌리자 개발 PC의 다른 MCP 서버(데스크톱 제어 포함)까지 불러왔다.
+  - 모델: 기본 `gpt-6.1-terra`, 추론 강도 `medium`. `LLM_QA_MODEL`·`LLM_QA_EFFORT`로 바꾼다. ChatGPT 로그인으로 이 모델을 쓰려면 Codex CLI 0.164.0 이상이 필요하다(0.155.1은 "지원하지 않는 모델"로 거절된다).
+  - 결과는 `--output-schema scripts/llm-qa/result.schema.json`으로 받는다: `{ summary, scenarios: [{ id, title, criterion, steps, expected, actual, verdict: pass|fail|blocked, evidence }], suggestions: [{ criterion, code }] }`.
+- 브라우저: Playwright MCP 0.0.83, Chromium headless, `--isolated --allowed-origins http://localhost:8091`(테스트 환경 밖 요청 차단), 1280×800, 스크린샷은 결과 폴더로.
+- 로그인: `seed.mjs`가 테스트 토큰으로 편집 권한 계정을 만들어 쿠키를 storage state 파일로 넘긴다. 토큰은 모델에 가지 않는다. 실행마다 새로 만든다(모델이 로그아웃하면 세션이 끊긴다. 시험에서 실제로 일어남).
+
+**다음 단계**에서 세 컨테이너로 나눠 LLM이 인터넷과 비밀에 동시에 닿지 않게 한다.
 
 | 컨테이너 | 네트워크 | 가진 것 |
 |---|---|---|
-| `qa-agent`(Codex CLI) | 인터넷(OpenAI) | 요청서(읽기 전용), Codex 로그인 사본(tmpfs). 셸은 `--sandbox read-only`라 네트워크·쓰기가 막힌다 |
-| `qa-browser`(Playwright MCP, chromium) | 테스트 환경 내부 망만(`internal: true`, 인터넷 없음) | 테스트 환경 웹 주소만 허용(`--allowed-origins`) |
-| `qa-mcp`(우리 MCP, Node) | 테스트 환경 내부 망만 | `TEST_AUTH_TOKEN`. 도구로 역할별 테스트 로그인(`login_as`), 예제 데이터 넣기(`seed_problem`), 결과 기록(`report_scenario`, 스크린샷 저장)만 준다. 토큰 값은 모델에 보이지 않는다 |
+| `qa-agent`(Codex CLI, 버전 고정) | 인터넷(OpenAI) | 요청서(읽기 전용), Codex 로그인 사본(tmpfs) |
+| `qa-browser`(Playwright MCP) | 테스트 환경 내부 망만(`internal: true`) | 테스트 환경 웹 주소만 허용 |
+| `qa-mcp`(우리 MCP) | 테스트 환경 내부 망만 | 테스트 토큰. 역할별 로그인·예제 데이터 도구만 준다 |
 
-- Codex 실행 형태는 `generate.sh`와 같다: `codex exec --ignore-user-config --sandbox read-only --ephemeral -c approval_policy="never"`. MCP 서버로 `qa_browser`와 `qa`를 HTTP(SSE)로 붙인다. 둘 다 다른 컨테이너라 stdio로 띄우지 않는다.
-  - 모델: 기본 `gpt-6.1-terra`, 추론 강도 `medium`. `LLM_QA_MODEL`·`LLM_QA_EFFORT`로 바꾼다. ChatGPT 로그인으로 이 모델을 쓰려면 Codex CLI 0.164.0 이상이 필요하다(0.155.1은 "지원하지 않는 모델"로 거절된다). `qa-agent` 이미지에서 CLI 버전을 고정한다.
-  - `--ignore-user-config`: 사용자 `config.toml`의 모델·MCP 서버·hook을 읽지 않는다. 로그인(`auth.json`)만 쓴다. 시험에서 이 옵션 없이 돌리자 개발 PC의 다른 MCP 서버(데스크톱 제어 포함)까지 불러왔다.
-  - 로그인 상태는 실행마다 새로 만든다. 모델이 로그아웃 시나리오를 돌리면 서버에서 세션이 끊기므로, 다음 실행에 같은 쿠키를 쓰면 비회원으로 돈다(시험에서 실제로 일어남).
-- 프롬프트 줄거리:
-  1. `qa.guide`를 읽는다. 저장소의 `docs/quality/llm-qa-guide.md`를 서버가 준다. 0009처럼 지침을 고치면 모델과 상관없이 함께 적용된다.
-  2. 요청서의 완료 기준과 변경 파일로 시나리오 3~8개를 만든다. 정상 경로 하나, 경계·오류 하나, 권한 하나, 휴대폰 폭 하나를 포함한다.
-  3. 시나리오마다 브라우저로 실행하고 `report_scenario`로 기록한다. 재현 단계는 다른 사람이 그대로 따라 할 수 있게 연 주소·누른 요소·입력값·화면 크기를 적는다(시험에서 "라이트 모드 버튼을 누른다"처럼 주소 없는 단계가 나왔다). 기록 형식은 `{ id, title, criterion, steps, expected, actual, verdict: pass|fail|blocked, screenshots }`이다.
-  4. 자동화가 없는 완료 기준은 Playwright 테스트 초안을 `report_suggestion`으로 남긴다.
+- 지침(`scripts/llm-qa/guide.md`) 줄거리:
+  1. 요청서로 시나리오 4~8개를 정한다. 정상 경로 먼저, 상태 변화·환경 차이(기기 테마·390px·키보드)·오류 입력 가운데 PR과 관계있는 것을 더한다. 브라우저로 확인할 수 없는 기준(문서·소스)은 시나리오로 만들지 않는다.
+  2. 시나리오마다 실행하고 스크린샷·콘솔 오류·실패한 요청·측정값을 근거로 남긴다. 추측으로 pass를 주지 않는다.
+  3. 재현 단계는 다른 사람이 그대로 따라 할 수 있게 연 주소·화면 폭·누른 요소·입력값을 적는다(시험에서 "라이트 모드 버튼을 누른다"처럼 주소 없는 단계가 나왔다).
+  4. 자동화가 없는 완료 기준은 Playwright 테스트 초안을 남긴다.
 - 프롬프트 인젝션 대비:
   - PR 본문·코드·화면 글자는 데이터로만 다루라고 지침에 적는다.
   - 더 중요한 장치는 구조다. 모델이 할 수 있는 일이 테스트 환경 안의 클릭과 기록뿐이고, 가진 비밀(Codex 로그인)을 내보낼 길(셸 네트워크·브라우저 인터넷)이 막혀 있다.
-  - 결과 댓글은 작업자가 정해진 틀로 만든다. 모델이 쓴 글은 인용 블록 안에 길이를 제한해 넣고 멘션(@)을 지운다.
+  - 결과 댓글·이슈는 `scripts/llm-qa-report.mjs`가 정해진 틀로 만든다. 모델이 쓴 글은 인용 블록 안에 길이를 제한해 넣고 멘션(@)을 지운다.
 
 ### 판정과 결과
 
@@ -108,12 +113,12 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 
   | 상태 | 경우 | 설명 예 |
   |---|---|---|
-  | `pending` | 요청서를 만들었거나 작업자가 실행 중 | `대기 중` · `실행 중(3/6)` |
+  | `pending` | pahidc에서 실행 중 | `실행 중` |
   | `success` | 모든 시나리오 통과 | `통과 6 · 실패 0 · 확인 못 함 0` |
   | `success` | 실패는 없고 확인 못 한 시나리오가 있음 | `통과 4 · 실패 0 · 확인 못 함 2 — 댓글 확인` |
-  | `success` | 대상 아님, 오늘 한도 초과 | `대상 아님(문서만 변경)` · `확인 못 함: 오늘 한도 초과` |
+  | `success` | 대상 아님(화면·API 코드 변경 없음) | `대상 아님(화면·API 코드 변경 없음)` |
   | `failure` | 실패가 하나라도 있음 | `통과 3 · 실패 1 · 확인 못 함 0` |
-  | `error` | 작업자·테스트 환경 오류. `/llm-qa`로 다시 돌린다 | `오류: 테스트 환경이 뜨지 않음` |
+  | `error` | 접속 설정 없음, 메모리 부족, 테스트 환경·QA 명령 오류. Actions에서 다시 실행한다 | `오류: 테스트 환경이 뜨지 않았습니다.` |
 
   - 확인 못 함이 섞인 `success`는 PR 댓글 맨 위에 "– 확인 못 한 시나리오 n개"를 따로 적어 사람이 보게 한다.
   - 상태 링크(`target_url`)는 PR 댓글로 건다.
@@ -126,11 +131,11 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
   - 실패 상세: 재현 단계, 기대값과 실제값
   - 테스트 초안: 접어 두기
 - 스크린샷·초안·실행 로그(비밀 가린 것)는 `qa-reports` 브랜치 `llm-qa/pr-<n>/<sha>/`에 둔다. 기존 QA 보고서와 같은 보관 방식이다.
-- 다음 PR의 QA 보고서(`qa-report.yml`)가 `llm-qa` 결과를 한 절로 묶어 보여 준다.
+- QA 보고서(`qa-report.yml`)에 반영한다. LLM QA가 결과(`llm-qa` 아티팩트)를 남기고 끝나면 보고서 워크플로가 다시 돌아, 같은 커밋의 PR CI 결과에 "LLM e2e QA (advisory)" 절(댓글 5장, PDF 6.4)과 측정치 한 줄을 더한 **새 판**(0.x를 하나 올림)을 만든다. 개정 이력에는 "PR stage report + LLM e2e QA (CI #…, LLM QA #…)"로 남고, 같은 CI·LLM QA 실행을 다시 돌리면 판 번호를 유지한다. 참고 체크라 보고서 판정(Verdict)은 바꾸지 않고, LLM QA를 끝내지 못했으면 "계획 대비 차이"에 적는다.
 
 ### 실패하면 이슈를 올린다
 
-실패(`fail`) 시나리오마다 작업자가 GitHub 이슈를 하나씩 만든다. PR 댓글은 다음 커밋에서 덮이지만, 이슈는 결함을 고칠 때까지 남는다.
+실패(`fail`) 시나리오마다 `llm-qa.yml`이 GitHub 이슈를 하나씩 만든다. PR 댓글은 다음 커밋에서 덮이지만, 이슈는 결함을 고칠 때까지 남는다.
 
 - 제목: `bug(qa): <시나리오 제목> — PR #<n> LLM QA 실패`. 레이블은 `bug`·`qa:llm`. 본문 끝에 원래 PR을 연결하되 `Closes`는 쓰지 않는다.
 - 본문은 AGENTS.md 이슈 형식(`## 배경`/`## 범위`/`## 완료 기준`)에 아래를 더한다. 작업자가 정해진 틀로 채우고, 모델이 쓴 글은 인용 블록에 넣는다. 길이를 자르고 `@`·`#숫자`가 멘션·자동 연결이 되지 않게 바꾼다.
@@ -139,7 +144,7 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
   - **기대 결과 / 실제 결과**
   - **근거**: 스크린샷 링크(`qa-reports`), 콘솔 오류, 실패한 네트워크 요청, 측정값(색·크기·대비)
   - **완료 기준**: 재현 단계에서 기대 결과가 나오고, 재현 테스트가 CI에서 통과한다
-- 같은 결함을 다시 올리지 않는다. PR·시나리오 제목·기대 결과로 지문을 만들어 본문에 숨겨 두고(`<!-- llm-qa:<지문> -->`), 열린 이슈에 같은 지문이 있으면 새로 만들지 않고 댓글로 "다시 실패(SHA)"만 더한다.
+- 같은 결함을 다시 올리지 않는다. PR 번호와 시나리오 제목으로 지문을 만들어 본문에 숨겨 두고(`<!-- llm-qa:<지문> -->`), 열린 이슈에 같은 지문이 있으면 새로 만들지 않고 댓글로 "다시 실패(SHA)"만 더한다.
 - 다음 실행에서 같은 시나리오가 통과하면 이슈에 "통과(SHA)" 댓글을 남긴다. 닫는 것은 사람이 한다.
 - 오탐이면 사람이 `qa:false-positive` 레이블을 붙여 닫는다. 이 레이블 수가 거짓 실패율 지표가 된다.
 - 한 실행에서 이슈는 최대 5개까지 만든다. 나머지는 PR 댓글에만 둔다(폭주 방지).
@@ -147,32 +152,26 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 
 ### 다시 돌리기
 
-- PR 댓글 `/llm-qa`(작성자·관리자만) 또는 `qa:llm` 레이블을 다시 붙이면 같은 SHA로 재실행한다.
+- Actions 탭에서 `LLM QA` 워크플로를 PR 번호로 실행한다(`workflow_dispatch`, 쓰기 권한이 있는 사람만). 작성자·레이블·경로 조건 없이 그 PR의 최신 커밋으로 돈다.
+- PR 댓글 `/llm-qa`로 다시 돌리기는 다음 단계다.
 
 ## 단계
 
-1. **작업자와 기본 체크**
-   - `llm-qa-request.yml`, `scripts/llm-qa/worker.sh`, 테스트 환경 띄우기, 변경 파일 → @R 태그 → 해당 e2e만 실행, PR 댓글·상태.
-   - LLM은 아직 없다. 경로·권한·자원 제한을 먼저 검증한다.
-2. **LLM QA**
-   - `qa-agent`·`qa-browser`·`qa-mcp` 컨테이너, 지침(`llm-qa-guide.md`), 시나리오·스크린샷·초안.
-   - #171의 CSP 문제(사람이 찾은 결함)를 재현 사례로 써서, 고치기 전 커밋(`9abf426`)에서 LLM이 찾는지 확인한다.
-   - 2026-11-03 개발 PC 시험(같은 Docker 테스트 환경, Codex 0.164.0 + Playwright MCP 0.0.83, 컨테이너 분리 없이 `--allowed-origins`로 테스트 환경만 허용, 로그인은 쿠키 파일로 주고 토큰은 모델에 주지 않음). 결과는 아래 표와 같다.
+1. **루프(이번)**: `llm-qa.yml`, `scripts/llm-qa/`(QA 명령·설치·seed·지침·결과 형식), `scripts/llm-qa-report.mjs`(요청서·댓글·상태·이슈, 테스트 `scripts/llm-qa-report.test.mjs`).
+   - 개발 PC 시험(2026-11-03): #171의 CSP 문제(사람이 찾은 결함)를 고치기 전 커밋(`9abf426`)에서 LLM이 찾는지 확인했다. 같은 Docker 테스트 환경, Codex 0.164.0 + Playwright MCP 0.0.83.
 
      | 모델 | 시나리오 | CSP 결함 | 그 밖 | 토큰 |
      |---|---|---|---|---|
-     | `gpt-6-astra`(기본) | 8개: 통과 4 · 실패 3 · 확인 못 함 1 | 찾음(첫 테마·새로고침 유지, 콘솔 CSP 오류 근거) | 휴대폰에서 테마 버튼이 사라졌다는 실패는 오탐(사용자 메뉴로 옮김). 터치 기기 버튼 32~40px 측정은 참고할 만함 | 약 4.8만 |
-     | `gpt-6.1-terra` | 6개: 통과 2 · 실패 2 · 확인 못 함 2 | 찾음(같은 근거) | 오탐 없음. 휴대폰 사용자 메뉴의 테마 항목까지 확인. 실행 약 1분 | 약 7만 |
+     | `gpt-6-astra` | 8개: 통과 4 · 실패 3 · 확인 못 함 1 | 찾음(첫 테마·새로고침 유지, 콘솔 CSP 오류 근거) | 휴대폰에서 테마 버튼이 사라졌다는 실패는 오탐(사용자 메뉴로 옮김) | 약 4.8만 |
+     | `gpt-6.1-terra` | 6개: 통과 2 · 실패 2 · 확인 못 함 2 | 찾음(같은 근거) | 오탐 없음. 실행 약 1분 | 약 7만 |
 
-     - 두 모델 모두 "DESIGN.md·토큰 치환" 같은 저장소 기준은 브라우저로 확인할 수 없어 `blocked`로 남겼다. 지침에서 브라우저로 확인할 수 없는 기준은 시나리오로 만들지 말고 요약에만 적게 한다.
-     - 실패 2건으로 이슈 본문 초안을 만들어 형식을 확인했다(실제로 올리지는 않음. 결함은 #171에서 이미 고침).
-3. **보조안·고도화**
-   - pahidc가 응답하지 않으면 Actions에서 GitHub Models로 "완료 기준 → 시나리오 계획"만 만들어 댓글로 남긴다.
-   - 거짓 실패율 지표, 필수 체크 승격 검토.
+   - pahidc 시험: PR #181(이 PR) 문서에 적는다.
+2. **격리·운영**: 세 컨테이너 분리, 하루 한도(`LLM_QA_DAILY_MAX`), `/llm-qa` 댓글 재실행, 기존 e2e 중 변경 파일에 걸린 @R 태그만 먼저 돌리기.
+3. **보조안·고도화**: pahidc가 응답하지 않으면 Actions에서 GitHub Models로 "완료 기준 → 시나리오 계획"만 댓글로 남긴다. 거짓 실패율 지표, 필수 체크 승격 검토.
 
 ## 결과
 
-- 새 비밀: `/etc/solveline/llm-qa.env`(fine-grained GitHub 토큰). GitHub Environment에 넣지 않고 pahidc에만 둔다. 이 저장소의 워크플로는 이 토큰을 모른다.
+- 새 비밀(저장소 secrets): `LLM_QA_SSH_KEY`(QA 강제 명령 전용 SSH 비공개 키), `LLM_QA_SSH_HOST`. 새 변수: `LLM_QA_SSH_KNOWN_HOSTS`. pahidc에는 GitHub 토큰을 두지 않는다.
 - 새 상태 체크 `llm-qa`(필수 아님), 새 레이블 `qa:llm`·`qa:false-positive`. 실패하면 이슈가 자동으로 생긴다.
-- pahidc에 QA 전용 compose 프로젝트(`solveline-qa-*`)가 잠깐 뜬다. 운영 compose(`solveline-production`)와 네트워크·볼륨을 나눈다. 테스트 환경 데이터는 tmpfs라 남지 않는다.
+- pahidc에 QA 전용 compose 프로젝트(`solveline-qa`, 127.0.0.1:8091)가 잠깐 뜬다. 운영 compose(`solveline-production`)와 네트워크·볼륨을 나눈다. 테스트 환경 데이터는 tmpfs라 남지 않는다.
 - 사용자 코드 실행은 여전히 테스트 환경의 runner 컨테이너에서만 한다(샌드박스 규칙 그대로).

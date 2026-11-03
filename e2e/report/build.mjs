@@ -18,7 +18,7 @@ mkdirSync(out, { recursive: true });
 
 const model = loadReport(input, repo);
 const context = existsSync(join(input, 'context.json')) ? JSON.parse(readFileSync(join(input, 'context.json'), 'utf8')) : {};
-const links = { run: context.run?.url, report: context.reportRunUrl };
+const links = { run: context.run?.url, report: context.reportRunUrl, llm: context.llmRunUrl };
 const name = `${model.id}-v${model.version}`;
 
 writeFileSync(join(out, 'comment.md'), toMarkdown(model, links));
