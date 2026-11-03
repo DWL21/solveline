@@ -18,6 +18,7 @@ import {
   FolderInput,
   Problem,
   ProblemInput,
+  CatalogProblem,
   ProblemPatch,
   ProblemSummary,
   HiddenCases,
@@ -46,7 +47,19 @@ import {
   DailyInbox,
   DailySettings,
   DailySettingsInput,
-  DailyIssueInput,
+  DAILY_AUTHOR_GUIDE,
+  DAILY_BANK_PATH,
+  DAILY_TOPICS,
+  DailyBankCall,
+  DailyBankTools,
+  DailyProblemDetail,
+  DailyProblemInput,
+  DailyProblemStatus,
+  DailyProblemSummary,
+  DailySaveResult,
+  type DailyBankToolName,
+  type DailyProblemData,
+  type DailyVerifyResult,
   DailyPauseInput,
   DailySendResult,
   DailySubscribeInput,
@@ -71,7 +84,7 @@ import { isTerminal, SubmissionStore } from './submissions.ts';
 import { buildCatalog, CatalogPublisher } from './catalog.ts';
 import { sqliteSql, type Sql } from './sql.ts';
 import type { ObjectStore } from '@solveline/judge/r2';
-import { confirmMail, DailyStore, escapeHtml, issueMail, normalizeEmail, runDailyTick, verifyWebhook } from './daily.ts';
+import { confirmMail, DailyStore, escapeHtml, kstDate, normalizeEmail, problemMail, runDailyTick, sendFirstProblem, verifyWebhook } from './daily.ts';
 import { MailSendError, ResendSender, type MailSender } from './mail-sender.ts';
 import { log } from './redact.ts';
 import { decodeJson, encodeJson, randomInt, sha256Hex } from './crypto.ts';
@@ -138,7 +151,6 @@ async function readJson<T extends z.ZodType>(c: Context, schema: T): Promise<z.o
   }
 }
 
-const ISSUE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** 메일 링크가 여는 작은 안내 화면. 메일 보안 검사가 링크를 미리 열어도 처리되지 않도록 action이 있으면 버튼을 눌러야 한다 */
 const dailyPage = (title: string, message: string, action?: { url: string; label: string }) =>
@@ -163,7 +175,7 @@ export function createApp(deps: AppDeps) {
   const signupSettings = new SignupSettingsStore(sql);
   const catalogSource = async () => ({ problems: await problems.catalogProblems(), folders: await folders.list(null), collections: await collections.list() });
   const catalog = deps.objectStore
-    ? new CatalogPublisher(deps.objectStore, catalogSource, { problem: (id) => problems.catalogProblem(id), collections: () => collections.list() })
+    ? new CatalogPublisher(deps.objectStore, catalogSource, { problem: (id) => problems.publicCatalogProblem(id), collections: () => collections.list() })
     : null;
   const configuredGoogle = () => (config.google ? googleClient(config.google.clientId, config.google.clientSecret) : null);
   const google = deps.google === undefined ? configuredGoogle() : deps.google;
@@ -271,9 +283,16 @@ export function createApp(deps: AppDeps) {
 
   // 읽기 전용이라 메일 스캐너가 먼저 열어도 바뀌는 것이 없다
   app.get('/api/public/daily/hint', async (c) => {
-    const issue = await daily.issueByHintToken(c.req.query('token') ?? '');
-    if (!issue?.hint) return c.html(dailyPage('문제 힌트', '볼 수 있는 내용이 없어요.'), 404);
-    return c.html(dailyPage(`${escapeHtml(issue.title)} 힌트`, escapeHtml(issue.hint).replace(/\n/g, '<br>')));
+    const problem = await daily.problemByHintToken(c.req.query('token') ?? '');
+    if (!problem?.hint) return c.html(dailyPage('문제 힌트', '볼 수 있는 내용이 없어요.'), 404);
+    return c.html(dailyPage(`${escapeHtml(problem.title)} 힌트`, escapeHtml(problem.hint).replace(/\n/g, '<br>')));
+  });
+
+  /** 일일 미니 문제는 카탈로그(목록)에 없으므로 링크로 연 문제 내용을 여기서 준다. id는 추측할 수 없는 UUID다 */
+  app.get('/api/public/daily/problems/:id', async (c) => {
+    const id = c.req.param('id');
+    const p = (await daily.isBankProblem(id)) ? await problems.catalogProblem(id) : null;
+    return p ? ok(c, CatalogProblem, p) : fail(c, 404, 'not_found', '없는 문제입니다.');
   });
 
   app.post('/api/public/daily/webhook/resend', async (c) => {
@@ -511,11 +530,88 @@ export function createApp(deps: AppDeps) {
     return next();
   });
 
-  // ─── 일일 메일 관리 ───
-  const issueDateOf = (c: Context) => {
-    const date = c.req.param('date') ?? '';
-    return ISSUE_DATE.test(date) ? date : null;
+  // ─── 일일 미니 문제 은행: 관리자 화면과 에이전트(MCP)가 같은 길로 만든다 ───
+  const toProblemInput = (p: DailyProblemData): ProblemInput => ({
+    title: p.title,
+    folderId: null,
+    description: p.description,
+    mode: p.mode,
+    params: p.params,
+    timeLimitMs: p.timeLimitMs,
+    cases: p.cases,
+    language: p.referenceSolution.language,
+    code: p.starterCode,
+    starterCode: p.starterCode,
+    myCases: [],
+    memo: '',
+    lastSubmission: null,
+  });
+
+  /** 기준 풀이로 예제와 채점 케이스를 모두 채점한다. 제출 기록은 남기지 않는다(결과 콜백은 모르는 id라 무시된다) */
+  const verifyDaily = async (p: DailyProblemData): Promise<DailyVerifyResult> => {
+    const id = `verify-${crypto.randomUUID()}`;
+    let s: JudgeStatus;
+    try {
+      s = await judge.submit({ id, kind: 'submit', language: p.referenceSolution.language, mode: p.mode, code: p.referenceSolution.code, cases: p.cases, testsetHash: null, timeLimitMs: p.timeLimitMs }, 25_000);
+      if (!isTerminal(s.status)) s = (await judge.status(id, 25_000)) ?? s;
+    } catch (e) {
+      return { ok: false, score: null, failures: [], error: e instanceof JudgeError ? e.message : '채점 서버에 닿지 않았어요.' };
+    }
+    if (!isTerminal(s.status)) return { ok: false, score: null, failures: [], error: '채점이 끝나지 않았어요. 잠시 뒤 다시 시도해 주세요.' };
+    const expected = new Map(p.cases.map((x) => [x.id, x.expected]));
+    const cut = (v: string, n = 500) => v.slice(0, n);
+    const failures = !s.result
+      ? []
+      : !s.result.compile.ok
+        ? [{ id: 'compile', status: 'error', expected: '', actual: null, stderr: cut(s.result.compile.output, 1500) }]
+        : s.result.results.filter((r) => r.status !== 'pass').slice(0, 10).map((r) => ({ id: r.id, status: r.status, expected: cut(expected.get(r.id) ?? ''), actual: r.actual === null ? null : cut(r.actual), stderr: cut(r.stderr) }));
+    return { ok: s.score === 100, score: s.score, failures, error: s.error };
   };
+
+  /** 검증을 통과해야 저장한다. 채점 케이스는 judge 테스트셋으로, 문제와 은행 행은 한 번에 쓴다 */
+  const saveDaily = async (id: string | null, p: DailyProblemData, source: string): Promise<DailySaveResult> => {
+    if (id && !(await daily.isBankProblem(id))) return { saved: false, id, verify: { ok: false, score: null, failures: [], error: '없는 문제예요.' } };
+    const verify = await verifyDaily(p);
+    if (!verify.ok) return { saved: false, id, verify };
+    const hiddenRef = await judge.putTestset(p.cases.filter((x) => x.hidden));
+    const meta = { topic: p.topic, level: p.level, hint: p.hint, status: p.status };
+    if (id) {
+      await problems.updateShared(id, toProblemInput(p), hiddenRef);
+      await daily.updateBank(id, meta, now());
+      return { saved: true, id, verify };
+    }
+    const created = await problems.createShared(toProblemInput(p), hiddenRef, (newId) => [daily.addToBankStmt(newId, { ...meta, source }, now())]);
+    return { saved: true, id: created, verify };
+  };
+
+  /** 문제은행 도구 하나를 실행한다(MCP 도구와 같은 이름·입력) */
+  const bankTool = async (tool: DailyBankToolName, args: unknown, source: string): Promise<{ data: unknown } | { error: string }> => {
+    const parsed = DailyBankTools[tool].input.safeParse(args ?? {});
+    if (!parsed.success) return { error: z.prettifyError(parsed.error) };
+    const a = parsed.data as Record<string, unknown>;
+    switch (tool) {
+      case 'bank_guide':
+        return { data: { guide: DAILY_AUTHOR_GUIDE, topics: DAILY_TOPICS } };
+      case 'bank_overview':
+        return { data: { cells: await daily.bankCells(), topics: DAILY_TOPICS, levels: [1, 2, 3, 4, 5] } };
+      case 'list_problems':
+        return { data: await daily.listProblems(a as { topic?: string; status?: string; limit: number }) };
+      case 'get_problem': {
+        const p = await daily.problem(a.id as string);
+        return p ? { data: p } : { error: '없는 문제예요.' };
+      }
+      case 'verify_problem':
+        return { data: await verifyDaily(a as DailyProblemData) };
+      case 'create_problem':
+        return { data: await saveDaily(null, a as DailyProblemData, source) };
+      case 'update_problem':
+        return { data: await saveDaily(a.id as string, a.problem as DailyProblemData, source) };
+      case 'set_status':
+        return (await daily.setStatus(a.id as string, a.status as DailyProblemStatus, now())) ? { data: { updated: true } } : { error: '없는 문제예요.' };
+    }
+  };
+
+  // ─── 일일 메일 관리 ───
   const mailFailed = (c: Context, e: unknown) => {
     log.error('[daily] 관리자 발송 실패', e);
     return fail(c, 502, 'mail_failed', e instanceof MailSendError ? `메일을 보내지 못했어요(${e.message}).` : '메일을 보내지 못했어요.');
@@ -535,28 +631,49 @@ export function createApp(deps: AppDeps) {
     return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
   });
 
-  app.put('/api/admin/daily/issues/:date', async (c) => {
-    const date = issueDateOf(c);
-    const input = await readJson(c, DailyIssueInput);
-    if (!date || !input) return fail(c, 400, 'invalid_request', '회차 내용을 확인해 주세요.');
-    await daily.saveIssue(date, input, now());
+  app.get('/api/admin/daily/problems', async (c) => {
+    const topic = c.req.query('topic') || undefined;
+    const status = c.req.query('status') || undefined;
+    return ok(c, z.array(DailyProblemSummary), await daily.listProblems({ topic, status, limit: 200 }));
+  });
+
+  app.get('/api/admin/daily/problems/:id', async (c) => {
+    const p = await daily.problem(c.req.param('id'));
+    return p ? ok(c, DailyProblemDetail, p) : fail(c, 404, 'not_found', '없는 문제예요.');
+  });
+
+  app.post('/api/admin/daily/problems', async (c) => {
+    const input = await readJson(c, DailyProblemInput);
+    if (!input) return fail(c, 400, 'invalid_request', '문제 형식을 확인해 주세요.');
+    return ok(c, DailySaveResult, await saveDaily(null, input, 'admin'));
+  });
+
+  app.put('/api/admin/daily/problems/:id', async (c) => {
+    const input = await readJson(c, DailyProblemInput);
+    if (!input) return fail(c, 400, 'invalid_request', '문제 형식을 확인해 주세요.');
+    return ok(c, DailySaveResult, await saveDaily(c.req.param('id'), input, 'admin'));
+  });
+
+  app.put('/api/admin/daily/problems/:id/status', async (c) => {
+    const input = await readJson(c, z.object({ status: DailyProblemStatus }));
+    if (!input) return fail(c, 400, 'invalid_request', '상태를 확인해 주세요.');
+    if (!(await daily.setStatus(c.req.param('id'), input.status, now()))) return fail(c, 404, 'not_found', '없는 문제예요.');
     return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
   });
 
-  app.delete('/api/admin/daily/issues/:date', async (c) => {
-    const date = issueDateOf(c);
-    if (!date || !(await daily.deleteIssue(date))) return fail(c, 409, 'issue_locked', '없는 회차이거나 이미 발송 기록이 있어요.');
+  app.delete('/api/admin/daily/problems/:id', async (c) => {
+    if (!(await daily.deleteProblem(c.req.param('id')))) return fail(c, 409, 'problem_locked', '없는 문제이거나 이미 받은 사람이 있어요. 받은 문제는 그만 보내기(retired)로 바꿔 주세요.');
     return ok(c, DailyAdminOverview, await daily.overview(dailyConfig, now()));
   });
 
   // 시험 발송: 지정한 주소로만 보내고 발송 기록을 남기지 않는다
-  app.post('/api/admin/daily/issues/:date/test', async (c) => {
+  app.post('/api/admin/daily/problems/:id/test', async (c) => {
     if (!dailyConfig || !mailSender) return fail(c, 503, 'daily_unavailable', '발송 설정이 없어요.');
-    const date = issueDateOf(c);
     const input = await readJson(c, DailyTestInput);
-    const issue = date ? await daily.issue(date) : undefined;
-    if (!input || !issue) return fail(c, 400, 'invalid_request', '회차와 주소를 확인해 주세요.');
-    const mails = input.emails.map((to) => issueMail(issue, { from: dailyConfig.from, to: normalizeEmail(to), webOrigin: config.webOrigin, test: true }));
+    const problem = await daily.mailProblem(c.req.param('id'));
+    if (!input || !problem) return fail(c, 400, 'invalid_request', '문제와 주소를 확인해 주세요.');
+    const date = kstDate(now());
+    const mails = input.emails.map((to) => problemMail(problem, { from: dailyConfig.from, to: normalizeEmail(to), webOrigin: config.webOrigin, date, test: true }));
     try {
       await mailSender.sendBatch(mails, `daily-test-${crypto.randomUUID()}`);
     } catch (e) {
@@ -565,11 +682,10 @@ export function createApp(deps: AppDeps) {
     return ok(c, DailySendResult, { outcome: 'test', sent: mails.length, failed: 0, remaining: 0 });
   });
 
-  // 지금 보내기: cron을 기다리지 않고 그날 회차를 한 묶음 보낸다. 실패 건도 다시 시도한다
-  app.post('/api/admin/daily/issues/:date/send', async (c) => {
+  // 지금 보내기: cron을 기다리지 않고 오늘 문제를 한 묶음 보낸다. 실패 건도 다시 시도한다
+  app.post('/api/admin/daily/send', async (c) => {
     if (!dailyConfig || !mailSender) return fail(c, 503, 'daily_unavailable', '발송 설정이 없어요.');
-    const date = issueDateOf(c);
-    if (!date) return fail(c, 400, 'invalid_request', '날짜를 확인해 주세요.');
+    const date = kstDate(now());
     await daily.retryFailed(date);
     return ok(c, DailySendResult, await runDailyTick({ sql, sender: mailSender, from: dailyConfig.from, webOrigin: config.webOrigin, now: now(), date }));
   });
@@ -695,6 +811,16 @@ export function createApp(deps: AppDeps) {
     const result = await daily.saveSettings(user, input, dailyConfig, now());
     if (result === 'full') return fail(c, 409, 'daily_full', '메일 구독 인원이 다 찼어요. 인박스로는 계속 받을 수 있어요.');
     if (result === 'blocked') return fail(c, 409, 'daily_mail_blocked', '반송이나 스팸 신고가 있었던 주소라 메일을 보낼 수 없어요. 인박스로는 계속 받을 수 있어요.');
+    if (input.subscribed && (await daily.firstTime(user.id))) {
+      // 처음 구독한 날은 다음 아침을 기다리지 않고 그날 문제를 바로 준다. 메일이 실패해도 구독과 인박스는 유지한다
+      const sent = input.mail && dailyConfig && mailSender
+        ? await sendFirstProblem({ sql, sender: mailSender, from: dailyConfig.from, webOrigin: config.webOrigin, now: now(), userId: user.id }).catch((e) => {
+            log.error('[daily] 첫 문제 발송 실패', e);
+            return false;
+          })
+        : false;
+      if (!sent) await daily.ensurePick(user.id, user.id, kstDate(now()), now());
+    }
     return ok(c, DailySettings, await daily.settings(user, dailyConfig));
   });
 
@@ -918,6 +1044,22 @@ export function createApp(deps: AppDeps) {
     const st = await judge.cancel(id);
     const s = st ? await record(st) : await submissions.get(id);
     return ok(c, Submission, s!);
+  });
+
+  /** pahidc의 문제은행 MCP 서버가 서명해 부르는 도구 호출. 서명 비밀은 judge와 같다(외부에 열린 MCP는 없다) */
+  app.post(DAILY_BANK_PATH, async (c) => {
+    const body = await c.req.text();
+    if (!config.judgeSecret || !(await verifyJudge(config.judgeSecret, (n) => c.req.header(n), 'POST', DAILY_BANK_PATH, body, now())))
+      return fail(c, 401, 'bad_signature', '서명이 올바르지 않습니다.');
+    let call: ReturnType<typeof DailyBankCall.safeParse>;
+    try {
+      call = DailyBankCall.safeParse(JSON.parse(body));
+    } catch {
+      return fail(c, 400, 'invalid_request', '요청 형식이 올바르지 않습니다.');
+    }
+    if (!call.success) return fail(c, 400, 'invalid_request', '요청 형식이 올바르지 않습니다.');
+    const result = await bankTool(call.data.tool, call.data.args, `agent:${call.data.agent}`);
+    return 'error' in result ? fail(c, 400, 'invalid_args', result.error) : c.json({ data: result.data });
   });
 
   /** judge가 끝난 결과를 보낸다(서명 확인). 같은 결과를 여러 번 받아도 한 번만 반영한다. */

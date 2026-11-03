@@ -1,6 +1,6 @@
-import { useState, type ReactNode, type SubmitEvent } from 'react';
+import { useState, type SubmitEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DailyAdminOverview, DailyIssue, DailyIssueInput, DailySubscriber } from '@solveline/shared';
+import { DAILY_TOPICS, type DailyAdminOverview, type DailyProblemInput, type DailyProblemStatus, type DailySaveResult, type DailySubscriber } from '@solveline/shared';
 import { ApiError, adminApi, qk } from '../lib/api.ts';
 import { LinesSkeleton } from './Loading.tsx';
 
@@ -22,175 +22,274 @@ const STATUS_COLOR: Record<DailySubscriber['status'], string> = {
   complained: 'text-bad',
 };
 
-type Draft = DailyIssueInput & { issueDate: string };
+const PROBLEM_STATUS: Record<DailyProblemStatus, string> = { ready: '발송 중', draft: '작성 중', retired: '그만 보냄' };
 
-const emptyDraft = (today: string): Draft => ({ issueDate: today, problemId: '', title: '', body: '', difficulty: '쉬움', hint: '', status: 'draft' });
+/** 새 문제 입력 예시. 에이전트(MCP create_problem)와 같은 형식이다 */
+const TEMPLATE: DailyProblemInput = {
+  topic: '해시',
+  level: 1,
+  title: '두 번째로 먼저 나온 수',
+  description:
+    '정수 배열 `numbers`를 앞에서부터 볼 때, 두 번째로 나타나는 순간이 가장 빠른 수를 반환한다. 그런 수가 없으면 -1을 반환한다.\n\n제한\n- 1 ≤ numbers의 길이 ≤ 100,000\n- -10^9 ≤ numbers[i] ≤ 10^9',
+  mode: 'function',
+  params: ['numbers'],
+  timeLimitMs: 2000,
+  cases: [
+    { id: 'e1', args: ['[3, 1, 3, 1]'], stdin: '', expected: '3', hidden: false },
+    { id: 'h1', args: ['[1, 2, 3]'], stdin: '', expected: '-1', hidden: true },
+    { id: 'h2', args: ['[5, 5]'], stdin: '', expected: '5', hidden: true },
+    { id: 'h3', args: ['[2, 1, 1, 2]'], stdin: '', expected: '1', hidden: true },
+  ],
+  starterCode: { java: 'class Solution {\n    public int solution(int[] numbers) {\n        return 0;\n    }\n}\n', python: 'def solution(numbers):\n    return 0\n' },
+  referenceSolution: { language: 'python', code: 'def solution(numbers):\n    seen = set()\n    for n in numbers:\n        if n in seen:\n            return n\n        seen.add(n)\n    return -1\n' },
+  hint: '지금까지 본 수를 빠르게 찾을 수 있는 자료구조를 떠올려 보세요.',
+  status: 'ready',
+};
 
-const toDraft = (i: DailyIssue): Draft => ({ issueDate: i.issueDate, problemId: i.problemId, title: i.title, body: i.body, difficulty: i.difficulty, hint: i.hint, status: i.status });
-
-/** 관리자 모드의 일일 메일 탭: 발송 상태, 회차 작성·시험 발송, 구독자 관리 */
+/** 관리자 모드의 일일 메일 탭: 발송 상태, 문제은행(직접 추가·상태 관리), 구독자 관리 */
 export function DailyMailPanel() {
   const qc = useQueryClient();
   const overview = useQuery({ queryKey: qk.adminDaily, queryFn: adminApi.daily, refetchOnWindowFocus: true });
-  const apply = (data: DailyAdminOverview) => qc.setQueryData(qk.adminDaily, data);
+  const apply = (data: DailyAdminOverview) => {
+    qc.setQueryData(qk.adminDaily, data);
+    void qc.invalidateQueries({ queryKey: qk.adminDailyProblems });
+  };
   const pause = useMutation({ mutationFn: adminApi.setDailyPaused, onSuccess: apply });
+  const send = useMutation({ mutationFn: adminApi.sendDaily, onSettled: () => void qc.invalidateQueries({ queryKey: qk.adminDaily }) });
   if (overview.isPending) return <LinesSkeleton />;
   if (overview.isError) return <p role="alert" className="text-[13px] text-bad">{errMsg(overview.error)}</p>;
   const data = overview.data;
   const active = data.subscribers.filter((s) => s.status === 'active').length;
+  const ready = data.bank.reduce((n, c) => n + c.ready, 0);
+  const action = pause.error ?? send.error;
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
         <section className="rounded-lg border border-line bg-panel p-5">
           <h1 className="text-[16px] font-bold">일일 메일</h1>
-          <output className={`mt-3 block font-semibold ${data.configured && !data.paused ? 'text-ok' : 'text-warn'}`}>
+          <output className={`mt-3 block font-semibold ${data.configured && !data.paused && ready ? 'text-ok' : 'text-warn'}`}>
             {!data.configured && '✗ 발송 설정이 없어 구독과 발송이 꺼져 있어요'}
-            {data.configured && (data.paused ? '✗ 발송을 멈춘 상태예요' : '✓ 평일 07시에 발송해요')}
+            {data.configured && data.paused && '✗ 발송을 멈춘 상태예요'}
+            {data.configured && !data.paused && (ready ? '✓ 평일 07시에 사람마다 다른 문제를 보내요' : '✗ 발송할 문제가 없어요')}
           </output>
           <p className="mt-2 text-[13px] text-dim">
-            구독 중 {active}명 / 상한 {data.maxSubscribers}명
+            구독 중 {active}명 / 상한 {data.maxSubscribers}명 · 오늘({data.today}) 보냄 {data.delivery.sent} · 대기 {data.delivery.pending} · 실패 {data.delivery.failed} · 제외 {data.delivery.skipped}
           </p>
-          <button type="button" className="btn-primary mt-4" disabled={pause.isPending} onClick={() => pause.mutate(!data.paused)}>
-            {data.paused ? '발송 다시 시작하기' : '발송 멈추기'}
-          </button>
-          {pause.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(pause.error)}</p>}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" className="btn-primary" disabled={pause.isPending} onClick={() => pause.mutate(!data.paused)}>
+              {data.paused ? '발송 다시 시작하기' : '발송 멈추기'}
+            </button>
+            <button
+              type="button"
+              className="btn-quiet border border-line px-3 text-[13px]"
+              disabled={send.isPending || !data.configured}
+              onClick={() => {
+                if (window.confirm('오늘 문제를 구독자에게 지금 한 묶음 보낼까요?')) send.mutate();
+              }}
+            >
+              {send.isPending ? '보내는 중…' : '오늘 문제 지금 보내기'}
+            </button>
+          </div>
+          {send.isSuccess && (
+            <output className="mt-3 block text-[13px] text-dim">
+              {send.data.outcome === 'paused' ? '발송을 멈춘 상태라 보내지 않았어요.' : `보냄 ${send.data.sent}통, 실패 ${send.data.failed}통, 남음 ${send.data.remaining}통`}
+            </output>
+          )}
+          {action && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(action)}</p>}
         </section>
-        <IssueEditor key={data.today} data={data} onSaved={apply} />
+        <BankGrid data={data} />
+        <ProblemEditor onSaved={() => void qc.invalidateQueries({ queryKey: qk.adminDaily })} />
+        <AgentInfo />
       </div>
       <div className="flex min-w-0 flex-col gap-4">
+        <ProblemList onChanged={apply} />
         <SubscriberList subscribers={data.subscribers} onChanged={apply} />
       </div>
     </div>
   );
 }
 
-function IssueEditor({ data, onSaved }: Readonly<{ data: DailyAdminOverview; onSaved: (d: DailyAdminOverview) => void }>) {
+const LEVELS = [1, 2, 3, 4, 5];
+
+/** 유형×난이도별 발송 중인 문제 수(괄호는 작성 중). 비어 있는 칸부터 에이전트가 채운다 */
+function BankGrid({ data }: Readonly<{ data: DailyAdminOverview }>) {
+  const cell = (topic: string, level: number) => data.bank.find((c) => c.topic === topic && c.level === level);
+  return (
+    <section className="rounded-lg border border-line bg-panel p-5">
+      <h2 className="text-[15px] font-bold">문제은행</h2>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-[12.5px]">
+          <thead>
+            <tr className="text-faint">
+              <th className="py-1 pr-2 text-left font-semibold">유형</th>
+              {LEVELS.map((l) => (
+                <th key={l} className="px-1 py-1 text-right font-semibold">
+                  {l}단계
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {DAILY_TOPICS.map((topic) => (
+              <tr key={topic} className="border-t border-line">
+                <td className="py-1 pr-2 whitespace-nowrap">{topic}</td>
+                {LEVELS.map((l) => {
+                  const c = cell(topic, l);
+                  return (
+                    <td key={l} className={`px-1 py-1 text-right tabular-nums ${c?.ready ? '' : 'text-faint'}`}>
+                      {c?.ready ?? 0}
+                      {c?.draft ? <span className="text-warn"> ({c.draft})</span> : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/** 직접 추가: 에이전트와 같은 JSON 형식. 기준 풀이가 모든 케이스를 통과해야 저장된다 */
+function ProblemEditor({ onSaved }: Readonly<{ onSaved: () => void }>) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<Draft>(() => {
-    const today = data.issues.find((i) => i.issueDate === data.today);
-    return today ? toDraft(today) : emptyDraft(data.today);
-  });
-  const [testEmails, setTestEmails] = useState('');
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
-  const refresh = () => qc.invalidateQueries({ queryKey: qk.adminDaily });
+  const [text, setText] = useState('');
+  const [parseError, setParseError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: () => {
-      const { issueDate, ...input } = draft;
-      return adminApi.saveDailyIssue(issueDate, input);
-    },
-    onSuccess: onSaved,
-  });
-  const remove = useMutation({
-    mutationFn: () => adminApi.deleteDailyIssue(draft.issueDate),
-    onSuccess: (d) => {
-      onSaved(d);
-      setDraft(emptyDraft(d.today));
+    mutationFn: (input: DailyProblemInput) => adminApi.saveDailyProblem(null, input),
+    onSuccess: (r: DailySaveResult) => {
+      if (!r.saved) return;
+      setText('');
+      onSaved();
+      void qc.invalidateQueries({ queryKey: qk.adminDailyProblems });
     },
   });
-  const test = useMutation({
-    mutationFn: () => adminApi.testDailyIssue(draft.issueDate, testEmails.split(/[\s,]+/).filter(Boolean)),
-  });
-  const send = useMutation({ mutationFn: () => adminApi.sendDailyIssue(draft.issueDate), onSettled: refresh });
   const submit = (e: SubmitEvent) => {
     e.preventDefault();
-    if (!save.isPending) save.mutate();
+    let input: DailyProblemInput;
+    try {
+      input = JSON.parse(text) as DailyProblemInput;
+    } catch {
+      setParseError('JSON 형식이 올바르지 않아요.');
+      return;
+    }
+    setParseError(null);
+    save.mutate(input);
   };
-  const saved = data.issues.find((i) => i.issueDate === draft.issueDate);
-  const action = save.error ?? remove.error ?? test.error ?? send.error;
+  const result = save.data;
   return (
-    <>
-      <form onSubmit={submit} className="rounded-lg border border-line bg-panel p-5">
-        <h2 className="text-[15px] font-bold">회차 작성</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Field label="발송일(한국 시간)">
-            <input type="date" className="field" value={draft.issueDate} onChange={(e) => set('issueDate', e.target.value)} required />
-          </Field>
-          <Field label="문제 ID">
-            <input className="field" value={draft.problemId} onChange={(e) => set('problemId', e.target.value)} required pattern="[\w-]+" />
-          </Field>
+    <form onSubmit={submit} className="rounded-lg border border-line bg-panel p-5">
+      <div className="flex items-center gap-2">
+        <h2 className="text-[15px] font-bold">문제 직접 추가</h2>
+        <button type="button" className="btn-quiet ml-auto px-2 text-[12px]" onClick={() => setText(JSON.stringify(TEMPLATE, null, 2))}>
+          예시 채우기
+        </button>
+      </div>
+      <p className="mt-1 text-[12.5px] text-dim">에이전트(MCP create_problem)와 같은 형식이에요. 기준 풀이로 예제와 채점 케이스를 모두 채점해 통과해야 저장돼요.</p>
+      <textarea className="field mt-3 min-h-64 font-mono text-[12px]" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} aria-label="문제 JSON" required />
+      <button type="submit" className="btn-primary mt-3" disabled={save.isPending || !text.trim()}>
+        {save.isPending ? '채점하고 저장하는 중…' : '검증하고 저장하기'}
+      </button>
+      {parseError && <p role="alert" className="mt-3 text-[13px] text-bad">{parseError}</p>}
+      {save.isError && <p role="alert" className="mt-3 whitespace-pre-wrap text-[13px] text-bad">{errMsg(save.error)}</p>}
+      {result?.saved && <output className="mt-3 block text-[13px] text-ok">저장했어요.</output>}
+      {result && !result.saved && (
+        <div role="alert" className="mt-3 text-[13px] text-bad">
+          <p>{result.verify.error ?? `기준 풀이가 ${result.verify.score ?? 0}점이에요. 아래 케이스를 확인해 주세요.`}</p>
+          <ul className="mt-1 list-disc pl-5 font-mono text-[12px]">
+            {result.verify.failures.map((f) => (
+              <li key={f.id} className="break-all">
+                {f.id}: {f.status} · 기대 {f.expected} · 실제 {f.actual ?? '-'} {f.stderr && `· ${f.stderr}`}
+              </li>
+            ))}
+          </ul>
         </div>
-        <Field label="제목" className="mt-3">
-          <input className="field font-sans" value={draft.title} onChange={(e) => set('title', e.target.value)} required maxLength={120} />
-        </Field>
-        <Field label="지문" className="mt-3">
-          <textarea className="field min-h-36 font-sans" value={draft.body} onChange={(e) => set('body', e.target.value)} required maxLength={5000} />
-        </Field>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Field label="난이도">
-            <input className="field font-sans" value={draft.difficulty} onChange={(e) => set('difficulty', e.target.value)} required maxLength={20} />
-          </Field>
-          <Field label="상태">
-            <select className="field font-sans" value={draft.status} onChange={(e) => set('status', e.target.value as Draft['status'])}>
-              <option value="draft">작성 중(발송 안 함)</option>
-              <option value="ready">발송 준비 완료</option>
-            </select>
-          </Field>
-        </div>
-        <Field label="문제 힌트(선택, 메일에는 보기 링크만 들어가요)" className="mt-3">
-          <textarea className="field min-h-20 font-sans" value={draft.hint} onChange={(e) => set('hint', e.target.value)} maxLength={1000} />
-        </Field>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button type="submit" className="btn-primary" disabled={save.isPending}>
-            {save.isPending ? '저장 중…' : '저장하기'}
-          </button>
-          <button type="button" className="btn-quiet px-3 text-[13px]" onClick={() => setDraft(emptyDraft(data.today))}>
-            새 회차
-          </button>
-          {saved && (
-            <button type="button" className="btn-quiet px-3 text-[13px] text-bad" disabled={remove.isPending} onClick={() => remove.mutate()}>
-              회차 지우기
-            </button>
-          )}
-        </div>
-        {save.isSuccess && <output className="mt-3 block text-[13px] text-dim">회차를 저장했어요.</output>}
-      </form>
+      )}
+    </form>
+  );
+}
 
-      <section className="rounded-lg border border-line bg-panel p-5">
-        <h2 className="text-[15px] font-bold">발송</h2>
-        <p className="mt-1 text-[13px] text-dim">저장한 회차를 기준으로 보내요. 시험 발송은 입력한 주소로만 가요.</p>
-        <Field label="시험 받을 주소(최대 5개, 쉼표로 구분)" className="mt-3">
-          <input className="field" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} autoComplete="off" />
-        </Field>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className="btn-quiet border border-line px-3 text-[13px]" disabled={!saved || !testEmails.trim() || test.isPending} onClick={() => test.mutate()}>
-            {test.isPending ? '보내는 중…' : '시험 발송'}
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={saved?.status !== 'ready' || send.isPending}
-            onClick={() => {
-              if (window.confirm(`${draft.issueDate} 회차를 구독자에게 지금 보낼까요?`)) send.mutate();
-            }}
-          >
-            {send.isPending ? '보내는 중…' : '구독자에게 지금 보내기'}
-          </button>
-        </div>
-        {test.isSuccess && <output className="mt-3 block text-[13px] text-dim">시험 메일 {test.data.sent}통을 보냈어요.</output>}
-        {send.isSuccess && (
-          <output className="mt-3 block text-[13px] text-dim">
-            {send.data.outcome === 'paused' && '발송을 멈춘 상태라 보내지 않았어요.'}
-            {send.data.outcome !== 'paused' && `보냄 ${send.data.sent}통, 실패 ${send.data.failed}통, 남음 ${send.data.remaining}통`}
-          </output>
-        )}
-        {action && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(action)}</p>}
-
-        <h3 className="mt-5 text-[13px] font-bold text-dim">회차별 현황</h3>
-        {data.issues.length === 0 && <p className="mt-2 text-[13px] text-faint">아직 회차가 없어요.</p>}
-        <ol className="mt-2 divide-y divide-line">
-          {data.issues.map((i) => (
-            <li key={i.issueDate}>
-              <button type="button" className="w-full py-2 text-left text-[13px] hover:text-text" onClick={() => setDraft(toDraft(i))}>
-                <span className="font-semibold">{i.issueDate}</span> {i.title}
-                <span className="block text-[12px] text-faint">
-                  {i.status === 'ready' ? '준비 완료' : '작성 중'} · 보냄 {i.delivery.sent} · 대기 {i.delivery.pending} · 실패 {i.delivery.failed} · 제외 {i.delivery.skipped}
-                </span>
+function ProblemList({ onChanged }: Readonly<{ onChanged: (d: DailyAdminOverview) => void }>) {
+  const list = useQuery({ queryKey: qk.adminDailyProblems, queryFn: adminApi.dailyProblems });
+  const [testEmails, setTestEmails] = useState('');
+  const status = useMutation({ mutationFn: ({ id, s }: { id: string; s: DailyProblemStatus }) => adminApi.setDailyProblemStatus(id, s), onSuccess: onChanged });
+  const remove = useMutation({ mutationFn: adminApi.deleteDailyProblem, onSuccess: onChanged });
+  const test = useMutation({ mutationFn: (id: string) => adminApi.testDailyProblem(id, testEmails.split(/[\s,]+/).filter(Boolean)) });
+  const action = status.error ?? remove.error ?? test.error;
+  return (
+    <section className="rounded-lg border border-line bg-panel p-5">
+      <h2 className="text-[15px] font-bold">
+        문제 <span className="text-faint">{list.data?.length ?? ''}</span>
+      </h2>
+      <label className="mt-3 flex flex-col gap-1.5">
+        <span className="text-[12px] font-bold text-dim">시험 받을 주소(최대 5개, 쉼표로 구분)</span>
+        <input className="field" value={testEmails} onChange={(e) => setTestEmails(e.target.value)} autoComplete="off" />
+      </label>
+      {list.isPending && <LinesSkeleton />}
+      {list.isError && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(list.error)}</p>}
+      {list.data?.length === 0 && <p className="mt-3 text-[13px] text-faint">아직 문제가 없어요. 직접 추가하거나 에이전트로 채워 주세요.</p>}
+      {test.isSuccess && <output className="mt-3 block text-[13px] text-dim">시험 메일 {test.data.sent}통을 보냈어요.</output>}
+      {action && <p role="alert" className="mt-3 text-[13px] text-bad">{errMsg(action)}</p>}
+      <ol className="mt-2 divide-y divide-line">
+        {list.data?.map((p) => (
+          <li key={p.id} className="py-2 text-[13px]">
+            <div className="flex items-center gap-2">
+              <a href={`#/p/${encodeURIComponent(p.id)}`} className="min-w-0 flex-1 truncate font-semibold hover:underline">
+                {p.title}
+              </a>
+              <select
+                className="field w-auto py-0.5 text-[12px]"
+                value={p.status}
+                aria-label={`${p.title} 상태`}
+                disabled={status.isPending}
+                onChange={(e) => status.mutate({ id: p.id, s: e.target.value as DailyProblemStatus })}
+              >
+                {(Object.keys(PROBLEM_STATUS) as DailyProblemStatus[]).map((s) => (
+                  <option key={s} value={s}>
+                    {PROBLEM_STATUS[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-faint">
+              <span>
+                {p.topic} · {p.level}단계 · {p.source} · 받음 {p.picks} · 해결 {p.solved}
+              </span>
+              <button type="button" className="btn-quiet px-1 text-[12px]" disabled={!testEmails.trim() || test.isPending} onClick={() => test.mutate(p.id)}>
+                시험 발송
               </button>
-            </li>
-          ))}
-        </ol>
-      </section>
-    </>
+              {p.picks === 0 && (
+                <button
+                  type="button"
+                  className="btn-quiet px-1 text-[12px] text-bad"
+                  disabled={remove.isPending}
+                  onClick={() => {
+                    if (window.confirm(`'${p.title}' 문제를 지울까요?`)) remove.mutate(p.id);
+                  }}
+                >
+                  지우기
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/** 에이전트 연결 안내. MCP는 pahidc 안에서만 실행되고 외부에 열려 있지 않다 */
+function AgentInfo() {
+  return (
+    <section className="rounded-lg border border-line bg-panel p-5 text-[13px]">
+      <h2 className="text-[15px] font-bold">에이전트 자동 제작</h2>
+      <p className="mt-1 text-dim">
+        pahidc의 타이머가 Codex CLI로 문제은행 MCP에 접속해, 부족한 유형·난이도부터 새 문제를 만들고 검증해 추가해요. 다른 모델도 같은 MCP에 연결하면 똑같이 동작해요.
+      </p>
+      <p className="mt-2 text-dim">SSH로 접속할 수 있는 곳에서 직접 연결:</p>
+      <pre className="mt-1 overflow-x-auto rounded bg-raised p-2 font-mono text-[12px]">ssh pahidc solveline-bank-mcp --agent 이름</pre>
+    </section>
   );
 }
 
@@ -222,14 +321,5 @@ function SubscriberList({ subscribers, onChanged }: Readonly<{ subscribers: Dail
         ))}
       </ol>
     </section>
-  );
-}
-
-function Field({ label, className = '', children }: Readonly<{ label: string; className?: string; children: ReactNode }>) {
-  return (
-    <label className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      <span className="text-[12px] font-bold text-dim">{label}</span>
-      {children}
-    </label>
   );
 }

@@ -9,7 +9,8 @@
     "./runner": "./src/runner.ts",
     "./testsets": "./src/testsets.ts",
     "./jobs": "./src/jobs.ts",
-    "./mirror": "./src/mirror.ts"
+    "./mirror": "./src/mirror.ts",
+    "./bank-mcp": "./src/bank-mcp.ts"
   },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",

@@ -71,8 +71,8 @@ function SubscribeCard({ settings }: Readonly<{ settings: DailySettings }>) {
   });
   return (
     <section className="rounded-lg border border-line bg-panel p-5">
-      <h2 className="text-[16px] font-bold">평일마다 한 문제, 인박스로 받아 보세요</h2>
-      <p className="mt-2 text-[14px] text-dim">코딩 테스트 준비에 맞춘 새 문제를 평일 아침 7시에 보내 드려요.</p>
+      <h2 className="text-[16px] font-bold">평일마다 나에게 맞춘 한 문제</h2>
+      <p className="mt-2 text-[14px] text-dim">코딩 테스트 준비용 미니 문제를 평일 아침 7시에 보내 드려요. 풀이 기록을 보고 약한 유형과 알맞은 난이도로 사람마다 다르게 골라요. 구독하면 첫 문제를 바로 받아요.</p>
       {settings.mailAvailable && !settings.mailBlocked && <p className="mt-1 break-all text-[13px] text-dim">{settings.email}(으)로 메일도 함께 보내 드려요. 수신 설정에서 언제든 끌 수 있어요.</p>}
       <p className="mt-3 text-[12.5px] text-dim">
         구독하면 이메일과 수신 기록을 일일 문제 제공에 사용하고, 메일 발송을 Resend(미국)에 맡겨요. 자세한 내용은 <a href="/privacy" className="underline">개인정보처리방침</a>을 확인해 주세요.
@@ -85,7 +85,14 @@ function SubscribeCard({ settings }: Readonly<{ settings: DailySettings }>) {
   );
 }
 
+const PROGRESS: Record<DailyInboxItem['progress'], { label: string; className: string } | null> = {
+  none: null,
+  tried: { label: '도전 중', className: 'text-warn' },
+  solved: { label: '해결', className: 'text-ok' },
+};
+
 function InboxEntry({ item, open, onToggle }: Readonly<{ item: DailyInboxItem; open: boolean; onToggle: () => void }>) {
+  const progress = PROGRESS[item.progress];
   return (
     <li className="border-b border-line last:border-0">
       <button type="button" aria-expanded={open} onClick={onToggle} className="w-full px-4 py-3 text-left hover:bg-raised">
@@ -93,11 +100,14 @@ function InboxEntry({ item, open, onToggle }: Readonly<{ item: DailyInboxItem; o
           {!item.read && <span className="mr-2 text-[12px] font-bold text-accent-text">새 문제</span>}
           {item.title}
         </span>
-        <span className="mt-1 block text-[12.5px] text-dim">{item.issueDate} · {item.difficulty}</span>
+        <span className="mt-1 block text-[12.5px] text-dim">
+          {item.date} · {item.topic} · {item.level}단계
+          {progress && <span className={`ml-2 font-semibold ${progress.className}`}>{progress.label}</span>}
+        </span>
       </button>
       {open && (
         <div className="border-t border-line px-4 py-4">
-          <p className="whitespace-pre-wrap text-[14px] leading-relaxed">{item.body}</p>
+          <p className="whitespace-pre-wrap text-[14px] leading-relaxed">{item.excerpt}</p>
           <a href={`#/p/${encodeURIComponent(item.problemId)}`} className="btn-primary mt-4 inline-flex">바로 풀기</a>
           {item.hint && (
             <details className="mt-4 text-[14px]">
@@ -122,12 +132,12 @@ function InboxList({ inbox, subscribed }: Readonly<{ inbox: DailyInbox; subscrib
     <ol className="overflow-hidden rounded-lg border border-line bg-panel" aria-label="받은 문제">
       {inbox.items.map((item) => (
         <InboxEntry
-          key={item.issueDate}
+          key={item.date}
           item={item}
-          open={openDate === item.issueDate}
+          open={openDate === item.date}
           onToggle={() => {
-            setOpenDate(openDate === item.issueDate ? null : item.issueDate);
-            if (!item.read) markRead.mutate(item.issueDate);
+            setOpenDate(openDate === item.date ? null : item.date);
+            if (!item.read) markRead.mutate(item.date);
           }}
         />
       ))}

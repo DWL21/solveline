@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { templateFor, type Language, type ProblemInput, type ProblemMode, type TestCase } from '@solveline/shared';
+import { templateFor, type DailyProblemInput, type Language, type ProblemInput, type ProblemMode, type TestCase } from '@solveline/shared';
 
 /**
  * 테스트 데이터 빌더(Test Data Builder). 테스트에 중요한 값만 드러내고 나머지는 의미 있는 기본값으로 채운다.
@@ -56,3 +56,27 @@ export const sumSolutions: Record<Language, Record<'correct' | 'wrong' | 'compil
     printsAndReturns: 'def solution(numbers):\n    print("debug:" + str(len(numbers)))\n    return sum(numbers)\n',
   },
 };
+
+/** 일일 미니 문제(배열의 합). 기준 풀이는 sumSolutions와 같아 실제 judge가 채점해 통과한다 */
+export function aDailyProblem(overrides: Partial<DailyProblemInput> = {}): DailyProblemInput {
+  return {
+    topic: '배열·문자열',
+    level: 1,
+    title: `E2E 미니 합 ${uid()}`,
+    description: '정수 배열 numbers의 합을 반환한다.\n\n제한\n- 1 ≤ numbers의 길이 ≤ 100',
+    mode: 'function',
+    params: ['numbers'],
+    timeLimitMs: 2000,
+    cases: [
+      aCase(['[1, 2]'], '3'),
+      aCase(['[5]'], '5', { hidden: true }),
+      aCase(['[-1, 1]'], '0', { hidden: true }),
+      aCase(['[10, 20, 30]'], '60', { hidden: true }),
+    ],
+    starterCode: { java: templateFor('java', 'function', ['numbers']), python: templateFor('python', 'function', ['numbers']) },
+    referenceSolution: { language: 'python', code: sumSolutions.python.correct },
+    hint: '',
+    status: 'ready',
+    ...overrides,
+  };
+}

@@ -27,7 +27,11 @@ import {
   SignupSettings,
   DailyAdminOverview,
   DailySendResult,
-  type DailyIssueInput,
+  DailyProblemDetail,
+  DailyProblemSummary,
+  DailySaveResult,
+  type DailyProblemInput,
+  type DailyProblemStatus,
   type DailySettingsInput,
   DailyInbox,
   DailySettings,
@@ -131,6 +135,8 @@ function catalogIndex(): Promise<CatalogIndex> {
 /** 버전이 붙은 상세는 브라우저·엣지가 오래 캐시한다. 그 사이 목록이 바뀌었으면 목록을 새로 받아 다시 읽는다. */
 async function catalogProblem(id: string): Promise<CatalogProblem> {
   const version = (await catalogIndex()).problems.find((p) => p.id === id)?.version;
+  // 목록에 없는 문제는 일일 미니 문제일 수 있다(메일·인박스 링크로만 연다)
+  if (!version) return request(CatalogProblem, `/api/public/daily/problems/${enc(id)}`).catch(() => request(CatalogProblem, `/api/catalog/problems/${enc(id)}`, { cache: 'no-store' }));
   try {
     const query = version ? `?v=${version}` : '';
     return await request(CatalogProblem, `/api/catalog/problems/${enc(id)}${query}`);
@@ -211,10 +217,14 @@ export const adminApi = {
   deleteUser: (id: string) => request(z.object({ deleted: z.boolean() }), `/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   daily: () => request(DailyAdminOverview, '/api/admin/daily'),
   setDailyPaused: (paused: boolean) => request(DailyAdminOverview, '/api/admin/daily/pause', json('PUT', { paused })),
-  saveDailyIssue: (date: string, input: DailyIssueInput) => request(DailyAdminOverview, `/api/admin/daily/issues/${encodeURIComponent(date)}`, json('PUT', input)),
-  deleteDailyIssue: (date: string) => request(DailyAdminOverview, `/api/admin/daily/issues/${encodeURIComponent(date)}`, { method: 'DELETE' }),
-  testDailyIssue: (date: string, emails: string[]) => request(DailySendResult, `/api/admin/daily/issues/${encodeURIComponent(date)}/test`, json('POST', { emails })),
-  sendDailyIssue: (date: string) => request(DailySendResult, `/api/admin/daily/issues/${encodeURIComponent(date)}/send`, json('POST')),
+  dailyProblems: () => request(z.array(DailyProblemSummary), '/api/admin/daily/problems'),
+  dailyProblem: (id: string) => request(DailyProblemDetail, `/api/admin/daily/problems/${encodeURIComponent(id)}`),
+  saveDailyProblem: (id: string | null, input: DailyProblemInput) =>
+    request(DailySaveResult, id ? `/api/admin/daily/problems/${encodeURIComponent(id)}` : '/api/admin/daily/problems', json(id ? 'PUT' : 'POST', input)),
+  setDailyProblemStatus: (id: string, status: DailyProblemStatus) => request(DailyAdminOverview, `/api/admin/daily/problems/${encodeURIComponent(id)}/status`, json('PUT', { status })),
+  deleteDailyProblem: (id: string) => request(DailyAdminOverview, `/api/admin/daily/problems/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testDailyProblem: (id: string, emails: string[]) => request(DailySendResult, `/api/admin/daily/problems/${encodeURIComponent(id)}/test`, json('POST', { emails })),
+  sendDaily: () => request(DailySendResult, '/api/admin/daily/send', json('POST')),
   deleteDailySubscriber: (id: string) => request(DailyAdminOverview, `/api/admin/daily/subscribers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   signupSettings: () => request(SignupSettings, '/api/admin/signup-settings'),
   setSignupEnabled: (signupEnabled: boolean) => request(SignupSettings, '/api/admin/signup-settings', json('PUT', { signupEnabled })),
@@ -229,6 +239,7 @@ export const qk = {
   adminUser: (id: string) => ['admin', 'user', id] as const,
   signupSettings: ['admin', 'signup-settings'] as const,
   adminDaily: ['admin', 'daily'] as const,
+  adminDailyProblems: ['admin', 'daily', 'problems'] as const,
   dailySettings: ['daily', 'settings'] as const,
   dailyInbox: ['daily', 'inbox'] as const,
   runtime: ['runtime'] as const,

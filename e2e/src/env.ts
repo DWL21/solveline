@@ -20,6 +20,8 @@ export const env = {
   productionURL: process.env.E2E_PRODUCTION_URL ?? 'https://solveline.simplyimg.com',
   testAuthToken: process.env.E2E_TEST_AUTH_TOKEN ?? '',
   masterPassword: process.env.E2E_MASTER_PASSWORD ?? '',
+  /** API·judge가 함께 쓰는 서명 비밀. 문제은행 에이전트 경로(MCP가 부르는 길)를 시험할 때 쓴다 */
+  judgeSecret: process.env.E2E_JUDGE_SECRET ?? '',
   ci: !!process.env.CI,
   /** 시연 모드: 통과한 테스트도 영상·trace·스크린샷을 남긴다(CI 수동 실행의 demo 입력) */
   demo: process.env.E2E_DEMO === '1',

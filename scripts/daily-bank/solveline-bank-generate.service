@@ -1,0 +1,14 @@
+[Unit]
+Description=Solveline 일일 미니 문제 자동 제작
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/home/ubuntu/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+# 에이전트와 문제 수를 바꾸려면 /etc/solveline/bank-generate.env에 BANK_AGENT_CLI·BANK_GENERATE_COUNT를 둔다
+EnvironmentFile=-/etc/solveline/bank-generate.env
+ExecStart=/usr/local/bin/solveline-bank-generate
+TimeoutStartSec=55min

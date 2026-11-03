@@ -29,5 +29,12 @@ sudo install -d -o 1000 -g 1000 -m 700 /var/lib/solveline
 sudo docker compose -f compose.production.yaml config --quiet
 sudo docker compose -f compose.production.yaml up -d --build --force-recreate --wait --wait-timeout 300
 curl --fail --silent --show-error http://127.0.0.1:8083/judge/health
+
+# 일일 미니 문제 은행: MCP 서버(SSH로만 접속)와 자동 제작 타이머. 에이전트 CLI(codex)는 서버에 미리 로그인해 둔다.
+sudo install -m 755 scripts/daily-bank/solveline-bank-mcp /usr/local/bin/solveline-bank-mcp
+sudo install -m 755 scripts/daily-bank/generate.sh /usr/local/bin/solveline-bank-generate
+sudo install -m 644 scripts/daily-bank/solveline-bank-generate.service scripts/daily-bank/solveline-bank-generate.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solveline-bank-generate.timer
 # 오래된 빌드 캐시·이미지 정리 (서버 디스크 보호)
 sudo docker image prune -f >/dev/null
