@@ -167,6 +167,7 @@ export function Home({ scope, onScope, onPick, onNew, footer }: Readonly<{ scope
           </div>
           {collection?.description && <p className="mt-2 max-w-2xl text-[14px] leading-relaxed whitespace-pre-wrap text-dim">{collection.description}</p>}
           {!overview && list.length > 0 && signedIn && <Progress solved={solved} total={list.length} done={inCollection && progress.cleared} />}
+          {overview && <DailyPromo signedIn={signedIn} />}
           {cards.length > 0 && <CollectionCards cards={cards} all={all} signedIn={signedIn} overview={overview} onScope={onScope} />}
           {overview && cards.length === 0 && <p className="py-16 text-center text-[14px] text-faint">아직 컬렉션이 없어요</p>}
           {!overview && <>
@@ -236,6 +237,24 @@ function SiblingNav({ siblings, label, onScope }: Readonly<{ siblings: NonNullab
       <button type="button" className="btn-ghost ml-1 size-9 px-0 disabled:opacity-40" aria-label={`이전 ${label}`} title={`이전 ${label}`} disabled={!siblings.previous} onClick={() => go(siblings.previous)}><Icon name="left" /></button>
       <button type="button" className="btn-ghost size-9 px-0 disabled:opacity-40" aria-label={`다음 ${label}`} title={`다음 ${label}`} disabled={!siblings.next} onClick={() => go(siblings.next)}><Icon name="right" /></button>
     </>
+  );
+}
+
+/** 첫 화면의 일일 문제 구독 안내. 이미 구독했으면 보이지 않는다. 비회원은 로그인 뒤 인박스로 간다 */
+function DailyPromo({ signedIn }: Readonly<{ signedIn: boolean }>) {
+  const settings = useQuery({ queryKey: qk.dailySettings, queryFn: api.dailySettings, enabled: signedIn });
+  if (signedIn && (!settings.data || settings.data.subscribed)) return null;
+  const href = signedIn ? '#/inbox' : `/login?next=${encodeURIComponent('/#/inbox')}`;
+  return (
+    <aside className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-line bg-panel px-5 py-4" aria-label="일일 문제 구독">
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-bold">평일마다 나에게 맞춘 한 문제</p>
+        <p className="mt-0.5 text-[13px] text-dim">풀이 기록을 보고 약한 유형과 알맞은 난이도로 골라 아침 7시에 메일과 인박스로 보내 드려요. 구독하면 첫 문제는 바로 받아요.</p>
+      </div>
+      <a href={href} className="btn-primary shrink-0">
+        {signedIn ? '구독하러 가기' : '로그인하고 구독하기'}
+      </a>
+    </aside>
   );
 }
 

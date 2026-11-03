@@ -145,12 +145,68 @@ function InboxList({ inbox, subscribed }: Readonly<{ inbox: DailyInbox; subscrib
   );
 }
 
+/** 받은 문제로 본 내 기록: 해결 수와 유형별 해결률. 해결률이 낮은 유형이 다음 문제로 더 자주 온다 */
+function LearningSummary({ items }: Readonly<{ items: DailyInboxItem[] }>) {
+  if (!items.length) return null;
+  const solved = items.filter((i) => i.progress === 'solved').length;
+  const byTopic = new Map<string, { got: number; solved: number }>();
+  for (const i of items) {
+    const t = byTopic.get(i.topic) ?? { got: 0, solved: 0 };
+    t.got++;
+    if (i.progress === 'solved') t.solved++;
+    byTopic.set(i.topic, t);
+  }
+  const topics = [...byTopic].sort((a, b) => a[1].solved / a[1].got - b[1].solved / b[1].got || b[1].got - a[1].got);
+  return (
+    <section className="rounded-lg border border-line bg-panel p-5" aria-label="내 기록">
+      <h2 className="text-[15px] font-bold">내 기록</h2>
+      <p className="mt-1 text-[13px] text-dim">
+        받은 문제 {items.length}개 중 {solved}개 해결
+      </p>
+      <ul className="mt-3 flex flex-col gap-1.5 text-[13px]">
+        {topics.map(([topic, t]) => (
+          <li key={topic} className="flex items-center gap-2">
+            <span className="w-24 shrink-0 truncate">{topic}</span>
+            <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-raised" aria-hidden="true">
+              <span className="block h-full rounded-full bg-accent" style={{ width: `${(t.solved / t.got) * 100}%` }} />
+            </span>
+            <span className="shrink-0 tabular-nums text-dim">
+              {t.solved}/{t.got}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-[12px] text-faint">해결률이 낮은 유형을 더 자주, 잘 푸는 유형은 한 단계 어렵게 보내 드려요.</p>
+    </section>
+  );
+}
+
+/** 비회원: 구독을 소개하고 로그인으로 안내한다(로그인 뒤 인박스로 돌아온다) */
+function GuestIntro() {
+  return (
+    <main className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-xl px-4 py-10">
+        <h1 className="text-[20px] font-bold">평일마다 나에게 맞춘 한 문제</h1>
+        <ul className="mt-4 flex list-disc flex-col gap-1.5 pl-5 text-[14px] text-dim">
+          <li>코딩 테스트에 자주 나오는 자료구조·알고리즘 개념을 하나씩 익히는 학습용 문제예요.</li>
+          <li>풀이 기록을 보고 약한 유형과 알맞은 난이도로 사람마다 다르게 골라요.</li>
+          <li>평일 아침 7시에 메일과 인박스로 받고, 풀이는 문제 화면에서 그대로 채점돼요.</li>
+          <li>구독하면 첫 문제는 바로 받아요. 언제든 끌 수 있어요.</li>
+        </ul>
+        <a className="btn-primary mt-6 inline-flex" href={loginHref()}>
+          로그인하고 구독하기
+        </a>
+      </div>
+    </main>
+  );
+}
+
 /** 일일 문제 인박스: 받은 문제 목록과 수신 설정 */
 export function DailyInboxPage() {
   const me = useMe();
   const settings = useQuery({ queryKey: qk.dailySettings, queryFn: api.dailySettings, enabled: !!me });
   const inbox = useQuery({ queryKey: qk.dailyInbox, queryFn: api.dailyInbox, enabled: !!me });
-  if (!me) return <div className="p-6 text-[14px]">인박스는 로그인하면 볼 수 있어요. <a className="font-semibold text-accent-text underline" href={loginHref()}>로그인</a></div>;
+  if (!me) return <GuestIntro />;
   const failed = settings.error ?? inbox.error;
   return (
     <main className="min-h-0 flex-1 overflow-y-auto">
@@ -164,7 +220,12 @@ export function DailyInboxPage() {
               {!settings.data.subscribed && <SubscribeCard settings={settings.data} />}
               <InboxList inbox={inbox.data} subscribed={settings.data.subscribed} />
             </div>
-            {settings.data.subscribed && <SettingsPanel settings={settings.data} />}
+            {(settings.data.subscribed || inbox.data.items.length > 0) && (
+              <div className="flex min-w-0 flex-col gap-4">
+                <LearningSummary items={inbox.data.items} />
+                {settings.data.subscribed && <SettingsPanel settings={settings.data} />}
+              </div>
+            )}
           </div>
         )}
       </div>
