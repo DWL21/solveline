@@ -2,11 +2,12 @@ name: QA report
 # CI가 끝나면 QA 테스트 완료 보고서(ISO/IEC/IEEE 29119-3 구성)를 PR 댓글 하나로 남긴다.
 #   PR 실행    PR 단계 보고서 v0.x(커밋마다 올림). 필수 체크가 아니라서 CI만 통과하면 이 작업을 기다리지 않고 머지할 수 있다.
 #   main 실행  배포가 끝나기를 기다려 운영 스모크를 돌리고, 같은 보고서를 v1.0으로 갱신한다.
+#   LLM QA 실행  LLM QA(llm-qa.yml)가 끝나면 그 PR의 CI 결과에 LLM QA 절을 더해 판 번호를 올린다(0010).
 # PDF와 표지 이미지는 main과 히스토리를 공유하지 않는 qa-reports 브랜치(pr-<번호>/)에 보관하고 댓글에서 연결한다.
 # 보고서 코드는 기본 브랜치의 것만 실행하고, PR이 만든 결과 파일(아티팩트)은 읽기만 한다.
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, LLM QA]
     types: [completed]
 permissions:
   contents: write # qa-reports 브랜치에 PDF 보관
@@ -14,26 +15,50 @@ permissions:
   issues: read
   pull-requests: write
 concurrency:
-  group: qa-report-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_sha }}
+  # LLM QA 실행은 기본 브랜치에서 돌아 head_sha가 PR 커밋이 아니므로 실행 번호로 묶는다
+  group: qa-report-${{ github.event.workflow_run.name == 'LLM QA' && format('llm-{0}', github.event.workflow_run.id) || format('{0}-{1}', github.event.workflow_run.event, github.event.workflow_run.head_sha) }}
   cancel-in-progress: true
 jobs:
-  report:
-    name: QA 테스트 보고서
+  gate:
+    name: 보고서 대상 확인
     if: >-
       github.event.workflow_run.conclusion != 'cancelled' &&
-      (github.event.workflow_run.event == 'pull_request' ||
-       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'))
+      (github.event.workflow_run.name == 'LLM QA' && github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.name == 'CI' &&
+       (github.event.workflow_run.event == 'pull_request' ||
+        (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - name: LLM QA 결과가 있는지
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ github.event.workflow_run.name }}
+          RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          # CI 실행은 언제나 만든다. LLM QA는 대상이 아니어서 결과(llm-qa 아티팩트)가 없으면 건너뛴다
+          if [ "$NAME" != "LLM QA" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/artifacts" --jq '[.artifacts[] | select(.name == "llm-qa")] | length')
+          echo "go=$([ "$n" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+  report:
+    name: QA 테스트 보고서
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      RUN_ID: ${{ github.event.workflow_run.id }}
-      RUN_URL: ${{ github.event.workflow_run.html_url }}
-      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-      SHA: ${{ github.event.workflow_run.head_sha }}
-      KIND: ${{ github.event.workflow_run.event == 'push' && 'final' || 'pr' }}
-      PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
+      SOURCE: ${{ github.event.workflow_run.name == 'LLM QA' && 'llm' || 'ci' }}
+      EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+      EVENT_RUN_URL: ${{ github.event.workflow_run.html_url }}
+      EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+      EVENT_KIND: ${{ github.event.workflow_run.event == 'push' && 'final' || 'pr' }}
+      EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
       INPUT: ${{ github.workspace }}/qa-input
       OUT: ${{ github.workspace }}/qa-out
     steps:
@@ -46,13 +71,33 @@ jobs:
       - name: 한글 글꼴
         run: sudo apt-get install -y -q --no-install-recommends fonts-noto-cjk
 
+      - name: 근거 실행 정하기(CI 또는 LLM QA)
+        run: |
+          mkdir -p "$INPUT"
+          if [ "$SOURCE" = ci ]; then
+            { echo "RUN_ID=$EVENT_RUN_ID"; echo "RUN_URL=$EVENT_RUN_URL"; echo "RUN_ATTEMPT=$EVENT_RUN_ATTEMPT"; echo "SHA=$EVENT_SHA"
+              echo "KIND=$EVENT_KIND"; echo "PR_FROM_EVENT=$EVENT_PR"; echo "REPORT_KEY=$EVENT_RUN_ID"; } >> "$GITHUB_ENV"
+            exit 0
+          fi
+          # LLM QA 결과(요청서·결과)를 받고, 같은 커밋의 PR CI 실행을 근거로 다시 만든다
+          gh run download "$EVENT_RUN_ID" -R "$REPO" -n llm-qa -D "$INPUT/llm-qa"
+          pr=$(jq -r .pr "$INPUT/llm-qa/request.json")
+          sha=$(jq -r .sha "$INPUT/llm-qa/request.json")
+          [[ "$pr" =~ ^[0-9]+$ && "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "LLM QA 요청서가 올바르지 않습니다."; exit 1; }
+          ci=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=pull_request&status=completed&per_page=1" --jq '.workflow_runs[0] // empty | {id, html_url, run_attempt}')
+          [ -n "$ci" ] || { echo "커밋 $sha의 CI 실행이 없습니다."; exit 1; }
+          id=$(jq -r .id <<< "$ci")
+          { echo "RUN_ID=$id"; echo "RUN_URL=$(jq -r .html_url <<< "$ci")"; echo "RUN_ATTEMPT=$(jq -r .run_attempt <<< "$ci")"; echo "SHA=$sha"
+            echo "KIND=pr"; echo "PR_FROM_EVENT=$pr"; echo "REPORT_KEY=$id-llm-$EVENT_RUN_ID"; echo "LLM_RUN_URL=$EVENT_RUN_URL"; } >> "$GITHUB_ENV"
+          echo "PR #$pr ($sha): CI #$id + LLM QA #$EVENT_RUN_ID"
+
       - name: CI 결과 내려받기(품질 지표)
         uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: quality-report
           path: qa-input/quality-report
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
       - name: CI 결과 내려받기(자동화 결과·증거)
         uses: actions/download-artifact@v8
@@ -60,7 +105,7 @@ jobs:
         with:
           name: e2e
           path: qa-input/e2e
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
 
       - name: 대상 PR 찾기
@@ -105,8 +150,9 @@ jobs:
           jq -n --arg kind "$KIND" --arg repo "$REPO" --arg sha "$SHA" --arg now "$(date -u +%FT%TZ)" \
             --arg runUrl "$RUN_URL" --argjson runId "$RUN_ID" --argjson attempt "${RUN_ATTEMPT:-1}" \
             --arg reportRunUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg llmRunUrl "${LLM_RUN_URL:-}" \
             --argjson pr "$pr" --argjson jobs "$jobs" --argjson bugs "$bugs" --argjson deploy "$deploy" \
-            '{kind: $kind, repo: $repo, sha: $sha, generatedAt: $now, pr: $pr, deploy: $deploy, openBugs: $bugs, reportRunUrl: $reportRunUrl,
+            '{kind: $kind, repo: $repo, sha: $sha, generatedAt: $now, pr: $pr, deploy: $deploy, openBugs: $bugs, reportRunUrl: $reportRunUrl, llmRunUrl: (if $llmRunUrl == "" then null else $llmRunUrl end),
               run: {id: $runId, url: $runUrl, attempt: $attempt, jobs: $jobs}}' > "$INPUT/context.json"
 
       - name: 보관 위치·판 번호(qa-reports 브랜치)
@@ -123,17 +169,22 @@ jobs:
           dir="qa-store/pr-$PR_NUMBER"
           mkdir -p "$dir"
           history=$(cat "$dir/history.json" 2>/dev/null || echo '[]')
-          # 같은 CI 실행을 다시 돌리면 판 번호를 유지하고, 새 커밋이면 0.x를 올린다
-          version=$(jq -r --argjson id "$RUN_ID" '[.[] | select(.runId == $id)][0].version // empty' <<< "$history")
+          # 같은 근거(CI 실행, 또는 CI 실행 + LLM QA 실행)를 다시 돌리면 판 번호를 유지하고, 새 근거면 0.x를 올린다
+          version=$(jq -r --arg key "$REPORT_KEY" '[.[] | select((.key // (.runId | tostring)) == $key)][0].version // empty' <<< "$history")
           if [ -z "$version" ]; then
             if [ "$KIND" = final ]; then version=1.0
             else version="0.$(( $(jq '[.[] | select(.version | startswith("0."))] | length' <<< "$history") + 1 ))"; fi
           fi
           name="QA-TCR-PR$PR_NUMBER-v$version"
+          if [ "$KIND" = final ]; then note="Post-merge: deployment and production smoke (CI #$RUN_ID)"
+          elif [ "$SOURCE" = llm ]; then note="PR stage report + LLM e2e QA (CI #$RUN_ID, LLM QA #$EVENT_RUN_ID)"
+          else note="PR stage report (CI #$RUN_ID)"; fi
+          echo "REV_NOTE=$note" >> "$GITHUB_ENV"
           base="$GITHUB_SERVER_URL/$REPO/blob/qa-reports/pr-$PR_NUMBER"
           jq --arg v "$version" --argjson h "$history" \
             --arg pdf "$base/$name.pdf" --arg cover "https://raw.githubusercontent.com/$REPO/qa-reports/pr-$PR_NUMBER/$name-cover.png" \
-            '. + {version: $v, history: $h, links: {pdf: $pdf, cover: $cover}}' "$INPUT/context.json" > "$INPUT/context.next" && mv "$INPUT/context.next" "$INPUT/context.json"
+            --arg note "$note" \
+            '. + {version: $v, history: $h, note: $note, links: {pdf: $pdf, cover: $cover}}' "$INPUT/context.json" > "$INPUT/context.next" && mv "$INPUT/context.next" "$INPUT/context.json"
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "판: $name"
 
@@ -153,9 +204,8 @@ jobs:
           dir="qa-store/pr-$PR_NUMBER"
           name=$(jq -r .name "$OUT/verdict.json")
           cp "$OUT/$name.pdf" "$OUT/$name-cover.png" "$dir/"
-          if [ "$KIND" = final ]; then note="Post-merge: deployment and production smoke (CI #$RUN_ID)"; else note="PR stage report (CI #$RUN_ID)"; fi
-          jq --arg v "$VERSION" --arg d "$(date -u +%FT%TZ)" --argjson id "$RUN_ID" --arg note "$note" \
-            'map(select(.version != $v)) + [{version: $v, date: $d, runId: $id, note: $note}]' \
+          jq --arg v "$VERSION" --arg d "$(date -u +%FT%TZ)" --argjson id "$RUN_ID" --arg note "$REV_NOTE" --arg key "$REPORT_KEY" \
+            'map(select(.version != $v)) + [{version: $v, date: $d, runId: $id, key: $key, note: $note}]' \
             <(cat "$dir/history.json" 2>/dev/null || echo '[]') > "$dir/history.next" && mv "$dir/history.next" "$dir/history.json"
           cd qa-store
           git add -A

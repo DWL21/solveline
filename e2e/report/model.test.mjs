@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, parseCases, parseRequirements, parseThresholds } from './model.mjs';
+import { buildModel, parseCases, parseLlmQa, parseRequirements, parseThresholds } from './model.mjs';
 import { MARKER, toHtml, toMarkdown } from './render.mjs';
 
 const requirements = parseRequirements('| 번호 | 요구사항 |\n|---|---|\n| R1 | 둘러보기 | 중간 | UI 4 |\n| R11 | 운영 | 큼 | 스모크 4 |\n| TC-01 | R1 | x |');
@@ -96,4 +96,29 @@ test('개정 이력은 이전 판을 잇고 같은 판은 이번 것으로 바�
   const html = toHtml(buildModel(base({ context: ctx, smoke: { stats: { expected: 1 } } })), {});
   assert.match(html, /PR stage report \(CI #1\)/);
   assert.ok(!html.includes('>old<'));
+});
+
+test('LLM QA 결과가 있으면 절과 측정치에 더하고, 판정은 바꾸지 않는다', () => {
+  const llmQa = parseLlmQa({
+    request: { pr: 7, sha: 'a'.repeat(40) },
+    result: { summary: '요약', scenarios: [{ title: '테마 유지', criterion: '새로고침해도 유지', verdict: 'pass', actual: '유지됨' }, { title: '제목 크기', criterion: '22px', verdict: 'fail', actual: '16px' }, { title: '첫 그리기', criterion: '깜빡임 없음', verdict: 'blocked', actual: '측정 못 함' }] },
+    meta: { model: 'gpt-6.1-terra', effort: 'medium', seconds: 120 },
+    error: null,
+  });
+  assert.deepEqual([llmQa.passed, llmQa.failed, llmQa.blocked], [1, 1, 1]);
+  const m = buildModel(base({ llmQa, context: { ...base().context, note: 'PR stage report + LLM e2e QA (CI #1, LLM QA #2)' } }));
+  assert.equal(m.verdict.status, 'pass');
+  const comment = toMarkdown(m, { llm: 'https://llm' });
+  assert.match(comment, /\*\*LLM e2e QA \(advisory\)\*\* — Pass 1 · Fail 1 · Not verified 1 · gpt-6.1-terra\/medium · 2 min · \[run\]\(https:\/\/llm\)/);
+  assert.match(comment, /\| Fail \| 제목 크기 \| 22px \|/);
+  const html = toHtml(m);
+  assert.match(html, /6\.4 LLM e2e QA \(Advisory\)/);
+  assert.match(html, /PR stage report \+ LLM e2e QA \(CI #1, LLM QA #2\)/);
+  assert.equal(parseLlmQa({ request: null, result: null, meta: null, error: null }), null);
+});
+test('LLM QA를 끝내지 못했으면 계획 대비 차이에 적는다', () => {
+  const llmQa = parseLlmQa({ request: { pr: 7 }, result: null, meta: null, error: '테스트 환경이 뜨지 않았습니다.\n' });
+  const m = buildModel(base({ llmQa }));
+  assert.ok(m.deviations.includes('LLM QA를 끝내지 못했다: 테스트 환경이 뜨지 않았습니다.'));
+  assert.match(toMarkdown(m), /Error: 테스트 환경이 뜨지 않았습니다\./);
 });

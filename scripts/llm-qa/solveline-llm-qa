@@ -91,6 +91,7 @@ PLAYWRIGHT_BROWSERS_PATH="$TOOLS/browsers" timeout 20m nice -n 10 "$CODEX" exec 
   -c mcp_servers.playwright.command='"node"' \
   -c "mcp_servers.playwright.args=$MCP_ARGS" \
   -c mcp_servers.playwright.startup_timeout_sec=60 \
+  -c "mcp_servers.playwright.cwd=\"$OUT/shots\"" \
   -c mcp_servers.playwright.tool_timeout_sec=120 \
   -c mcp_servers.playwright.default_tools_approval_mode='"approve"' \
   -c 'mcp_servers.playwright.env={PLAYWRIGHT_BROWSERS_PATH="'"$TOOLS/browsers"'"}' \

@@ -131,7 +131,7 @@ llm-qa.yml  스크린샷 → qa-reports 브랜치 llm-qa/pr-<n>/<sha7>/
   - 실패 상세: 재현 단계, 기대값과 실제값
   - 테스트 초안: 접어 두기
 - 스크린샷·초안·실행 로그(비밀 가린 것)는 `qa-reports` 브랜치 `llm-qa/pr-<n>/<sha>/`에 둔다. 기존 QA 보고서와 같은 보관 방식이다.
-- 다음 PR의 QA 보고서(`qa-report.yml`)가 `llm-qa` 결과를 한 절로 묶어 보여 준다.
+- QA 보고서(`qa-report.yml`)에 반영한다. LLM QA가 결과(`llm-qa` 아티팩트)를 남기고 끝나면 보고서 워크플로가 다시 돌아, 같은 커밋의 PR CI 결과에 "LLM e2e QA (advisory)" 절(댓글 5장, PDF 6.4)과 측정치 한 줄을 더한 **새 판**(0.x를 하나 올림)을 만든다. 개정 이력에는 "PR stage report + LLM e2e QA (CI #…, LLM QA #…)"로 남고, 같은 CI·LLM QA 실행을 다시 돌리면 판 번호를 유지한다. 참고 체크라 보고서 판정(Verdict)은 바꾸지 않고, LLM QA를 끝내지 못했으면 "계획 대비 차이"에 적는다.
 
 ### 실패하면 이슈를 올린다
 
