@@ -1,0 +1,155 @@
+name: LLM QA
+# PR이 바꾼 기능을 LLM이 브라우저로 확인한다(0010). 참고 체크라 머지를 막지 않는다.
+#   CI가 통과한 PR → 대상 판정 → 요청서 → pahidc의 QA 명령(SSH 강제 명령) → 댓글·상태 llm-qa·실패 이슈
+# 이 워크플로는 기본 브랜치의 코드만 실행한다. PR 코드는 pahidc의 테스트 환경 컨테이너 안에서만 돈다.
+# PR 제목·본문 같은 글은 파일로만 넘기고 셸 식(${{ }})에 넣지 않는다.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "다시 돌릴 PR 번호(작성자·레이블 조건 없이 돈다)"
+        required: true
+        type: string
+permissions:
+  contents: write # qa-reports 브랜치에 스크린샷 보관
+  pull-requests: write
+  issues: write
+  statuses: write
+  actions: read
+concurrency:
+  group: llm-qa-${{ github.event.workflow_run.head_sha || inputs.pr }}
+  cancel-in-progress: true
+jobs:
+  qa:
+    name: LLM QA
+    if: >-
+      github.repository == 'DWL21/solveline' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
+      EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+      MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: 대상 PR·조건
+        id: target
+        run: |
+          pr="$EVENT_PR"
+          # 포크 PR은 workflow_run에 PR 번호가 없어 커밋으로 찾는다
+          [ -n "$pr" ] || pr=$(gh api "repos/$REPO/commits/$EVENT_SHA/pulls" --jq '[.[] | select(.state == "open")][0].number // empty')
+          [ -n "$pr" ] || { echo "열린 PR이 없습니다."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          info=$(gh api "repos/$REPO/pulls/$pr")
+          sha=$(jq -r .head.sha <<< "$info")
+          assoc=$(jq -r .author_association <<< "$info")
+          labeled=$(jq -r '[.labels[].name] | index("qa:llm") != null' <<< "$info")
+          state=$(jq -r .state <<< "$info")
+          # 새 커밋이 올라왔으면 그 커밋의 CI가 다시 부른다
+          if [ "$MANUAL" != true ] && [ "$sha" != "$EVENT_SHA" ]; then echo "PR #$pr에 더 새 커밋이 있습니다."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          trusted=false
+          case "$assoc" in OWNER|MEMBER|COLLABORATOR) trusted=true ;; esac
+          go=false
+          if [ "$state" = open ] && { [ "$MANUAL" = true ] || [ "$trusted" = true ] || [ "$labeled" = true ]; }; then go=true; fi
+          echo "PR #$pr ($sha) 작성자 $assoc, qa:llm $labeled → $go"
+          { echo "pr=$pr"; echo "sha=$sha"; echo "go=$go"; } >> "$GITHUB_OUTPUT"
+
+      - name: 요청서
+        id: request
+        if: steps.target.outputs.go == 'true'
+        env:
+          PR: ${{ steps.target.outputs.pr }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          mkdir -p qa
+          node scripts/llm-qa-report.mjs request qa/request.json
+
+      - name: 대상 아님(문서·설정만 바꿈)
+        if: steps.request.outputs.relevant == 'false' && env.MANUAL != 'true'
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: node scripts/llm-qa-report.mjs status success "대상 아님(화면·API 코드 변경 없음)"
+
+      - name: pahidc에서 QA
+        id: run
+        if: steps.request.outputs.relevant == 'true' || (steps.request.outcome == 'success' && env.MANUAL == 'true')
+        env:
+          PR: ${{ steps.target.outputs.pr }}
+          SHA: ${{ steps.target.outputs.sha }}
+          SSH_KEY: ${{ secrets.LLM_QA_SSH_KEY }}
+          SSH_HOST: ${{ secrets.LLM_QA_SSH_HOST }}
+          KNOWN_HOSTS: ${{ vars.LLM_QA_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p qa/out
+          if [ -z "$SSH_KEY" ] || [ -z "$SSH_HOST" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "LLM QA 접속 설정(LLM_QA_SSH_KEY·LLM_QA_SSH_HOST 비밀, LLM_QA_SSH_KNOWN_HOSTS 변수)이 없습니다." > qa/out/error.txt
+            exit 0
+          fi
+          node scripts/llm-qa-report.mjs status pending "실행 중"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/llm_qa && chmod 600 ~/.ssh/llm_qa
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # 강제 명령이라 이 키로는 QA 명령 하나만 돈다. 결과는 tar.gz로 표준 출력에 온다
+          if ssh -i ~/.ssh/llm_qa -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ConnectTimeout=20 "ubuntu@$SSH_HOST" "run $PR $SHA" < qa/request.json > qa/out.tgz; then
+            tar -xzf qa/out.tgz -C qa/out
+          else
+            echo "pahidc에 접속하지 못했거나 QA 명령이 실패했습니다(ssh 종료 코드 $?)." > qa/out/error.txt
+          fi
+          rm -f ~/.ssh/llm_qa
+          find qa/out -maxdepth 2 | sed -n 1,50p
+
+      - name: 스크린샷 보관(qa-reports 브랜치)
+        id: store
+        if: steps.run.outcome == 'success' && hashFiles('qa/out/shots/*.png') != ''
+        env:
+          PR: ${{ steps.target.outputs.pr }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch -q origin qa-reports 2>/dev/null; then
+            git worktree add -q -B qa-reports qa-store FETCH_HEAD
+          else
+            git worktree add -q --orphan -b qa-reports qa-store
+          fi
+          dir="llm-qa/pr-$PR/${SHA:0:7}"
+          mkdir -p "qa-store/$dir"
+          cp qa/out/shots/*.png "qa-store/$dir/"
+          cd qa-store
+          git add -A
+          git commit -q -m "qa: LLM QA 스크린샷 PR #$PR ${SHA:0:7}"
+          for _ in 1 2 3 4 5; do
+            if git push -q origin qa-reports; then
+              echo "base=$GITHUB_SERVER_URL/$REPO/blob/qa-reports/$dir" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git pull -q --rebase origin qa-reports
+          done
+          exit 1
+
+      - name: 댓글·상태·실패 이슈
+        if: steps.run.outcome == 'success'
+        env:
+          PR: ${{ steps.target.outputs.pr }}
+          SHA: ${{ steps.target.outputs.sha }}
+          SHOTS_BASE: ${{ steps.store.outputs.base }}
+        run: node scripts/llm-qa-report.mjs report qa/out qa/request.json
+
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.run.outcome == 'success'
+        with:
+          name: llm-qa
+          path: qa/
+          retention-days: 14
