@@ -67,9 +67,13 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 - `scripts/llm-qa/worker.sh`가 systemd 타이머로 2분마다 돈다. `solveline-bank-generate`와 같은 설치 방식이다.
 - 할 일을 찾는 법: `llm-qa=pending` 상태인 열린 PR의 최신 요청서 아티팩트를 받는다. 같은 SHA에 이미 결과가 있으면 건너뛰고, 새 커밋이 오면 이전 작업을 버린다.
 - GitHub 토큰: 이 저장소 하나만 쓰는 fine-grained 토큰을 `/etc/solveline/llm-qa.env`(root, 600)에 둔다.
-  - 권한은 Pull requests 쓰기, Commit statuses 쓰기, Actions 읽기, Contents 쓰기다. Contents 쓰기는 `qa-reports` 브랜치 업로드에만 쓴다. main은 브랜치 보호로 막혀 있어야 한다.
+  - 권한은 Pull requests 쓰기, Issues 쓰기, Commit statuses 쓰기, Actions 읽기, Contents 쓰기다. Contents 쓰기는 `qa-reports` 브랜치 업로드에만 쓴다. main은 브랜치 보호로 막혀 있어야 한다.
   - 토큰은 작업자 프로세스만 갖고 컨테이너에는 넘기지 않는다.
 - 자원: 운영 judge·runner가 우선이다.
+  - 2026-11-03 시험에서 잰 양: 테스트 환경 컨테이너 넷 약 350MB, 브라우저·Codex·MCP 약 1.6GB, 이미지 약 1.3GB.
+  - 같은 날 pahidc는 메모리 3GB 중 여유 2GB, 디스크 94%(여유 3GB)였고 다른 서비스(never-ai)도 돈다. **지금 상태로는 운영과 함께 돌릴 수 없다.** 1단계 전에 둘 중 하나를 정한다.
+    - pahidc를 늘린다(메모리 8GB 이상, 디스크 여유 10GB 이상).
+    - QA 전용 일반 인스턴스를 둔다. 같은 작업자·compose를 그대로 쓰고, Codex 로그인만 그 인스턴스에 한다. runner 이미지가 x86_64 전용이라(JDK 21.0.2) x86_64 인스턴스여야 한다.
   - QA 컨테이너 전체를 `--cpus 1.5`·메모리 3GB로 제한하고 `nice 10`으로 돌린다.
   - judge 대기열이 길면(`/health`의 queued > 5) 시작을 미룬다.
   - 하루 최대 횟수(`LLM_QA_DAILY_MAX`, 기본 20)를 넘기면 `success`("확인 못 함: 오늘 한도 초과")로 끝낸다(판정과 결과 참고). 0009의 문제 자동 제작(04:00)과 Codex 사용량을 나눠 쓴다.
@@ -84,11 +88,14 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 | `qa-browser`(Playwright MCP, chromium) | 테스트 환경 내부 망만(`internal: true`, 인터넷 없음) | 테스트 환경 웹 주소만 허용(`--allowed-origins`) |
 | `qa-mcp`(우리 MCP, Node) | 테스트 환경 내부 망만 | `TEST_AUTH_TOKEN`. 도구로 역할별 테스트 로그인(`login_as`), 예제 데이터 넣기(`seed_problem`), 결과 기록(`report_scenario`, 스크린샷 저장)만 준다. 토큰 값은 모델에 보이지 않는다 |
 
-- Codex 실행 형태는 `generate.sh`와 같다: `codex exec --sandbox read-only -c approval_policy="never"`. MCP 서버로 `qa_browser`와 `qa`를 HTTP(SSE)로 붙인다. 둘 다 다른 컨테이너라 stdio로 띄우지 않는다.
+- Codex 실행 형태는 `generate.sh`와 같다: `codex exec --ignore-user-config --sandbox read-only --ephemeral -c approval_policy="never"`. MCP 서버로 `qa_browser`와 `qa`를 HTTP(SSE)로 붙인다. 둘 다 다른 컨테이너라 stdio로 띄우지 않는다.
+  - 모델: 기본 `gpt-6.1-terra`, 추론 강도 `medium`. `LLM_QA_MODEL`·`LLM_QA_EFFORT`로 바꾼다. ChatGPT 로그인으로 이 모델을 쓰려면 Codex CLI 0.164.0 이상이 필요하다(0.155.1은 "지원하지 않는 모델"로 거절된다). `qa-agent` 이미지에서 CLI 버전을 고정한다.
+  - `--ignore-user-config`: 사용자 `config.toml`의 모델·MCP 서버·hook을 읽지 않는다. 로그인(`auth.json`)만 쓴다. 시험에서 이 옵션 없이 돌리자 개발 PC의 다른 MCP 서버(데스크톱 제어 포함)까지 불러왔다.
+  - 로그인 상태는 실행마다 새로 만든다. 모델이 로그아웃 시나리오를 돌리면 서버에서 세션이 끊기므로, 다음 실행에 같은 쿠키를 쓰면 비회원으로 돈다(시험에서 실제로 일어남).
 - 프롬프트 줄거리:
   1. `qa.guide`를 읽는다. 저장소의 `docs/quality/llm-qa-guide.md`를 서버가 준다. 0009처럼 지침을 고치면 모델과 상관없이 함께 적용된다.
   2. 요청서의 완료 기준과 변경 파일로 시나리오 3~8개를 만든다. 정상 경로 하나, 경계·오류 하나, 권한 하나, 휴대폰 폭 하나를 포함한다.
-  3. 시나리오마다 브라우저로 실행하고 `report_scenario`로 기록한다. 기록 형식은 `{ id, title, criterion, steps, expected, actual, verdict: pass|fail|blocked, screenshots }`이다.
+  3. 시나리오마다 브라우저로 실행하고 `report_scenario`로 기록한다. 재현 단계는 다른 사람이 그대로 따라 할 수 있게 연 주소·누른 요소·입력값·화면 크기를 적는다(시험에서 "라이트 모드 버튼을 누른다"처럼 주소 없는 단계가 나왔다). 기록 형식은 `{ id, title, criterion, steps, expected, actual, verdict: pass|fail|blocked, screenshots }`이다.
   4. 자동화가 없는 완료 기준은 Playwright 테스트 초안을 `report_suggestion`으로 남긴다.
 - 프롬프트 인젝션 대비:
   - PR 본문·코드·화면 글자는 데이터로만 다루라고 지침에 적는다.
@@ -121,6 +128,23 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 - 스크린샷·초안·실행 로그(비밀 가린 것)는 `qa-reports` 브랜치 `llm-qa/pr-<n>/<sha>/`에 둔다. 기존 QA 보고서와 같은 보관 방식이다.
 - 다음 PR의 QA 보고서(`qa-report.yml`)가 `llm-qa` 결과를 한 절로 묶어 보여 준다.
 
+### 실패하면 이슈를 올린다
+
+실패(`fail`) 시나리오마다 작업자가 GitHub 이슈를 하나씩 만든다. PR 댓글은 다음 커밋에서 덮이지만, 이슈는 결함을 고칠 때까지 남는다.
+
+- 제목: `bug(qa): <시나리오 제목> — PR #<n> LLM QA 실패`. 레이블은 `bug`·`qa:llm`. 본문 끝에 원래 PR을 연결하되 `Closes`는 쓰지 않는다.
+- 본문은 AGENTS.md 이슈 형식(`## 배경`/`## 범위`/`## 완료 기준`)에 아래를 더한다. 작업자가 정해진 틀로 채우고, 모델이 쓴 글은 인용 블록에 넣는다. 길이를 자르고 `@`·`#숫자`가 멘션·자동 연결이 되지 않게 바꾼다.
+  - **배경**: PR 번호·SHA, 확인한 완료 기준, 환경(테스트 환경·브라우저·화면 크기·계정 역할), 모델과 실행 기록 링크
+  - **재현 단계**: 번호를 매긴 단계. 지침에서 "다른 사람이 그대로 따라 할 수 있게, 주소·누른 것·입력값을 구체적으로"를 요구한다
+  - **기대 결과 / 실제 결과**
+  - **근거**: 스크린샷 링크(`qa-reports`), 콘솔 오류, 실패한 네트워크 요청, 측정값(색·크기·대비)
+  - **완료 기준**: 재현 단계에서 기대 결과가 나오고, 재현 테스트가 CI에서 통과한다
+- 같은 결함을 다시 올리지 않는다. PR·시나리오 제목·기대 결과로 지문을 만들어 본문에 숨겨 두고(`<!-- llm-qa:<지문> -->`), 열린 이슈에 같은 지문이 있으면 새로 만들지 않고 댓글로 "다시 실패(SHA)"만 더한다.
+- 다음 실행에서 같은 시나리오가 통과하면 이슈에 "통과(SHA)" 댓글을 남긴다. 닫는 것은 사람이 한다.
+- 오탐이면 사람이 `qa:false-positive` 레이블을 붙여 닫는다. 이 레이블 수가 거짓 실패율 지표가 된다.
+- 한 실행에서 이슈는 최대 5개까지 만든다. 나머지는 PR 댓글에만 둔다(폭주 방지).
+- `확인 못 함`(`blocked`)은 이슈로 만들지 않는다.
+
 ### 다시 돌리기
 
 - PR 댓글 `/llm-qa`(작성자·관리자만) 또는 `qa:llm` 레이블을 다시 붙이면 같은 SHA로 재실행한다.
@@ -133,6 +157,15 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 2. **LLM QA**
    - `qa-agent`·`qa-browser`·`qa-mcp` 컨테이너, 지침(`llm-qa-guide.md`), 시나리오·스크린샷·초안.
    - #171의 CSP 문제(사람이 찾은 결함)를 재현 사례로 써서, 고치기 전 커밋(`9abf426`)에서 LLM이 찾는지 확인한다.
+   - 2026-11-03 개발 PC 시험(같은 Docker 테스트 환경, Codex 0.164.0 + Playwright MCP 0.0.83, 컨테이너 분리 없이 `--allowed-origins`로 테스트 환경만 허용, 로그인은 쿠키 파일로 주고 토큰은 모델에 주지 않음). 결과는 아래 표와 같다.
+
+     | 모델 | 시나리오 | CSP 결함 | 그 밖 | 토큰 |
+     |---|---|---|---|---|
+     | `gpt-6-astra`(기본) | 8개: 통과 4 · 실패 3 · 확인 못 함 1 | 찾음(첫 테마·새로고침 유지, 콘솔 CSP 오류 근거) | 휴대폰에서 테마 버튼이 사라졌다는 실패는 오탐(사용자 메뉴로 옮김). 터치 기기 버튼 32~40px 측정은 참고할 만함 | 약 4.8만 |
+     | `gpt-6.1-terra` | 6개: 통과 2 · 실패 2 · 확인 못 함 2 | 찾음(같은 근거) | 오탐 없음. 휴대폰 사용자 메뉴의 테마 항목까지 확인. 실행 약 1분 | 약 7만 |
+
+     - 두 모델 모두 "DESIGN.md·토큰 치환" 같은 저장소 기준은 브라우저로 확인할 수 없어 `blocked`로 남겼다. 지침에서 브라우저로 확인할 수 없는 기준은 시나리오로 만들지 말고 요약에만 적게 한다.
+     - 실패 2건으로 이슈 본문 초안을 만들어 형식을 확인했다(실제로 올리지는 않음. 결함은 #171에서 이미 고침).
 3. **보조안·고도화**
    - pahidc가 응답하지 않으면 Actions에서 GitHub Models로 "완료 기준 → 시나리오 계획"만 만들어 댓글로 남긴다.
    - 거짓 실패율 지표, 필수 체크 승격 검토.
@@ -140,6 +173,6 @@ pahidc  solveline-llm-qa.timer(2분) ─▶ 작업자: 대기 요청 확인(GitH
 ## 결과
 
 - 새 비밀: `/etc/solveline/llm-qa.env`(fine-grained GitHub 토큰). GitHub Environment에 넣지 않고 pahidc에만 둔다. 이 저장소의 워크플로는 이 토큰을 모른다.
-- 새 상태 체크 `llm-qa`(필수 아님), 새 레이블 `qa:llm`.
+- 새 상태 체크 `llm-qa`(필수 아님), 새 레이블 `qa:llm`·`qa:false-positive`. 실패하면 이슈가 자동으로 생긴다.
 - pahidc에 QA 전용 compose 프로젝트(`solveline-qa-*`)가 잠깐 뜬다. 운영 compose(`solveline-production`)와 네트워크·볼륨을 나눈다. 테스트 환경 데이터는 tmpfs라 남지 않는다.
 - 사용자 코드 실행은 여전히 테스트 환경의 runner 컨테이너에서만 한다(샌드박스 규칙 그대로).
