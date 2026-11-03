@@ -607,6 +607,30 @@ describe('로그인 사용자의 구독·인박스', () => {
     expect(after.unread).toBe(1);
   });
 
+  it('임시 계정은 인박스로만 구독하고 메일은 켤 수 없다', async () => {
+    const app = buildUser();
+    await addProblem(app);
+    const res = await app.request('/api/auth/temporary', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const cookie = res.headers.get('set-cookie')!.split(';')[0]!;
+    expect(await settings(app, cookie)).toMatchObject({ temporary: true, mail: false });
+    const mailOn = await put(app, cookie, MAIL_ON);
+    expect(mailOn.status).toBe(403);
+    expect(((await mailOn.json()) as { error: { code: string } }).error.code).toBe('daily_mail_temporary');
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: false });
+    expect((await put(app, cookie, { ...MAIL_ON, mail: false })).status).toBe(200);
+    expect(await settings(app, cookie)).toMatchObject({ subscribed: true, mail: false, temporary: true });
+    expect((await inbox(app, cookie)).items.map((i) => i.date)).toEqual([DATE]);
+    expect(sender.sent).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) FROM daily_subscribers').pluck().get()).toBe(0);
+    expect(await settings(app, await login(app, 'a@example.com'))).toMatchObject({ temporary: false });
+  });
+
+  it('공개 구독 신청에 임시 계정 주소는 받지 않는다', async () => {
+    const res = await build().request('/api/public/daily/subscribe', post({ email: 'x@temporary.invalid', consent: true }));
+    expect(res.status).toBe(400);
+    expect(sender.sent).toHaveLength(0);
+  });
+
   it('고른 요일에만 메일을 보낸다', async () => {
     const app = buildUser();
     await addProblem(app);

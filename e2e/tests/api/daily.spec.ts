@@ -41,6 +41,16 @@ test.describe('일일 미니 문제', { tag: '@R12' }, () => {
     expect((await api.inbox()).items[0]).toMatchObject({ problemId: item.problemId, progress: 'solved' });
   });
 
+  test('임시 계정은 인박스로만 구독하고, 메일을 켜면 Google 가입을 안내한다', async ({ api }) => {
+    await api.createDailyProblem(aDailyProblem());
+    expect((await api.request.post('/api/auth/temporary', { data: {} })).status()).toBe(200);
+    const denied = await api.fail(api.request.put('/api/me/daily/settings', { data: { subscribed: true, mail: true, weekdays: [1, 2, 3, 4, 5] } }));
+    expect(denied).toMatchObject({ status: 403, code: 'daily_mail_temporary' });
+    const saved = await api.saveDailySettings({ subscribed: true, mail: false, weekdays: [1, 2, 3, 4, 5] });
+    expect(saved).toMatchObject({ subscribed: true, mail: false, temporary: true });
+    expect((await api.inbox()).items).toHaveLength(1);
+  });
+
   test('관리자 일일 메일 화면과 문제은행 내부 경로는 권한이 있어야 쓴다', async ({ api, signIn }) => {
     expect((await api.fail(api.request.get('/api/admin/daily/problems'))).status).toBe(401);
     expect((await api.fail(api.request.post('/api/internal/daily/bank', { data: { agent: 'x', tool: 'bank_overview', args: {} } }))).status).toBe(401);

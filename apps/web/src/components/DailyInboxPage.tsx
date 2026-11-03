@@ -4,6 +4,7 @@ import type { DailyInbox, DailyInboxItem, DailySettings, DailySettingsInput } fr
 import { ApiError, api, qk } from '../lib/api.ts';
 import { loginHref, useMe } from '../lib/me.ts';
 import { LinesSkeleton } from './Loading.tsx';
+import { GoogleMark, startGoogleLogin } from './LoginScreen.tsx';
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : '요청을 처리하지 못했어요');
 
@@ -14,6 +15,19 @@ const WEEKDAYS = [
   { day: 4, label: '목' },
   { day: 5, label: '금' },
 ];
+
+/** 임시 계정: 인박스로만 받는다. 메일은 Google 계정으로 가입해야 받는다(가입하면 인박스로 돌아온다) */
+function GoogleSignupNudge() {
+  return (
+    <div className="mt-3 rounded-md border border-line bg-raised p-4">
+      <p className="text-ui font-semibold">임시 계정은 인박스로만 받아요</p>
+      <p className="mt-1 text-ui text-dim">Google 계정으로 가입하면 매일 아침 메일로도 받아요. 임시 계정에서 받은 문제와 풀이 기록은 옮겨지지 않아요.</p>
+      <button type="button" className="btn-ghost mt-3 gap-2" onClick={startGoogleLogin}>
+        <GoogleMark /> Google 계정으로 가입하기
+      </button>
+    </div>
+  );
+}
 
 /** 수신 설정: 바꾸는 즉시 저장한다. 받는 주소는 로그인 계정의 이메일이라 보여 주기만 한다 */
 function SettingsPanel({ settings }: Readonly<{ settings: DailySettings }>) {
@@ -32,6 +46,7 @@ function SettingsPanel({ settings }: Readonly<{ settings: DailySettings }>) {
   return (
     <section className="rounded-lg border border-line bg-panel p-5" aria-label="수신 설정">
       <h2 className="text-body font-bold">수신 설정</h2>
+      {settings.temporary ? <GoogleSignupNudge /> : <>
       <p className="mt-1 break-all text-ui text-dim">받는 주소: {settings.email}</p>
       <label className="mt-4 flex items-center gap-2 text-body">
         <input type="checkbox" checked={settings.mail} disabled={save.isPending || !settings.mailAvailable || settings.mailBlocked} onChange={(e) => change({ mail: e.target.checked })} />
@@ -53,6 +68,7 @@ function SettingsPanel({ settings }: Readonly<{ settings: DailySettings }>) {
           })}
         </div>
       </fieldset>
+      </>}
       <button type="button" className="btn-ghost mt-5" disabled={save.isPending} onClick={() => change({ subscribed: false, mail: false })}>
         구독 그만두기
       </button>
@@ -64,7 +80,7 @@ function SettingsPanel({ settings }: Readonly<{ settings: DailySettings }>) {
 function SubscribeCard({ settings }: Readonly<{ settings: DailySettings }>) {
   const qc = useQueryClient();
   const subscribe = useMutation({
-    mutationFn: () => api.saveDailySettings({ subscribed: true, mail: settings.mailAvailable && !settings.mailBlocked, weekdays: settings.weekdays }),
+    mutationFn: () => api.saveDailySettings({ subscribed: true, mail: settings.mailAvailable && !settings.mailBlocked && !settings.temporary, weekdays: settings.weekdays }),
     onSuccess: (data) => qc.setQueryData(qk.dailySettings, data),
     onError: () => void qc.invalidateQueries({ queryKey: qk.dailySettings }),
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.dailyInbox }),
@@ -73,14 +89,15 @@ function SubscribeCard({ settings }: Readonly<{ settings: DailySettings }>) {
     <section className="rounded-lg border border-line bg-panel p-5">
       <h2 className="text-lead font-bold">평일마다 나에게 맞춘 한 문제</h2>
       <p className="mt-2 text-body text-dim">코딩 테스트 준비용 미니 문제를 평일 아침 7시에 보내 드려요. 풀이 기록을 보고 약한 유형과 알맞은 난이도로 사람마다 다르게 골라요. 구독하면 첫 문제를 바로 받아요.</p>
-      {settings.mailAvailable && !settings.mailBlocked && <p className="mt-1 break-all text-ui text-dim">{settings.email}(으)로 메일도 함께 보내 드려요. 수신 설정에서 언제든 끌 수 있어요.</p>}
+      {settings.mailAvailable && !settings.mailBlocked && !settings.temporary && <p className="mt-1 break-all text-ui text-dim">{settings.email}(으)로 메일도 함께 보내 드려요. 수신 설정에서 언제든 끌 수 있어요.</p>}
       <p className="mt-3 text-caption text-dim">
         구독하면 이메일과 수신 기록을 일일 문제 제공에 사용하고, 메일 발송을 Resend(미국)에 맡겨요. 자세한 내용은 <a href="/privacy" className="underline">개인정보처리방침</a>을 확인해 주세요.
       </p>
       <button type="button" className="btn-primary mt-4" disabled={subscribe.isPending} onClick={() => subscribe.mutate()}>
-        {subscribe.isPending ? '구독하는 중…' : '구독하기'}
+        {subscribe.isPending ? '구독하는 중…' : settings.temporary ? '인박스로 구독하기' : '구독하기'}
       </button>
       {subscribe.isError && <p role="alert" className="mt-3 text-ui text-bad">{errMsg(subscribe.error)}</p>}
+      {settings.temporary && <GoogleSignupNudge />}
     </section>
   );
 }

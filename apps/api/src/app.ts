@@ -75,6 +75,8 @@ import {
   SignupRequest,
   TERMS_VERSION,
   PRIVACY_VERSION,
+  TEMPORARY_EMAIL_DOMAIN,
+  isTemporaryEmail,
 } from '@solveline/shared';
 import type { Config } from './config.ts';
 import { SignupSettingsStore, CollectionStore, FolderStore, ProblemStore, StoreError, UserStore, type GoogleProfile } from './db.ts';
@@ -246,6 +248,7 @@ export function createApp(deps: AppDeps) {
     const input = await readJson(c, DailySubscribeInput);
     if (!input) return fail(c, 400, 'invalid_request', '이메일과 수신 동의를 확인해 주세요.');
     const email = normalizeEmail(input.email);
+    if (isTemporaryEmail(email)) return fail(c, 400, 'invalid_request', '받을 수 있는 이메일 주소를 넣어 주세요.');
     const accepted = () => ok(c, DailySubscribeResult, { status: 'pending' });
     const existing = await daily.byEmail(email);
     if (existing && ['active', 'bounced', 'complained'].includes(existing.status)) return accepted();
@@ -455,7 +458,7 @@ export function createApp(deps: AppDeps) {
     const adjectives = ['말랑한', '포근한', '반짝이는', '따뜻한', '씩씩한', '수줍은', '발랄한', '졸린', '행복한', '상냥한'];
     const nouns = ['구름', '토끼', '다람쥐', '고양이', '햄스터', '펭귄', '오리', '곰', '별', '병아리'];
     const name = `${adjectives[randomInt(adjectives.length)]} ${nouns[randomInt(nouns.length)]}`;
-    const user = await users.create({ sub: `temporary:${id}`, email: `${id}@temporary.invalid`, name, picture: '' },
+    const user = await users.create({ sub: `temporary:${id}`, email: `${id}@${TEMPORARY_EMAIL_DOMAIN}`, name, picture: '' },
       { terms: 'temporary', privacy: 'temporary' }, {}, new Date(now()));
     const s = await startSession(c, user.id, true);
     return ok(c, Session, await sessionBody({ expiresAt: s.expiresAt, userId: user.id }));
@@ -831,6 +834,7 @@ export function createApp(deps: AppDeps) {
     if (!input) return fail(c, 400, 'invalid_request', '수신 설정을 확인해 주세요.');
     const user = await dailyUser(c);
     const result = await daily.saveSettings(user, input, dailyConfig, now());
+    if (result === 'temporary') return fail(c, 403, 'daily_mail_temporary', '임시 계정은 인박스로만 받을 수 있어요. 메일로 받으려면 Google 계정으로 가입해 주세요.');
     if (result === 'full') return fail(c, 409, 'daily_full', '메일 구독 인원이 다 찼어요. 인박스로는 계속 받을 수 있어요.');
     if (result === 'blocked') return fail(c, 409, 'daily_mail_blocked', '반송이나 스팸 신고가 있었던 주소라 메일을 보낼 수 없어요. 인박스로는 계속 받을 수 있어요.');
     if (input.subscribed && (await daily.firstTime(user.id))) {

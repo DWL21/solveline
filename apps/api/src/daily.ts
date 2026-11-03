@@ -1,4 +1,4 @@
-import type { DailyAdminOverview, DailyBankCell, DailyInbox, DailyProblemDetail, DailyProblemStatus, DailyProblemSummary, DailySendResult, DailySettings, DailySettingsInput, DailySubscriber, DailyTopic, TestCase } from '@solveline/shared';
+import { isTemporaryEmail, type DailyAdminOverview, type DailyBankCell, type DailyInbox, type DailyProblemDetail, type DailyProblemStatus, type DailyProblemSummary, type DailySendResult, type DailySettings, type DailySettingsInput, type DailySubscriber, type DailyTopic, type TestCase } from '@solveline/shared';
 import type { DailyConfig } from './config.ts';
 import { randomToken, sha256Hex } from './crypto.ts';
 import { MailSendError, type MailSender, type OutgoingMail } from './mail-sender.ts';
@@ -207,12 +207,14 @@ export class DailyStore {
       mail: sub?.status === 'active',
       mailAvailable: !!config,
       mailBlocked: sub?.status === 'bounced' || sub?.status === 'complained',
+      temporary: isTemporaryEmail(user.email),
       weekdays: sub ? fromWeekdayMask(sub.weekdays) : [1, 2, 3, 4, 5],
     };
   }
 
-  /** 구독(인박스)과 메일 수신을 함께 정한다. 계정 이메일은 로그인에서 인증되어 확인 메일을 보내지 않는다. 메일 자리가 없어도 인박스는 받을 수 있다 */
-  async saveSettings(user: DailyUser, input: DailySettingsInput, config: DailyConfig | null, now: number): Promise<'ok' | 'full' | 'blocked'> {
+  /** 구독(인박스)과 메일 수신을 함께 정한다. 계정 이메일은 로그인에서 인증되어 확인 메일을 보내지 않는다. 메일 자리가 없어도 인박스는 받을 수 있다. 임시 계정은 받을 주소가 없어 메일을 켤 수 없다 */
+  async saveSettings(user: DailyUser, input: DailySettingsInput, config: DailyConfig | null, now: number): Promise<'ok' | 'full' | 'blocked' | 'temporary'> {
+    if (input.subscribed && input.mail && isTemporaryEmail(user.email)) return 'temporary';
     const today = kstDate(now);
     if (input.subscribed) {
       await this.sql.run('INSERT INTO daily_members (user_id, started_date) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET ended_date = NULL', user.id, today);
