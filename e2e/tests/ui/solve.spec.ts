@@ -72,4 +72,19 @@ test.describe('문제 풀기', { tag: '@R3' }, () => {
     await page.reload();
     await expect(page.getByRole('textbox', { name: '코드 에디터' })).toContainText(marker);
   });
+
+  test('문제를 내 폴더로 옮기면 새로고침 후에도 그 폴더에서 볼 수 있다', { tag: '@R4' }, async ({ page, pageApi, home, workspace, seedProblem }) => {
+    const p = await seedProblem();
+    const folder = await pageApi.createFolder(`재방문 ${p.id.slice(0, 6)}`);
+    await workspace.open(p.id);
+    await workspace.moveToFolder(folder.name);
+    await expect.poll(async () => (await pageApi.problem(p.id)).folderId, { timeout: 45_000 }).toBe(folder.id);
+
+    await home.open();
+    await expect(home.folder(folder.name, 1)).toBeVisible();
+    await page.reload();
+    await home.folder(folder.name, 1).click();
+    await expect(home.heading).toHaveText(folder.name);
+    await expect(home.row(p.title)).toBeVisible();
+  });
 });
