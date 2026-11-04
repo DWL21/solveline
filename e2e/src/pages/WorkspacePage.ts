@@ -41,6 +41,10 @@ export class WorkspacePage {
     await this.page.getByRole('combobox', { name: '언어' }).selectOption({ label: name });
   }
 
+  async moveToFolder(name: string) {
+    await this.page.getByLabel('폴더', { exact: true }).selectOption({ label: name });
+  }
+
   /** 휴대폰에서는 키보드(에디터 초점)가 열려 있으면 실행 바가 숨는다 → 초점을 빼고 누른다 */
   private async focusOut() {
     await this.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());

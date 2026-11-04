@@ -37,6 +37,10 @@ export class HomePage {
     return this.page.getByRole('button', { name: title });
   }
 
+  folder(name: string, count: number) {
+    return this.page.getByRole('button', { name: `${name} ${count}`, exact: true });
+  }
+
   card(name: string) {
     return this.collectionCards.filter({ hasText: name }).getByRole('button').first();
   }
