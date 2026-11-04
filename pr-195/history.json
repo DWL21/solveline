@@ -5,5 +5,12 @@
     "runId": 41756431196,
     "key": "41756431196",
     "note": "PR stage report (CI #41756431196)"
+  },
+  {
+    "version": "1.0",
+    "date": "2026-11-04T01:57:53Z",
+    "runId": 41756989229,
+    "key": "41756989229",
+    "note": "Post-merge: deployment and production smoke (CI #41756989229)"
   }
 ]
