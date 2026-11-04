@@ -3,6 +3,30 @@ import { evidence } from '../../src/evidence.ts';
 
 /** 비회원: 둘러보기는 되고, 코드 작성·실행은 로그인 뒤 */
 test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
+  for (const { scheme, initialNext, chosenNext } of [
+    { scheme: 'dark', initialNext: '라이트', chosenNext: '다크' },
+    { scheme: 'light', initialNext: '다크', chosenNext: '라이트' },
+  ] as const) {
+    test(`기기 테마가 ${scheme}일 때 선택한 테마가 새로고침 후에도 유지된다`, async ({ page, home }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await home.openCollections();
+      await expect(home.themeButton(initialNext)).toBeVisible();
+      const header = page.getByRole('banner');
+      const initialBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
+      await page.reload();
+      await expect(home.themeButton(initialNext)).toBeVisible();
+      await expect(header).toHaveCSS('background-color', initialBackground);
+
+      await home.themeButton(initialNext).click();
+      await expect(home.themeButton(chosenNext)).toBeVisible();
+      await expect.poll(() => header.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(initialBackground);
+      const chosenBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
+      await page.reload();
+      await expect(home.themeButton(chosenNext)).toBeVisible();
+      await expect(header).toHaveCSS('background-color', chosenBackground);
+    });
+  }
+
   test('첫 화면의 컬렉션 카드에서 문제를 열면 읽기 전용이고, 로그인하기가 보인다', async ({ page, home, seedProblem, editorApi }) => {
     const p = await seedProblem();
     const col = await editorApi.createCollection({ name: `E2E 둘러보기/${p.id.slice(0, 6)}`, description: '첫 줄 설명\n둘째 줄은 카드에 안 보인다' });
