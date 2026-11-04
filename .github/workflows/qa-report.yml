@@ -224,6 +224,12 @@ jobs:
           id=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
           if [ -n "$id" ]; then
+            # CI 보고서와 LLM QA 보고서가 따로 돌아 늦게 끝난 옛 판이 최신 판을 덮어쓰지 않게 한다
+            current=$(gh api "repos/$REPO/issues/comments/$id" --jq .body | sed -n 's/^<!-- version: \([0-9.]*\) -->$/\1/p' | head -n 1)
+            if [ -n "$current" ] && [ "$current" != "$VERSION" ] && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)" = "$current" ]; then
+              echo "댓글에 더 높은 판(v$current)이 있어 v$VERSION으로 덮어쓰지 않는다."
+              exit 0
+            fi
             gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@"$OUT/comment.md" --jq .html_url
           else
             gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$OUT/comment.md" --jq .html_url

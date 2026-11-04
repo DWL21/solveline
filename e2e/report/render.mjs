@@ -75,6 +75,8 @@ export function toMarkdown(m, links = {}) {
   const L = [];
   const pdf = m.links.pdf;
   L.push(MARKER);
+  // 판 번호: 워크플로가 더 높은 판을 옛 판으로 덮어쓰지 않게 읽는다
+  L.push(`<!-- version: ${m.version} -->`);
   L.push(`## QA Test Completion Report · ${stage(m)}`);
   L.push('');
   L.push(`**Verdict: ${m.verdict.label}**  `);
@@ -88,6 +90,14 @@ export function toMarkdown(m, links = {}) {
     L.push(`**PDF:** [${m.id} v${m.version}.pdf](${pdf})${links.report ? ` · [workflow run](${links.report})` : ''}`);
     if (m.links.cover) L.push('', `<a href="${pdf}"><img src="${m.links.cover}" width="320" alt="${m.id} v${m.version} cover"></a>`);
     L.push('');
+  }
+  // 이전 판은 접어 두고 최신 판만 펼친다
+  const older = m.history.filter((x) => x.version !== m.version).reverse();
+  if (older.length) {
+    const pdfOf = (v) => (pdf ? pdf.replace(`-v${m.version}.pdf`, `-v${v}.pdf`) : null);
+    L.push(`<details><summary>이전 판 ${older.length}개</summary>`, '', '| Version | Date | Description | PDF |', '|---|---|---|---|');
+    for (const x of older) L.push(`| ${md(x.version)} | ${date(x.date)} | ${md(x.note)} | ${pdfOf(x.version) ? `[v${md(x.version)}](${pdfOf(x.version)})` : '—'} |`);
+    L.push('', '</details>', '');
   }
   L.push('### 1. Summary of Testing Performed');
   const total = (m.unit?.tests ?? 0) + (m.e2e?.total ?? 0) + (m.smoke?.total ?? 0);

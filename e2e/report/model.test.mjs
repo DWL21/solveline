@@ -122,3 +122,16 @@ test('LLM QA를 끝내지 못했으면 계획 대비 차이에 적는다', () =>
   assert.ok(m.deviations.includes('LLM QA를 끝내지 못했다: 테스트 환경이 뜨지 않았습니다.'));
   assert.match(toMarkdown(m), /Error: 테스트 환경이 뜨지 않았습니다\./);
 });
+test('댓글은 최신 판만 펼치고 이전 판은 접은 목록에 PDF 링크와 함께 둔다', () => {
+  const history = [
+    { version: '0.1', date: '2026-11-03T16:49:52Z', note: 'PR stage report (CI #1)' },
+    { version: '0.2', date: '2026-11-03T16:51:58Z', note: 'PR stage report + LLM e2e QA (CI #1, LLM QA #2)' },
+  ];
+  const m = buildModel(base({ context: { ...base().context, version: '0.3', history, links: { pdf: 'https://x/pr-7/QA-TCR-PR7-v0.3.pdf' } } }));
+  const comment = toMarkdown(m);
+  assert.match(comment.split('\n')[1], /^<!-- version: 0\.3 -->$/);
+  assert.match(comment, /<details><summary>이전 판 2개<\/summary>/);
+  assert.ok(comment.indexOf('| 0.2 |') < comment.indexOf('| 0.1 |'), '최근 판이 위');
+  assert.match(comment, /\[v0\.1\]\(https:\/\/x\/pr-7\/QA-TCR-PR7-v0\.1\.pdf\)/);
+  assert.equal(toMarkdown(buildModel(base())).includes('이전 판'), false);
+});

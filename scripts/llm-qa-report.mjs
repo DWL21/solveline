@@ -278,7 +278,10 @@ async function main([cmd, ...args]) {
     }
     const filed = fileIssues(repo, sha, drafts, runUrl);
     if (!error) notePassed(repo, request.pr, sha, result, runUrl);
-    upsertComment(repo, request.pr, comment({ result, error, meta, pr: request.pr, sha, runUrl, shotsBase, issues: filed }));
+    // 옛 커밋의 실행이 늦게 끝나면 댓글은 그대로 둔다(최신 커밋 결과만 보인다). 상태·이슈는 그 커밋 기준으로 단다
+    const head = gh(['api', `repos/${repo}/pulls/${request.pr}`, '--jq', '.head.sha']).trim();
+    if (head === sha) upsertComment(repo, request.pr, comment({ result, error, meta, pr: request.pr, sha, runUrl, shotsBase, issues: filed }));
+    else console.log(`PR 최신 커밋(${head.slice(0, 7)})이 아니라 댓글은 고치지 않는다`);
     setStatus(repo, sha, st, runUrl);
     console.log(`상태 ${st.state}: ${st.description} / 이슈 새로 ${filed.filter((f) => f.created).length}개, 기존 ${filed.filter((f) => !f.created).length}개`);
   } else {
