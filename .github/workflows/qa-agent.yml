@@ -1,0 +1,147 @@
+name: QA agent
+# 사람이 고른 QA 이슈를 pahidc Codex 에이전트가 맡아 draft PR을 연다(0011). 머지는 언제나 사람이 한다.
+#   이슈에 qa:agent 레이블(쓰기 권한자) → 판정 → 작업서 → pahidc "fix"(터널·QA 전용 sshd) → 패치 검사 → 브랜치·draft PR → CI 시작
+# 이 워크플로는 기본 브랜치의 코드만 실행한다. 이슈 글은 파일로만 넘기고, 에이전트가 만든 패치는 적용·커밋만 하고 실행하지 않는다.
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "다시 맡길 이슈 번호(qa:agent와 종류 레이블이 붙어 있어야 한다)"
+        required: true
+        type: string
+permissions:
+  contents: write # 에이전트 브랜치 푸시
+  pull-requests: write
+  issues: write
+  actions: write # CI 시작(GITHUB_TOKEN으로 만든 PR은 CI를 자동으로 부르지 않는다)
+concurrency:
+  group: qa-agent-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: false
+jobs:
+  agent:
+    name: QA agent
+    if: github.repository == 'DWL21/solveline' && (github.event_name == 'workflow_dispatch' || github.event.label.name == 'qa:agent')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      SENDER: ${{ github.event.sender.login || github.actor }}
+      LABEL: ${{ github.event.label.name || 'qa:agent' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: 판정
+        id: decide
+        run: |
+          mkdir -p qa
+          perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
+          # 판정 규칙은 scripts/llm-qa/policy.json의 agent, 판정은 scripts/qa-agent.mjs의 decideAgent()
+          gh api "repos/$REPO/issues/$ISSUE" | jq --arg label "$LABEL" --arg perm "$perm" \
+            '{number, title, body, state, labels: [.labels[].name], isPullRequest: (.pull_request != null), label: $label, senderPermission: $perm}' > qa/issue.json
+          node scripts/qa-agent.mjs decide qa/issue.json
+
+      - name: 맡지 않음(종류)
+        if: steps.decide.outputs.action == 'reject'
+        env:
+          REASON: ${{ steps.decide.outputs.reason }}
+        run: node scripts/qa-agent.mjs comment rejected "$REASON" | gh issue comment "$ISSUE" -R "$REPO" --body-file -
+
+      - name: pahidc 에이전트
+        id: run
+        if: steps.decide.outputs.action == 'run'
+        env:
+          SSH_KEY: ${{ secrets.LLM_QA_SSH_KEY }}
+          SSH_HOST: ${{ secrets.LLM_QA_SSH_HOST }}
+          KNOWN_HOSTS: ${{ vars.LLM_QA_SSH_KNOWN_HOSTS }}
+          CLOUDFLARED_VERSION: "2026.10.1"
+          CLOUDFLARED_SHA256: 3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586
+        run: |
+          mkdir -p qa/out
+          node scripts/qa-agent.mjs comment start | gh issue comment "$ISSUE" -R "$REPO" --body-file -
+          if [ -z "$SSH_KEY" ] || [ -z "$SSH_HOST" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "접속 설정(LLM_QA_SSH_KEY·LLM_QA_SSH_HOST 비밀, LLM_QA_SSH_KNOWN_HOSTS 변수)이 없습니다." > qa/out/error.txt
+            exit 0
+          fi
+          base=$(git rev-parse HEAD)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          node scripts/qa-agent.mjs task qa/issue.json "$base" > qa/task.json
+          # pahidc 22번은 호스팅 방화벽이 막으므로 Cloudflare Tunnel의 QA 전용 sshd로 들어간다(llm-qa.yml과 같은 방식)
+          curl -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  /tmp/cloudflared" | sha256sum -c -
+          sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/llm_qa && chmod 600 ~/.ssh/llm_qa
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if ssh -i ~/.ssh/llm_qa -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ConnectTimeout=30 \
+            -o ProxyCommand="cloudflared access ssh --hostname %h" "ubuntu@$SSH_HOST" "fix $ISSUE $base" < qa/task.json > qa/out.tgz; then
+            tar -xzf qa/out.tgz -C qa/out
+          else
+            echo "pahidc에 접속하지 못했거나 에이전트 명령이 실패했습니다(ssh 종료 코드 $?)." > qa/out/error.txt
+          fi
+          rm -f ~/.ssh/llm_qa
+          find qa/out -maxdepth 1 | sed -n 1,20p
+
+      - name: 패치 검사
+        id: check
+        if: steps.run.outcome == 'success' && hashFiles('qa/out/error.txt') == ''
+        env:
+          KIND: ${{ steps.decide.outputs.kind }}
+        run: node scripts/qa-agent.mjs check qa/out/patch.diff "$KIND"
+
+      - name: 브랜치·draft PR·CI
+        id: pr
+        if: steps.check.outputs.ok == 'true'
+        env:
+          KIND: ${{ steps.decide.outputs.kind }}
+          BASE: ${{ steps.run.outputs.base }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="$(jq -r --arg k "$KIND" '.agent.kinds[$k].branch' scripts/llm-qa/policy.json)/$ISSUE"
+          title=$(node scripts/qa-agent.mjs title qa/issue.json "$KIND")
+          # 패치는 적용·커밋만 한다(실행하지 않는다). 실행은 비밀이 없는 CI가 한다
+          git switch -q -C "$branch" "$BASE"
+          git apply --index qa/out/patch.diff
+          git commit -q -m "$title" -m "QA 에이전트(0011)가 이슈 #$ISSUE를 맡아 만들었다. 실행 기록: $RUN_URL"
+          git push -q -f origin "$branch"
+          node scripts/qa-agent.mjs pr-body qa/issue.json qa/out > qa/pr-body.md
+          if url=$(gh pr view "$branch" -R "$REPO" --json url,state --jq 'select(.state == "OPEN") | .url' 2>/dev/null) && [ -n "$url" ]; then
+            gh pr edit "$branch" -R "$REPO" --title "$title" --body-file qa/pr-body.md > /dev/null
+          else
+            url=$(gh pr create -R "$REPO" --draft --base main --head "$branch" --title "$title" --body-file qa/pr-body.md --label "$KIND")
+          fi
+          gh workflow run ci.yml -R "$REPO" --ref "$branch"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "draft PR: $url"
+
+      - name: 이슈에 결과
+        if: always() && steps.decide.outputs.action == 'run'
+        env:
+          URL: ${{ steps.pr.outputs.url }}
+          CHECK_REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          if [ -n "$URL" ]; then
+            node scripts/qa-agent.mjs comment "done" "" "$URL"
+          else
+            reason=$(cat qa/out/error.txt 2>/dev/null || true)
+            [ -n "$reason" ] || reason="${CHECK_REASON:-워크플로 단계가 실패했습니다(실행 기록 참고)}"
+            node scripts/qa-agent.mjs comment failed "$reason"
+          fi | gh issue comment "$ISSUE" -R "$REPO" --body-file -
+
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.decide.outputs.action == 'run'
+        with:
+          name: qa-agent
+          path: qa/
+          retention-days: 14

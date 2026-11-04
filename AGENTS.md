@@ -60,7 +60,7 @@
 - `deploy` 잡은 `github.repository == 'DWL21/solveline' && github.ref == 'refs/heads/main'`일 때만 돈다.
 - 외부 기여자 PR의 워크플로는 **항상 승인 후 실행**(저장소 설정 `all_external_contributors`). 외부 PR이 `.github/workflows`를 바꾸면 승인 전에 반드시 내용을 읽는다.
 - CI(`ci.yml`)는 GitHub-hosted runner만 쓴다.
-- LLM QA(`llm-qa.yml`)도 GitHub-hosted runner에서 돌고, pahidc에는 Cloudflare Tunnel 뒤의 QA 전용 sshd(QA 명령만)로만 닿는다. PR 코드는 pahidc의 테스트 환경 컨테이너 안에서만 돌고, 호스트에서 도는 `compose.test.yaml`·`scripts/test-env.sh`는 main 것을 쓴다([0010](docs/decisions/0010-llm-e2e-qa.md)).
+- LLM QA(`llm-qa.yml`)와 QA 에이전트(`qa-agent.yml`, [0011](docs/decisions/0011-qa-agent-loop.md))도 GitHub-hosted runner에서 돌고, pahidc에는 Cloudflare Tunnel 뒤의 QA 전용 sshd(QA 명령만)로만 닿는다. PR 코드는 pahidc의 테스트 환경 컨테이너 안에서만 돌고, 에이전트가 만든 패치는 Actions에서 적용·커밋만 하고 실행은 비밀이 없는 CI가 한다(바꿀 수 있는 경로는 `scripts/llm-qa/policy.json`의 `agent`). 호스트에서 도는 `compose.test.yaml`·`scripts/test-env.sh`는 main 것을 쓴다([0010](docs/decisions/0010-llm-e2e-qa.md)).
 
 ## 코드 실행 샌드박스 규칙
 

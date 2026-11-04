@@ -61,6 +61,10 @@ jobs:
           pnpm --filter @solveline/api build:worker
       - name: Deploy API, judge and runner
         run: bash scripts/deploy-production.sh
+      # LLM QA·QA 에이전트 명령과 지침을 main과 같게 맞춘다(0010·0011). QA 도구라 실패해도 배포는 계속한다
+      - name: Install LLM QA command
+        continue-on-error: true
+        run: bash scripts/llm-qa/install.sh
       - name: Sync Pages secrets (Worker API)
         # Worker 안의 API가 쓰는 값을 GitHub production 값 그대로 Pages 비밀에 넣는다(pahidc와 같은 SESSION_SECRET → 로그인 유지).
         # 값은 출력하지 않는다. 임시 파일은 600이고 바로 지운다.

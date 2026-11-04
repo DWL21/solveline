@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { buildRequest, comment, counts, decide, fingerprint, issueDrafts, linkShots, MARKER, MAX_ISSUES, POLICY, relevant, safe, section, status } from './llm-qa-report.mjs';
+import { buildRequest, comment, counts, decide, fingerprint, issueDrafts, linkShots, MARKER, MAX_ISSUES, MAX_TEST_ISSUES, POLICY, relevant, safe, section, status, testIssueDrafts } from './llm-qa-report.mjs';
 
 const script = fileURLToPath(new URL('./llm-qa-report.mjs', import.meta.url));
 const scenario = (verdict, i = 1) => ({
@@ -135,4 +135,17 @@ test('report(시험 모드): 결과 폴더로 댓글·상태·이슈 초안을 �
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('테스트 초안은 test 이슈 초안이 되고, 같은 PR·기준이면 지문이 같다', () => {
+  const r = { ...result('pass'), suggestions: Array.from({ length: 5 }, (_, i) => ({ criterion: `기준 ${i}`, code: 'test("x", async () => {})\n```' })) };
+  const drafts = testIssueDrafts({ result: r, request, runUrl: 'https://run' });
+  assert.equal(drafts.length, MAX_TEST_ISSUES);
+  assert.equal(drafts[0].title, 'test(e2e): 기준 0');
+  for (const h of ['## 배경', '## 범위', '## 완료 기준', 'qa:agent']) assert.ok(drafts[0].body.includes(h), h);
+  assert.ok(drafts[0].body.startsWith(`<!-- llm-qa-test:${drafts[0].fingerprint} -->`));
+  assert.ok(!drafts[0].body.includes('{})\n```\n```'), '초안 안의 코드 울타리는 바꾼다');
+  assert.equal(testIssueDrafts({ result: r, request, runUrl: 'other' })[0].fingerprint, drafts[0].fingerprint);
+  const body = comment({ result: r, pr: 171, sha: request.sha, runUrl: 'r', tests: [{ number: 12 }, { number: 13 }] });
+  assert.match(body, /테스트 초안을 이슈로 올렸습니다: #12, #13/);
 });

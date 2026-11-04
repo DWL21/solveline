@@ -1,7 +1,56 @@
 {
-  "$comment": "LLM QA 대상 판정 규칙(0010). 누구의 코드를 pahidc 테스트 환경에서 돌릴지 정하는 보안 경계라, 바꾸면 scripts/llm-qa-report.test.mjs의 결정표도 함께 고친다. 판정은 scripts/llm-qa-report.mjs의 decide()가 한다.",
-  "trustedAuthors": ["OWNER", "MEMBER", "COLLABORATOR"],
+  "$comment": "LLM QA 대상 판정(0010)과 QA 에이전트 판정·패치 검사(0011) 규칙. 누구의 코드를 pahidc에서 돌리고 무엇을 바꾸게 할지 정하는 보안 경계라, 바꾸면 scripts/llm-qa-report.test.mjs·scripts/qa-agent.test.mjs의 결정표도 함께 고친다.",
+  "trustedAuthors": [
+    "OWNER",
+    "MEMBER",
+    "COLLABORATOR"
+  ],
   "allowLabel": "qa:llm",
-  "appPaths": ["apps/web/", "apps/api/", "apps/judge/", "packages/shared/", "runner/", "docker/"],
-  "ignorePaths": ["*.md"]
+  "appPaths": [
+    "apps/web/",
+    "apps/api/",
+    "apps/judge/",
+    "packages/shared/",
+    "runner/",
+    "docker/"
+  ],
+  "ignorePaths": [
+    "*.md"
+  ],
+  "agent": {
+    "label": "qa:agent",
+    "permissions": [
+      "admin",
+      "maintain",
+      "write"
+    ],
+    "kinds": {
+      "test": {
+        "labels": [
+          "test"
+        ],
+        "paths": [
+          "e2e/"
+        ],
+        "branch": "test",
+        "commitType": "test",
+        "commitScope": "e2e"
+      }
+    },
+    "deny": [
+      ".github/",
+      "scripts/",
+      "deploy/",
+      "docker/",
+      "compose.",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "DESIGN.md",
+      "docs/decisions/",
+      "pnpm-lock.yaml",
+      "package.json"
+    ],
+    "maxFiles": 20,
+    "maxLines": 800
+  }
 }
