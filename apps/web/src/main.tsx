@@ -1,3 +1,5 @@
+// 다른 모듈이 zod로 검사하기 전에 설정한다(CSP)
+import './lib/zod-config.ts';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
