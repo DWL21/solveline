@@ -1,5 +1,6 @@
 import { Spinner } from './Loading.tsx';
-import type { CaseResult, ProblemMode, RunResult, TestCase } from '@solveline/shared';
+import type { CaseResult, Language, ProblemMode, RunResult, TestCase } from '@solveline/shared';
+import { prepareErrorLabel } from '../lib/result-labels.ts';
 
 export type RunState =
   | { kind: 'idle' }
@@ -8,9 +9,9 @@ export type RunState =
   | { kind: 'error'; message: string }
   /** 중지함. 코드 실행이면 중지 전까지의 결과를 done(cancelled)으로 보여 준다 */
   | { kind: 'cancelled'; submit: boolean }
-  | { kind: 'done'; result: RunResult; cases: TestCase[]; mode: ProblemMode; limitMs: number; cancelled?: boolean }
+  | { kind: 'done'; result: RunResult; language: Language; cases: TestCase[]; mode: ProblemMode; limitMs: number; cancelled?: boolean }
   /** 제출 후 채점: 입력·기댓값은 보여 주지 않는다 */
-  | { kind: 'graded'; result: RunResult; score: number };
+  | { kind: 'graded'; result: RunResult; language: Language; score: number };
 
 const label: Record<CaseResult['status'], string> = {
   pass: '통과',
@@ -77,7 +78,7 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
     );
   if (state.kind === 'error') return <p className="p-4 text-ui font-semibold text-bad">{state.message}</p>;
   if (state.kind === 'cancelled') return <p className="p-4 text-ui font-semibold text-warn">{state.submit ? '채점을 중지했습니다.' : '실행을 중지했습니다.'}</p>;
-  if (!state.result.compile.ok) return <CompileError output={state.result.compile.output} />;
+  if (!state.result.compile.ok) return <PrepareError language={state.language} output={state.result.compile.output} />;
   if (state.kind === 'graded') return <Graded result={state.result} score={state.score} />;
 
   const { result, cases, mode, limitMs } = state;
@@ -140,10 +141,10 @@ export function ResultPanel({ state }: Readonly<{ state: RunState }>) {
   );
 }
 
-function CompileError({ output }: Readonly<{ output: string }>) {
+function PrepareError({ language, output }: Readonly<{ language: Language; output: string }>) {
   return (
     <div className="p-4">
-      <p className="mb-2 text-ui font-bold text-bad">컴파일 에러</p>
+      <p className="mb-2 text-ui font-bold text-bad">✗ {prepareErrorLabel(language)}</p>
       <pre className="overflow-x-auto font-mono text-caption leading-relaxed whitespace-pre-wrap text-bad/90">{output.trim()}</pre>
     </div>
   );

@@ -57,10 +57,10 @@ export function Workspace({ problemId, onDeleted, onNext, onList }: Readonly<{ p
 
 /** 끝난 제출을 결과 패널 상태로 바꾼다 */
 function runStateOf(s: Submission, submit: boolean, cases: TestCase[], d: ProblemInput): RunState {
-  const done = (cancelled?: true): RunState => ({ kind: 'done', result: s.result!, cases, mode: d.mode, limitMs: d.timeLimitMs, ...(cancelled && { cancelled }) });
+  const done = (cancelled?: true): RunState => ({ kind: 'done', result: s.result!, language: s.language, cases, mode: d.mode, limitMs: d.timeLimitMs, ...(cancelled && { cancelled }) });
   if (s.status === 'cancelled') return submit || !s.result ? { kind: 'cancelled', submit } : done(true);
   if (s.status === 'error' || !s.result) return { kind: 'error', message: s.error ?? '실행하지 못했어요' };
-  return submit ? { kind: 'graded', result: s.result, score: s.score ?? 0 } : done();
+  return submit ? { kind: 'graded', result: s.result, language: s.language, score: s.score ?? 0 } : done();
 }
 
 /** 휴대폰 폭의 화면 탭(문제·코드·결과)과, 코드를 쓰는 동안 주변 막대를 숨기는 표시를 관리한다. */
