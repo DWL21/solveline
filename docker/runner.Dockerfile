@@ -12,7 +12,7 @@ COPY --from=jdk /opt/java/openjdk /opt/java/openjdk
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin sandbox \
   && for i in $(seq 1 16); do useradd --uid $((10001 + i)) --no-create-home --shell /usr/sbin/nologin "sandbox$i"; done
 WORKDIR /opt/runner
-COPY runner/server.py runner/py_harness.py runner/selftest.py runner/health.py ./
+COPY runner/server.py runner/seccomp_filter.py runner/py_harness.py runner/selftest.py runner/health.py ./
 COPY runner/java/SolvelineHarness.java java/
 RUN javac -encoding UTF-8 -d java java/SolvelineHarness.java && rm java/SolvelineHarness.java \
   && python3 -m compileall -q /opt/runner && chmod -R a+rX,go-w /opt/runner
