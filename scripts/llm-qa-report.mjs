@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 export const MARKER = '<!-- llm-qa -->';
 export const MAX_ISSUES = 5;
+export const MAX_TEST_ISSUES = 3;
 export const POLICY = JSON.parse(readFileSync(new URL('./llm-qa/policy.json', import.meta.url), 'utf8'));
 const VERDICT = { pass: '✓ 통과', fail: '✗ 실패', blocked: '– 확인 못 함' };
 
@@ -98,7 +99,7 @@ export function fingerprint(pr, scenario) {
   return createHash('sha256').update(key).digest('hex').slice(0, 12);
 }
 
-export function comment({ result, error, meta = {}, pr, sha, runUrl, shotsBase, issues = [] }) {
+export function comment({ result, error, meta = {}, pr, sha, runUrl, shotsBase, issues = [], tests = [] }) {
   const lines = [MARKER, '## LLM QA', ''];
   const model = meta.model ? `${meta.model}·${meta.effort}` : '';
   const took = meta.seconds ? `${Math.round(meta.seconds / 6) / 10}분` : '';
@@ -121,7 +122,9 @@ export function comment({ result, error, meta = {}, pr, sha, runUrl, shotsBase, 
     lines.push(...s.evidence.map((e) => `- 근거: ${linkShots(e, shotsBase)}`), '');
   }
   if (result.suggestions?.length) {
-    lines.push('<details><summary>테스트 초안(사람이 골라 넣기)</summary>', '');
+    const made = tests.filter((t) => t.number);
+    if (made.length) lines.push(`테스트 초안을 이슈로 올렸습니다: ${made.map((t) => `#${t.number}`).join(', ')}. 이슈에 \`qa:agent\` 레이블을 붙이면 QA 에이전트가 e2e 테스트 PR을 만듭니다(0011).`, '');
+    lines.push('<details><summary>테스트 초안</summary>', '');
     for (const t of result.suggestions) lines.push(`**${safe(t.criterion, 200)}**`, '', '```ts', String(t.code).slice(0, 3000).replace(/```/g, "'''"), '```', '');
     lines.push('</details>', '');
   }
@@ -179,6 +182,35 @@ export function issueDrafts({ result, request, meta = {}, runUrl, shotsBase }) {
     });
 }
 
+/** 테스트 초안마다 이슈 본문(QA 에이전트가 맡을 수 있게 test 레이블). 같은 PR·기준이면 지문이 같다 */
+export function testIssueDrafts({ result, request, runUrl }) {
+  return (result?.suggestions ?? []).slice(0, MAX_TEST_ISSUES).map((t) => {
+    const fp = createHash('sha256').update(`${request.pr}|test|${String(t.criterion).replace(/\s+/g, ' ').trim()}`).digest('hex').slice(0, 12);
+    const title = `test(e2e): ${safe(t.criterion, 80).replace(/\n/g, ' ')}`;
+    const body = [
+      `<!-- llm-qa-test:${fp} -->`,
+      '## 배경',
+      '',
+      `PR #${request.pr}(\`${request.sha.slice(0, 7)}\`)의 LLM QA가 자동화 테스트가 없을 것 같은 기준에 남긴 테스트 초안이다([실행 기록](${runUrl})).`,
+      '',
+      '## 범위',
+      '',
+      '아래 초안을 저장소 관례(fixtures·데이터 빌더·페이지 객체·요구사항 태그, `docs/quality/guide.md`)에 맞는 e2e 테스트로 넣는다. 초안은 LLM이 쓴 것이라 그대로 쓰지 않는다.',
+      '',
+      '```ts',
+      String(t.code).slice(0, 4000).replace(/```/g, "'''"),
+      '```',
+      '',
+      '## 완료 기준',
+      '',
+      `- ${safe(t.criterion, 300)}을(를) 확인하는 테스트가 CI에서 통과한다.`,
+      '',
+      `\`qa:agent\` 레이블을 붙이면 QA 에이전트가 PR을 만든다(0011). 관련 PR: #${request.pr}`,
+    ].join('\n');
+    return { fingerprint: fp, title, body };
+  });
+}
+
 // ── GitHub 호출(gh CLI, 인자 배열로만 넘긴다) ──────────────────────────────
 const gh = (args, input) => execFileSync('gh', args, { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'inherit'] });
 const ghJson = (args) => JSON.parse(gh(args) || 'null');
@@ -207,6 +239,16 @@ function fileIssues(repo, sha, drafts, runUrl) {
       return { ...d, number: same.number, created: false };
     }
     const url = gh(['issue', 'create', '-R', repo, '--title', d.title, '--label', 'bug', '--label', 'qa:llm', '--body-file', '-'], d.body).trim();
+    return { ...d, number: Number(url.split('/').pop()), created: true };
+  });
+}
+
+function fileTestIssues(repo, drafts) {
+  return drafts.map((d) => {
+    const found = ghJson(['issue', 'list', '-R', repo, '--state', 'all', '--label', 'test', '--search', `llm-qa-test:${d.fingerprint} in:body`, '--json', 'number,body']);
+    const same = (found ?? []).find((i) => i.body.includes(`llm-qa-test:${d.fingerprint}`));
+    if (same) return { ...d, number: same.number, created: false };
+    const url = gh(['issue', 'create', '-R', repo, '--title', d.title, '--label', 'test', '--label', 'qa:llm', '--body-file', '-'], d.body).trim();
     return { ...d, number: Number(url.split('/').pop()), created: true };
   });
 }
@@ -277,10 +319,11 @@ async function main([cmd, ...args]) {
       return;
     }
     const filed = fileIssues(repo, sha, drafts, runUrl);
+    const tests = error ? [] : fileTestIssues(repo, testIssueDrafts({ result, request, runUrl }));
     if (!error) notePassed(repo, request.pr, sha, result, runUrl);
     // 옛 커밋의 실행이 늦게 끝나면 댓글은 그대로 둔다(최신 커밋 결과만 보인다). 상태·이슈는 그 커밋 기준으로 단다
     const head = gh(['api', `repos/${repo}/pulls/${request.pr}`, '--jq', '.head.sha']).trim();
-    if (head === sha) upsertComment(repo, request.pr, comment({ result, error, meta, pr: request.pr, sha, runUrl, shotsBase, issues: filed }));
+    if (head === sha) upsertComment(repo, request.pr, comment({ result, error, meta, pr: request.pr, sha, runUrl, shotsBase, issues: filed, tests }));
     else console.log(`PR 최신 커밋(${head.slice(0, 7)})이 아니라 댓글은 고치지 않는다`);
     setStatus(repo, sha, st, runUrl);
     console.log(`상태 ${st.state}: ${st.description} / 이슈 새로 ${filed.filter((f) => f.created).length}개, 기존 ${filed.filter((f) => !f.created).length}개`);

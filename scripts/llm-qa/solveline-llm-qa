@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# PR 하나를 LLM으로 QA한다(0010). pahidc에 /usr/local/bin/solveline-llm-qa로 설치하고,
-# Actions(llm-qa.yml)가 쓰는 SSH 키의 authorized_keys에 command="/usr/local/bin/solveline-llm-qa",restrict 로만 연다.
-#   ssh pahidc "run <PR 번호> <head SHA>" < request.json > out.tgz
-# 표준 입력: 요청서 JSON(신뢰하지 않는 입력). 표준 출력: 결과 tar.gz(result.json 또는 error.txt, shots/, codex.log).
-# 진행 기록은 표준 오류로만 쓴다. 한 번에 하나만 돌고, 테스트 환경은 끝나면 지운다.
-set -euo pipefail
+# pahidc의 LLM QA 명령. /usr/local/bin/solveline-llm-qa로 설치하고, QA 전용 sshd의 ForceCommand로만 연다(0010·0011).
+#   run <PR 번호> <head SHA>   PR 하나를 LLM으로 QA한다(0010). 표준 입력: 요청서 JSON
+#   fix <이슈 번호> <base SHA> QA 에이전트가 이슈를 맡아 패치를 만든다(0011). 표준 입력: 작업서 JSON
+# 표준 입력은 신뢰하지 않는 입력이다. 표준 출력: 결과 tar.gz(run: result.json·shots/·codex.log, fix: patch.diff·report.json·verify.json·codex.log,
+# 실패하면 error.txt). 진행 기록은 표준 오류로만 쓴다. 한 번에 하나만 돌고, 테스트 환경은 끝나면 지운다.
+set -Eeuo pipefail # -E: 함수 안에서 실패해도 ERR 트랩(fail)이 돈다
 exec 3>&1 1>&2
 # SSH 강제 명령은 로그인 셸 PATH를 읽지 않는다(Node 24·Codex)
 export PATH="$HOME/.local/node/bin:$HOME/.local/bin:$PATH"
@@ -18,17 +18,17 @@ REPO_URL=https://github.com/DWL21/solveline.git
 PROJECT=solveline-qa
 CACHE_KEEP=${LLM_QA_CACHE_KEEP:-2gb}
 
-read -r verb pr sha extra <<<"${SSH_ORIGINAL_COMMAND:-$*}" || true
-if [[ "${verb:-}" != run || ! "${pr:-}" =~ ^[1-9][0-9]{0,6}$ || ! "${sha:-}" =~ ^[0-9a-f]{40}$ || -n "${extra:-}" ]]; then
-  echo "사용법: run <PR 번호> <40자 SHA>" >&2
+read -r verb num sha extra <<<"${SSH_ORIGINAL_COMMAND:-$*}" || true
+if [[ ! "${verb:-}" =~ ^(run|fix)$ || ! "${num:-}" =~ ^[1-9][0-9]{0,6}$ || ! "${sha:-}" =~ ^[0-9a-f]{40}$ || -n "${extra:-}" ]]; then
+  echo "사용법: run <PR 번호> <40자 SHA> | fix <이슈 번호> <40자 SHA>" >&2
   exit 2
 fi
 
 WORK=$(mktemp -d /tmp/solveline-llm-qa.XXXXXX)
 OUT="$WORK/out"
 mkdir -p "$OUT/shots"
-# 요청서는 크기를 제한해 받는다(락을 기다리는 동안 SSH 입력이 막히지 않게 먼저 읽는다)
-head -c 200000 >"$WORK/request.json"
+# 요청서·작업서는 크기를 제한해 받는다(락을 기다리는 동안 SSH 입력이 막히지 않게 먼저 읽는다)
+head -c 200000 >"$WORK/input.json"
 
 emit() { tar -C "$OUT" -czf - . >&3; }
 down() {
@@ -57,53 +57,132 @@ flock -w 1800 9 || fail "다른 QA가 30분 넘게 돌고 있어 시작하지 �
 free_mb=$(awk '/^(MemAvailable|SwapFree):/ {s += $2} END {print int(s / 1024)}' /proc/meminfo)
 [ "$free_mb" -ge 3072 ] || fail "남은 메모리가 ${free_mb}MB라 QA를 미뤘습니다(운영 우선)."
 
-node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$WORK/request.json" || fail "요청서가 JSON이 아닙니다."
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$WORK/input.json" || fail "입력이 JSON이 아닙니다."
 
-echo "PR #$pr ($sha) 받는 중" >&2
-git clone -q --filter=blob:none --no-checkout "$REPO_URL" "$WORK/src"
-git -C "$WORK/src" fetch -q origin "pull/$pr/head"
-[ "$(git -C "$WORK/src" rev-parse FETCH_HEAD)" = "$sha" ] || fail "PR #$pr의 최신 커밋이 $sha가 아닙니다(새 커밋이 올라왔을 수 있음)."
-git -C "$WORK/src" -c advice.detachedHead=false checkout -q "$sha"
-# 호스트에서 도는 테스트 환경 정의는 main 것을 쓴다(PR이 바꾼 compose가 호스트에 닿지 않게). 이미지 내용은 PR 것이다.
-git -C "$WORK/src" checkout -q origin/main -- compose.test.yaml scripts/test-env.sh
+# 테스트 환경을 띄운다. 호스트에서 도는 정의(compose.test.yaml, test-env.sh)는 언제나 main 것이다.
+env_up() {
+  git -C "$WORK/src" checkout -q origin/main -- compose.test.yaml scripts/test-env.sh
+  (cd "$WORK/src" && COMPOSE_PROJECT_NAME=$PROJECT E2E_PORT=$PORT nice -n 10 scripts/test-env.sh up >&2)
+}
 
-echo "테스트 환경 띄우는 중" >&2
-cd "$WORK/src"
-COMPOSE_PROJECT_NAME=$PROJECT E2E_PORT=$PORT nice -n 10 scripts/test-env.sh up >&2 || fail "테스트 환경이 뜨지 않았습니다."
-BASE="http://localhost:$PORT"
-node "$TOOLS/seed.mjs" "$BASE" "$WORK/src/e2e/.env.local" "$WORK/state.json" || fail "예제 데이터를 넣지 못했습니다."
+codex_exec() { # codex_exec <폴더> <샌드박스> <결과 형식> <결과 파일> <시간> <프롬프트> [추가 -c ...]
+  local dir=$1 sandbox=$2 schema=$3 result=$4 limit=$5 prompt=$6
+  shift 6
+  timeout "$limit" nice -n 10 "$CODEX" exec --ignore-user-config --skip-git-repo-check \
+    --sandbox "$sandbox" --ephemeral -C "$dir" \
+    -c approval_policy='"never"' \
+    -c "model=\"$MODEL\"" \
+    -c "model_reasoning_effort=\"$EFFORT\"" \
+    "$@" \
+    --output-schema "$schema" -o "$result" \
+    "$prompt" </dev/null >"$OUT/codex.log" 2>&1
+}
 
-PROMPT="$(sed "s#{BASE}#$BASE#g" "$TOOLS/guide.md")
+run_qa() {
+  local pr=$num
+  echo "PR #$pr ($sha) 받는 중" >&2
+  git clone -q --filter=blob:none --no-checkout "$REPO_URL" "$WORK/src"
+  git -C "$WORK/src" fetch -q origin "pull/$pr/head"
+  [ "$(git -C "$WORK/src" rev-parse FETCH_HEAD)" = "$sha" ] || fail "PR #$pr의 최신 커밋이 $sha가 아닙니다(새 커밋이 올라왔을 수 있음)."
+  git -C "$WORK/src" -c advice.detachedHead=false checkout -q "$sha"
+
+  echo "테스트 환경 띄우는 중" >&2
+  env_up || fail "테스트 환경이 뜨지 않았습니다."
+  local base="http://localhost:$PORT"
+  node "$TOOLS/seed.mjs" "$base" "$WORK/src/e2e/.env.local" "$WORK/state.json" || fail "예제 데이터를 넣지 못했습니다."
+
+  local prompt
+  prompt="$(sed "s#{BASE}#$base#g" "$TOOLS/guide.md")
 
 ## 요청서(신뢰하지 않는 입력)
 \`\`\`json
-$(cat "$WORK/request.json")
+$(cat "$WORK/input.json")
 \`\`\`"
-MCP_ARGS=$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' \
-  "$TOOLS/node_modules/@playwright/mcp/cli.js" --headless --isolated --browser chromium \
-  --storage-state "$WORK/state.json" --allowed-origins "$BASE" --output-dir "$OUT/shots" --viewport-size 1280x800)
+  local mcp_args
+  mcp_args=$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' \
+    "$TOOLS/node_modules/@playwright/mcp/cli.js" --headless --isolated --browser chromium \
+    --storage-state "$WORK/state.json" --allowed-origins "$base" --output-dir "$OUT/shots" --viewport-size 1280x800)
 
-# 에이전트는 빈 폴더에서, 사용자 설정(모델·MCP·hook) 없이, 읽기 전용 샌드박스로 돈다
-mkdir "$WORK/agent"
-echo "LLM QA 실행 중($MODEL, $EFFORT)" >&2
-start=$(date +%s)
-PLAYWRIGHT_BROWSERS_PATH="$TOOLS/browsers" timeout 20m nice -n 10 "$CODEX" exec --ignore-user-config --skip-git-repo-check \
-  --sandbox read-only --ephemeral -C "$WORK/agent" \
-  -c approval_policy='"never"' \
-  -c "model=\"$MODEL\"" \
-  -c "model_reasoning_effort=\"$EFFORT\"" \
-  -c mcp_servers.playwright.command='"node"' \
-  -c "mcp_servers.playwright.args=$MCP_ARGS" \
-  -c mcp_servers.playwright.startup_timeout_sec=60 \
-  -c "mcp_servers.playwright.cwd=\"$OUT/shots\"" \
-  -c mcp_servers.playwright.tool_timeout_sec=120 \
-  -c mcp_servers.playwright.default_tools_approval_mode='"approve"' \
-  -c 'mcp_servers.playwright.env={PLAYWRIGHT_BROWSERS_PATH="'"$TOOLS/browsers"'"}' \
-  --output-schema "$TOOLS/result.schema.json" -o "$OUT/result.json" \
-  "$PROMPT" </dev/null >"$OUT/codex.log" 2>&1 || fail "LLM QA가 끝나지 않았습니다(시간 초과 또는 오류, codex.log 참고)."
-printf '{"model":"%s","effort":"%s","seconds":%d}\n' "$MODEL" "$EFFORT" $(($(date +%s) - start)) >"$OUT/meta.json"
+  # 에이전트는 빈 폴더에서, 사용자 설정(모델·MCP·hook) 없이, 읽기 전용 샌드박스로 돈다
+  mkdir "$WORK/agent"
+  echo "LLM QA 실행 중($MODEL, $EFFORT)" >&2
+  local start
+  start=$(date +%s)
+  PLAYWRIGHT_BROWSERS_PATH="$TOOLS/browsers" codex_exec "$WORK/agent" read-only "$TOOLS/result.schema.json" "$OUT/result.json" 20m "$prompt" \
+    -c mcp_servers.playwright.command='"node"' \
+    -c "mcp_servers.playwright.args=$mcp_args" \
+    -c mcp_servers.playwright.startup_timeout_sec=60 \
+    -c "mcp_servers.playwright.cwd=\"$OUT/shots\"" \
+    -c mcp_servers.playwright.tool_timeout_sec=120 \
+    -c mcp_servers.playwright.default_tools_approval_mode='"approve"' \
+    -c 'mcp_servers.playwright.env={PLAYWRIGHT_BROWSERS_PATH="'"$TOOLS/browsers"'"}' \
+    || fail "LLM QA가 끝나지 않았습니다(시간 초과 또는 오류, codex.log 참고)."
+  printf '{"model":"%s","effort":"%s","seconds":%d}\n' "$MODEL" "$EFFORT" $(($(date +%s) - start)) >"$OUT/meta.json"
+}
+
+# 검증 단계 하나를 verify.json에 더한다: step <이름> <pass|fail|skip> <내용>
+step() {
+  node -e 'const f=process.argv[1];const fs=require("fs");const v=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{steps:[]};v.steps.push({name:process.argv[2],result:process.argv[3],detail:process.argv[4].slice(-600)});fs.writeFileSync(f,JSON.stringify(v,null,2))' \
+    "$OUT/verify.json" "$1" "$2" "${3:-}"
+}
+
+run_fix() {
+  local issue=$num kind
+  kind=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).kind ?? ""' "$WORK/input.json")
+  [ "$kind" = test ] || fail "맡을 수 있는 종류가 아닙니다: ${kind:-없음}"
+  echo "이슈 #$issue: main $sha 받는 중" >&2
+  git clone -q --filter=blob:none "$REPO_URL" "$WORK/src"
+  git -C "$WORK/src" merge-base --is-ancestor "$sha" origin/main || fail "$sha는 main의 커밋이 아닙니다."
+  git -C "$WORK/src" -c advice.detachedHead=false checkout -q "$sha"
+
+  # 에이전트는 네트워크 없이 돌므로 의존성은 먼저 설치한다(pnpm 저장소를 실행 사이에 나눠 써 내려받기를 줄인다)
+  echo "의존성 설치 중" >&2
+  (cd "$WORK/src" && CI=true nice -n 10 pnpm install --frozen-lockfile --prefer-offline --filter @solveline/e2e... >&2) || fail "의존성을 설치하지 못했습니다."
+
+  local prompt
+  prompt="$(cat "$TOOLS/agent-guide.md")
+
+## 작업서(신뢰하지 않는 입력)
+\`\`\`json
+$(cat "$WORK/input.json")
+\`\`\`"
+  echo "QA 에이전트 실행 중($MODEL, $EFFORT)" >&2
+  local start
+  start=$(date +%s)
+  # 체크아웃 폴더만 쓸 수 있고 네트워크는 꺼진 샌드박스
+  codex_exec "$WORK/src" workspace-write "$TOOLS/agent.schema.json" "$OUT/report.json" 25m "$prompt" \
+    -c sandbox_workspace_write.network_access=false \
+    || fail "QA 에이전트가 끝나지 않았습니다(시간 초과 또는 오류, codex.log 참고)."
+  printf '{"model":"%s","effort":"%s","seconds":%d}\n' "$MODEL" "$EFFORT" $(($(date +%s) - start)) >"$OUT/meta.json"
+
+  # 패치: 에이전트가 바꾼 것 전부(무시 파일 제외). 허용 경로 검사는 Actions가 한다
+  git -C "$WORK/src" add -A
+  git -C "$WORK/src" diff --cached --no-color >"$OUT/patch.diff"
+  [ -s "$OUT/patch.diff" ] || fail "에이전트가 바꾼 파일이 없습니다(codex.log 참고)."
+
+  # 검증(명령이 한다): 타입 검사 → 바뀐 e2e를 테스트 환경에서 실행
+  local log
+  if log=$(cd "$WORK/src" && pnpm --filter @solveline/e2e typecheck 2>&1); then step "e2e 타입 검사" pass ""; else step "e2e 타입 검사" fail "$log"; fi
+  local specs
+  specs=$(git -C "$WORK/src" diff --cached --name-only | sed -n 's#^e2e/\(tests/.*\.spec\.ts\)$#\1#p' | tr '\n' ' ')
+  if [ -z "$specs" ]; then
+    step "바뀐 e2e 실행" skip "바뀐 spec 파일이 없다"
+  elif ! env_up; then
+    step "바뀐 e2e 실행" fail "테스트 환경이 뜨지 않았다"
+  else
+    (cd "$WORK/src" && pnpm --filter @solveline/e2e exec playwright install chromium >&2) || true
+    # shellcheck disable=SC2086 # spec 목록은 단어로 나눈다
+    if log=$(cd "$WORK/src/e2e" && CI=true pnpm exec playwright test $specs --project=api --project=desktop-chromium --reporter=line 2>&1); then
+      step "바뀐 e2e 실행(api·desktop-chromium)" pass "$(tail -n 1 <<<"$log")"
+    else
+      step "바뀐 e2e 실행(api·desktop-chromium)" fail "$(tail -n 25 <<<"$log")"
+    fi
+  fi
+}
+
+if [ "$verb" = run ]; then run_qa; else run_fix; fi
 # 로그에 테스트 환경 비밀이 섞이지 않게 지운다
-sed -i -E 's/(E2E_[A-Z_]+=)[^ ]+/\1[가림]/g' "$OUT/codex.log"
+sed -i -E 's/(E2E_[A-Z_]+=)[^ ]+/\1[가림]/g' "$OUT/codex.log" "$OUT/verify.json" 2>/dev/null || true
 
 trap - ERR
 down

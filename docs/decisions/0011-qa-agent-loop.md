@@ -1,6 +1,6 @@
 # 0011. QA 개선 에이전트 루프
 
-상태: 제안(2026-11-04). 0010(PR마다 LLM e2e QA)의 인프라를 그대로 쓰고, 단계별로 켠다.
+상태: 1단계 구현(2026-11-04, `qa-agent.yml`·`scripts/qa-agent.mjs`·`solveline-llm-qa fix`). 0010(PR마다 LLM e2e QA)의 인프라를 그대로 쓰고, 단계별로 켠다.
 
 ## 배경
 
@@ -45,7 +45,7 @@
 | 동시에 하나 | QA·에이전트·문제 제작이 같은 flock을 쓴다. 에이전트는 최대 30분, 기다림은 30분까지 |
 | 메모리 | 에이전트 단계는 테스트 환경을 띄우지 않으므로 Codex만(약 0.5GB). 검증 단계만 테스트 환경(약 2GB)을 띄운다. 시작 기준(실메모리+스왑 3GB)은 그대로 |
 | 디스크 | 체크아웃은 `--filter=blob:none`, 의존성은 pnpm 저장소를 공유(`~/.local/share/pnpm/store`)해 실행마다 내려받지 않는다. 끝나면 작업 폴더·QA 이미지를 지운다(#187) |
-| Codex 사용량(ChatGPT 요금제) | 하루 한도: 에이전트 `LLM_AGENT_DAILY_MAX`(기본 3), LLM QA와 합쳐 10회. 넘으면 이슈에 "오늘 한도"를 남기고 다음 날 다시 |
+| 샌드박스 | Codex는 셸 명령을 bubblewrap으로 가둔다(체크아웃 폴더만 쓰기, 네트워크 없음). pahidc(Ubuntu 24.04)는 비특권 사용자 네임스페이스를 AppArmor로 막아 bwrap이 실패한다(첫 시험에서 `loopback: Failed RTM_NEWADDR`). 서버 전체 제한은 두고 `/usr/bin/bwrap`에만 허용하는 프로파일을 사람이 한 번 적용한다(`scripts/llm-qa/sandbox-apparmor.sh`). 배포가 자동으로 하지 않는다 |
 | 네트워크 | 에이전트 셸은 네트워크가 꺼진다. 의존성 설치는 에이전트 전에 명령이 한다(`pnpm install --frozen-lockfile --offline` 우선) |
 
 ## 흐름
@@ -54,7 +54,7 @@
 사람: 이슈에 qa:agent 레이블  (쓰기 권한자만 레이블을 붙일 수 있다)
    ▼
 qa-agent.yml (Actions, issues:labeled, 기본 브랜치 코드만 실행)
-   │ ① 판정(policy.json의 agent 규칙: 레이블을 붙인 사람·이슈 종류·하루 한도)
+   │ ① 판정(policy.json의 agent 규칙: 레이블을 붙인 사람의 권한·이슈 종류)
    │ ② 작업서 JSON: 이슈 본문(재현 단계·기대/실제·근거), 종류, base SHA(main)
    ▼  ssh(터널) "fix <이슈> <base SHA>" < task.json
 pahidc solveline-llm-qa fix
@@ -98,7 +98,7 @@ qa-agent.yml
 
 ### 결과 기록
 
-- 이슈에 진행 댓글 하나(표식으로 갱신): 시작 · PR 링크 또는 실패 이유(재현 못 함, 경로 거부, 크기 초과, 한도).
+- 이슈에 댓글 두 개: 시작, 그리고 결과(draft PR 링크 또는 실패 이유: 바꾼 것 없음, 경로 거부, 크기 초과, 접속·명령 실패).
 - `docs/quality/metrics.md`에 주 단위로: 에이전트 PR 수, 머지율, 사람이 고친 줄 비율, 되돌린 PR. 머지율이 낮은 신호 종류는 끈다.
 
 ## 단계

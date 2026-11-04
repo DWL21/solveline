@@ -11,7 +11,7 @@ MCP_VERSION=0.0.83
 export PATH="$HOME/.local/node/bin:$PATH"
 
 sudo install -d -o "$USER" -g "$USER" "$TOOLS"
-install -m 644 guide.md result.schema.json seed.mjs "$TOOLS/"
+install -m 644 guide.md result.schema.json seed.mjs agent-guide.md agent.schema.json "$TOOLS/"
 if [ "$(node -p "require('$TOOLS/node_modules/@playwright/mcp/package.json').version" 2>/dev/null)" != "$MCP_VERSION" ]; then
   (cd "$TOOLS" && npm init -y >/dev/null && npm install --silent --no-audit --no-fund "@playwright/mcp@$MCP_VERSION")
 fi
