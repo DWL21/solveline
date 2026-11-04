@@ -2,18 +2,18 @@
 
 - 범위: 코드 실행기 `runner`(Java·Python)와 judge의 결과 처리. 사용자가 임의의 코드를 제출할 수 있다는 전제에서 히든 데이터 노출, 판정 조작, 다른 사용자 간섭, 외부 접근을 확인했다.
 - 방법: main(`274e529`)의 `docker/runner.Dockerfile` 이미지를 운영 compose와 같은 옵션(`read_only`, capability 6개, `no-new-privileges`, 메모리 1.5GB, CPU 2, PID 512, `RUN_SLOTS=2`, `/tmp` tmpfs)으로 로컬에서 띄우고 runner `/run`에 직접 요청했다. 운영 서버(pahidc)와 운영 데이터는 사용하지 않았다.
-- 상태: **코드 수정 완료, 운영 배포·확인 대기**(브랜치 `fix/runner-hardening`). 운영 확인은 [인수인계](../handoff-runner-hardening.md). 남은 강화는 [0012](../decisions/0012-runner-fast-concurrent-secure.md) 4.3 B(샌드박스 엔진).
+- 상태: **수정·확인 완료(2026-11-04)**. [#203](https://github.com/DWL21/solveline/pull/203)으로 운영에 배포하고 아래 「운영 확인」대로 확인했다. 남은 강화는 [0012](../decisions/0012-runner-fast-concurrent-secure.md) 4.3 B(샌드박스 엔진).
 
 ## 요약
 
 | # | 심각도 | 항목 | 상태 |
 |---|---|---|---|
-| F1 | 높음 | runner에 캐시된 히든 테스트셋(기댓값 포함)을 사용자 코드가 읽을 수 있다 | 수정(배포 대기) |
-| F2 | 높음 | 제출 결과의 stderr로 히든 입력값이 API 응답에 나간다 | 수정(배포 대기) |
-| F3 | 중간 | 함수형 문제의 시간 초과 판정을 사용자 코드가 조작할 수 있다 | 수정(배포 대기) |
-| F4 | 중간 | 동시에 실행 중인 다른 사용자의 소스 코드를 읽을 수 있다 | 수정(배포 대기) |
-| F5 | 중간 | 동시에 실행 중인 다른 사용자의 프로세스를 종료할 수 있다 | 수정(배포 대기) |
-| F6 | 낮음~중간 | 사용자 코드가 인증 없는 runner API에 접속할 수 있다 | 수정(배포 대기) |
+| F1 | 높음 | runner에 캐시된 히든 테스트셋(기댓값 포함)을 사용자 코드가 읽을 수 있다 | 수정·확인 완료 |
+| F2 | 높음 | 제출 결과의 stderr로 히든 입력값이 API 응답에 나간다 | 수정·확인 완료 |
+| F3 | 중간 | 함수형 문제의 시간 초과 판정을 사용자 코드가 조작할 수 있다 | 수정·확인 완료 |
+| F4 | 중간 | 동시에 실행 중인 다른 사용자의 소스 코드를 읽을 수 있다 | 수정·확인 완료 |
+| F5 | 중간 | 동시에 실행 중인 다른 사용자의 프로세스를 종료할 수 있다 | 수정·확인 완료 |
+| F6 | 낮음~중간 | 사용자 코드가 인증 없는 runner API에 접속할 수 있다 | 수정·확인 완료 |
 
 이미 지켜지고 있는 것: 인터넷 차단(`internal` 네트워크), 읽기 전용 루트 파일시스템, 최소 capability, 비root uid로 실행, CPU·파일 크기·프로세스 수·주소 공간 rlimit, 출력 크기 제한, 제출 결과에서 반환값·표준 출력 제거, 실행 환경 변수 정리(비밀 없음).
 
@@ -79,7 +79,7 @@
 - 같은 방법(운영 옵션의 runner 이미지 + `/run` 직접 요청)으로 F1~F6을 다시 확인하고 이 문서의 상태를 바꾼다.
 - 0012의 워밍 실행기·C++·샌드박스 엔진(nsjail/gVisor)을 들일 때마다 같은 항목을 다시 확인한다.
 
-## 수정 내용 (fix/runner-hardening)
+## 수정 내용 (#203)
 
 | # | 수정 | 확인 |
 |---|---|---|
@@ -90,3 +90,31 @@
 | F6 | runner를 `network_mode: none`으로 두고 공유 볼륨의 unix 소켓(root:1000 0660)으로만 받는다. judge는 `RUNNER_URLS=unix:…` | 루프백 TCP 닫힘, 샌드박스 uid는 소켓 접속 거부, gid 1000만 응답. selftest "runner socket 0660 root:judge" |
 
 판정이 바뀔 수 있는 점: 함수형에서 모듈 최상위 코드(전처리)와 인자 파싱도 바깥 시간에 들어간다. 제한에 아주 가까운 풀이는 여유(150ms + 인자 크기)를 넘으면 시간 초과가 될 수 있다.
+
+## 운영 확인 (2026-11-04)
+
+배포 실행(Production deployment) 성공 뒤 pahidc에서 확인했다.
+
+| 확인 | 결과 |
+|---|---|
+| 컨테이너 상태 | runner·judge healthy |
+| runner 네트워크 | `none` |
+| 소켓 `/run/solveline-runner/runner.sock` | root:1000 `0660` |
+| 테스트셋 캐시 `/var/cache/solveline-testsets` | root:root `0700` |
+| judge → runner 소켓 `/health` | 200 |
+| `GET /api/runtime` | runner up, Java 21.0.2, Python 3.13.13 |
+| 운영 runner `selftest.py` | 26개 모두 PASS |
+| runner 로그의 `baseline … unavailable` | 없음 |
+
+- 예전 `sandbox` 네트워크는 연결된 컨테이너가 없음을 확인하고 지웠다.
+- 히든 테스트셋은 교체하지 않고 유지한다(운영자 결정). 배포 전 악용 여부는 기록이 없어 알 수 없다.
+
+### 문제가 생기면
+
+| 증상 | 확인 | 조치 |
+|---|---|---|
+| runner가 `unhealthy`, judge가 뜨지 않음(`depends_on`) | `sudo docker logs solveline-production-runner-1` | 소켓 폴더 권한·볼륨 마운트 오류면 로그에 나온다. 바로 고칠 수 없으면 main에서 #203을 되돌리는 PR을 만들어 머지한다(배포로 되돌림). |
+| `/api/runtime`이 `"runner":"down"` | judge 로그에서 `실행 서버에 연결할 수 없습니다` | judge 컨테이너에서 소켓으로 `/health`를 요청해 본다. `EACCES`면 judge 컨테이너 uid/gid가 1000인지(`docker exec … id`) 본다. 다르면 compose의 `RUNNER_SOCKET_GID`를 맞춘다. |
+| 시간 초과가 갑자기 늘었다는 신고 | 해당 제출의 언어·제한·인자 크기 | 함수형은 모듈 최상위 코드·인자 파싱도 바깥 시간에 들어간다. 여유는 runner 환경 변수 `TRUST_SLACK_MS`(기본 150), `ARG_MS_PER_MB`(기본 200)로 조정한다(compose 변경 → PR). |
+| `baseline … unavailable` 로그 | runner 로그 | 기동 기준값 측정이 실패해 바깥 시간 검사가 꺼졌다(판정은 예전처럼 동작). runner를 재시작하면 다시 잰다. 계속되면 이슈로 남긴다. |
+| 테스트셋 캐시가 자주 비워짐 | runner `/var/cache/solveline-testsets` 크기 | tmpfs 224MB, 캐시 상한 `TESTSET_CACHE_MB=200`. 늘리면 컨테이너 메모리(1.5GB)도 함께 본다. |
