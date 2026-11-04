@@ -10,19 +10,25 @@ test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
       await home.openCollections();
       await expect(home.themeToggle(selectedTheme)).toBeVisible();
       const deviceColor = await home.heading.evaluate((heading) => getComputedStyle(heading).color);
+      const header = page.getByRole('banner');
+      const deviceBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
 
       await page.reload();
       await expect(home.themeToggle(selectedTheme)).toBeVisible();
       await expect(home.heading).toHaveCSS('color', deviceColor);
+      await expect(header).toHaveCSS('background-color', deviceBackground);
 
       await home.themeToggle(selectedTheme).click();
       await expect(home.themeToggle(deviceTheme)).toBeVisible();
       await expect(home.heading).not.toHaveCSS('color', deviceColor);
       const selectedColor = await home.heading.evaluate((heading) => getComputedStyle(heading).color);
+      await expect(header).not.toHaveCSS('background-color', deviceBackground);
+      const selectedBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
 
       await page.reload();
       await expect(home.themeToggle(deviceTheme)).toBeVisible();
       await expect(home.heading).toHaveCSS('color', selectedColor);
+      await expect(header).toHaveCSS('background-color', selectedBackground);
     });
   }
 
