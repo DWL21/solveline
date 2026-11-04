@@ -3,27 +3,32 @@ import { evidence } from '../../src/evidence.ts';
 
 /** 비회원: 둘러보기는 되고, 코드 작성·실행은 로그인 뒤 */
 test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
-  for (const { scheme, initialNext, chosenNext } of [
-    { scheme: 'dark', initialNext: '라이트', chosenNext: '다크' },
-    { scheme: 'light', initialNext: '다크', chosenNext: '라이트' },
-  ] as const) {
-    test(`기기 테마가 ${scheme}일 때 선택한 테마가 새로고침 후에도 유지된다`, async ({ page, home }) => {
-      await page.emulateMedia({ colorScheme: scheme });
+  for (const deviceTheme of ['dark', 'light'] as const) {
+    test(`기기 ${deviceTheme} 테마를 따르고 직접 선택한 테마는 새로고침 후에도 유지한다`, async ({ page, home }) => {
+      const selectedTheme = deviceTheme === 'dark' ? 'light' : 'dark';
+      await page.emulateMedia({ colorScheme: deviceTheme });
       await home.openCollections();
-      await expect(home.themeButton(initialNext)).toBeVisible();
+      await expect(home.themeToggle(selectedTheme)).toBeVisible();
+      const deviceColor = await home.heading.evaluate((heading) => getComputedStyle(heading).color);
       const header = page.getByRole('banner');
-      const initialBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
-      await page.reload();
-      await expect(home.themeButton(initialNext)).toBeVisible();
-      await expect(header).toHaveCSS('background-color', initialBackground);
+      const deviceBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
 
-      await home.themeButton(initialNext).click();
-      await expect(home.themeButton(chosenNext)).toBeVisible();
-      await expect.poll(() => header.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(initialBackground);
-      const chosenBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
       await page.reload();
-      await expect(home.themeButton(chosenNext)).toBeVisible();
-      await expect(header).toHaveCSS('background-color', chosenBackground);
+      await expect(home.themeToggle(selectedTheme)).toBeVisible();
+      await expect(home.heading).toHaveCSS('color', deviceColor);
+      await expect(header).toHaveCSS('background-color', deviceBackground);
+
+      await home.themeToggle(selectedTheme).click();
+      await expect(home.themeToggle(deviceTheme)).toBeVisible();
+      await expect(home.heading).not.toHaveCSS('color', deviceColor);
+      const selectedColor = await home.heading.evaluate((heading) => getComputedStyle(heading).color);
+      await expect(header).not.toHaveCSS('background-color', deviceBackground);
+      const selectedBackground = await header.evaluate((element) => getComputedStyle(element).backgroundColor);
+
+      await page.reload();
+      await expect(home.themeToggle(deviceTheme)).toBeVisible();
+      await expect(home.heading).toHaveCSS('color', selectedColor);
+      await expect(header).toHaveCSS('background-color', selectedBackground);
     });
   }
 
