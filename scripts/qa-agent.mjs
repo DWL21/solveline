@@ -3,6 +3,7 @@
 //   node scripts/qa-agent.mjs task <issue.json> <base SHA>      → 작업서 JSON(표준 출력)
 //   node scripts/qa-agent.mjs check <patch.diff> <kind>         → GITHUB_OUTPUT에 ok=true|false, reason, files, lines
 //   node scripts/qa-agent.mjs title <issue.json> <kind>          → 커밋·PR 제목
+//   node scripts/qa-agent.mjs mergeable <결과 폴더> <kind> <PR CI 결론> → GITHUB_OUTPUT에 ok, reason(자동 머지 판정)
 //   node scripts/qa-agent.mjs pr-body <issue.json> <결과 폴더>    → PR 본문(표준 출력), env: KIND RUN_URL
 //   node scripts/qa-agent.mjs comment <state> [이유] [PR 주소] [브랜치] → 이슈 진행 댓글, env: RUN_URL
 // 이슈 본문과 에이전트가 만든 패치는 신뢰하지 않는 입력이다. 이 모듈은 읽고 검사만 하고 실행하지 않는다.
@@ -73,6 +74,21 @@ export function checkPatch(diff, kind, policy = POLICY) {
   return { ok: true, reason: '검사 통과', files: list, lines };
 }
 
+/**
+ * 사람 없이 머지해도 되는지(0011). 종류가 autoMerge이고, 패치 검사·pahidc 검증의 모든 단계·PR CI가 통과해야 한다.
+ * 검증 단계가 하나도 없거나 건너뛴 단계가 있으면(예: 바뀐 spec이 없어 e2e를 못 돌림) 머지하지 않는다.
+ */
+export function autoMergeable({ kind, check, verify, ci }, policy = POLICY) {
+  if (!policy.agent.kinds[kind]?.autoMerge) return { ok: false, reason: `${kind} 종류는 자동 머지하지 않습니다` };
+  if (!check?.ok) return { ok: false, reason: `패치 검사 실패: ${check?.reason ?? '결과 없음'}` };
+  const steps = verify?.steps ?? [];
+  if (!steps.length) return { ok: false, reason: 'pahidc 검증 결과가 없습니다' };
+  const bad = steps.find((s) => s.result !== 'pass');
+  if (bad) return { ok: false, reason: `pahidc 검증 "${bad.name}"이(가) ${bad.result === 'skip' ? '건너뛰어졌습니다' : '실패했습니다'}` };
+  if (ci !== 'success') return { ok: false, reason: `PR CI가 성공하지 않았습니다(${ci || '결과 없음'})` };
+  return { ok: true, reason: '모든 조건을 통과했습니다' };
+}
+
 /** 커밋·PR 제목: 저장소 규칙(Conventional Commits, 한국어 요약) */
 export function title(issue, kind, policy = POLICY) {
   const k = policy.agent.kinds[kind];
@@ -85,7 +101,7 @@ const verdict = (v) => (v === 'pass' ? '✓ 통과' : v === 'fail' ? '✗ 실패
 /** draft PR 본문: 저장소 PR 형식(변경 사항·검증·Closes) + 에이전트 요약·검증 결과 */
 export function prBody({ issue, report, verify, check, runUrl }) {
   const L = [
-    '> 🤖 QA 에이전트(0011)가 만든 PR입니다. **사람이 검토한 뒤 머지**합니다. 자동 머지하지 않습니다.',
+    '> 🤖 QA 에이전트(0011)가 만든 PR입니다. 패치 검사·pahidc 검증·CI를 모두 통과하면 자동으로 머지하고(테스트 종류만), 하나라도 실패하면 draft로 남겨 사람이 확인합니다.',
     '',
     '## 변경 사항',
     '',
@@ -115,6 +131,8 @@ export function issueComment({ state, reason = '', prUrl = '', branch = '', runU
   const head = {
     start: '⏳ QA 에이전트가 작업을 시작했습니다.',
     done: `✓ draft PR을 열었습니다: ${prUrl}`,
+    merged: `✓ 조건을 모두 통과해 자동으로 머지했습니다: ${prUrl}`,
+    held: `– PR을 열었지만 자동 머지하지 않았습니다(${safe(reason, 300)}). 사람이 확인해 주세요: ${prUrl}`,
     // PR을 자동으로 못 만들면(저장소 설정 등) 브랜치는 두고 사람이 한 번 눌러 열게 한다
     branch: `– 브랜치 \`${safe(branch, 80)}\`에 커밋하고 CI를 시작했지만 PR은 자동으로 만들지 못했습니다(${safe(reason, 300)}). [PR 만들기](${prUrl})`,
     failed: `✗ PR을 만들지 못했습니다: ${safe(reason, 500)}`,
@@ -139,6 +157,11 @@ function main([cmd, ...args]) {
   } else if (cmd === 'check') {
     const c = checkPatch(readFileSync(args[0], 'utf8'), args[1]);
     output({ ok: c.ok, reason: c.reason, files: c.files.length, lines: c.lines });
+  } else if (cmd === 'mergeable') {
+    // mergeable <결과 폴더> <kind> <PR CI 결론>
+    const [dir, kind, ci] = args;
+    const d = autoMergeable({ kind, check: checkPatch(readFileSync(join(dir, 'patch.diff'), 'utf8'), kind), verify: readJson(join(dir, 'verify.json')), ci });
+    output({ ok: d.ok, reason: d.reason });
   } else if (cmd === 'title') {
     process.stdout.write(title(JSON.parse(readFileSync(args[0], 'utf8')), args[1]));
   } else if (cmd === 'pr-body') {

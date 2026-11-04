@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTask, checkPatch, decideAgent, issueComment, kindOf, MARKER, prBody, title } from './qa-agent.mjs';
+import { autoMergeable, buildTask, checkPatch, decideAgent, issueComment, kindOf, MARKER, prBody, title } from './qa-agent.mjs';
 
 // 결정표: 한 줄이 판정 하나. policy.json의 agent를 바꾸면 이 표도 함께 고친다(0011)
 const issue = (over = {}) => ({
@@ -80,7 +80,7 @@ test('PR 본문: 사람 검토 안내·변경·검증 표·Closes를 담고 멘�
     check: { ok: true, files: ['e2e/tests/ui/theme.spec.ts'], lines: 30 },
     runUrl: 'https://run',
   });
-  assert.match(body, /사람이 검토한 뒤 머지/);
+  assert.match(body, /모두 통과하면 자동으로 머지/);
   assert.match(body, /\| 패치 검사\(경로·크기\) \| ✓ 통과 \| 1개 파일, 30줄 \|/);
   assert.match(body, /\| 바뀐 e2e 실행 \| ✗ 실패 \| 1 failed \\\| 2 passed \|/);
   assert.match(body, /Closes #7/);
@@ -97,3 +97,24 @@ test('PR을 자동으로 못 만들면 브랜치·이유·PR 만들기 링크를
   assert.match(c, /브랜치 `test\/7`에 커밋하고 CI를 시작했지만 PR은 자동으로 만들지 못했습니다\(GitHub Actions is not permitted/);
   assert.match(c, /\[PR 만들기\]\(https:\/\/github\.com\/o\/r\/compare\/main\.\.\.test%2F7\?expand=1\)/);
 });
+
+// 자동 머지 결정표: 한 줄이라도 실패하면 머지하지 않는다
+const ok = { ok: true, reason: '검사 통과', files: ['e2e/a.spec.ts'], lines: 3 };
+const pass = { steps: [{ name: 'e2e 타입 검사', result: 'pass' }, { name: '바뀐 e2e 실행', result: 'pass' }] };
+const mergeTable = [
+  ['모두 통과', { kind: 'test', check: ok, verify: pass, ci: 'success' }, true],
+  ['자동 머지가 아닌 종류', { kind: 'bug', check: ok, verify: pass, ci: 'success' }, false],
+  ['패치 검사 실패', { kind: 'test', check: { ...ok, ok: false, reason: '바꿀 수 없는 경로' }, verify: pass, ci: 'success' }, false],
+  ['검증 결과 없음', { kind: 'test', check: ok, verify: null, ci: 'success' }, false],
+  ['e2e 실행 실패', { kind: 'test', check: ok, verify: { steps: [{ name: 'e2e 타입 검사', result: 'pass' }, { name: '바뀐 e2e 실행', result: 'fail' }] }, ci: 'success' }, false],
+  ['e2e를 건너뜀(바뀐 spec 없음)', { kind: 'test', check: ok, verify: { steps: [{ name: 'e2e 타입 검사', result: 'pass' }, { name: '바뀐 e2e 실행', result: 'skip' }] }, ci: 'success' }, false],
+  ['CI 실패', { kind: 'test', check: ok, verify: pass, ci: 'failure' }, false],
+  ['CI 결과 없음(시간 초과)', { kind: 'test', check: ok, verify: pass, ci: '' }, false],
+];
+for (const [name, input, expected] of mergeTable) {
+  test(`자동 머지: ${name} → ${expected ? '머지' : '보류'}`, () => {
+    const d = autoMergeable(input);
+    assert.equal(d.ok, expected);
+    assert.ok(d.reason);
+  });
+}
