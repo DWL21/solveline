@@ -134,7 +134,7 @@ export type CodeSet = z.infer<typeof CodeSet>;
 export const ProblemInput = z.object({
   title: z.string().trim().min(1).max(200),
   /** 폴더 id. null이면 폴더 없음 */
-  folderId: z.string().max(64).nullable().default(null),
+  folderId: z.string().max(128).nullable().default(null),
   description: z.string().max(MAX_TEXT),
   mode: ProblemMode,
   params: z.array(z.string().trim().min(1).max(64)).max(20),

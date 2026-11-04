@@ -385,7 +385,10 @@ CREATE TABLE daily_deliveries (
   PRIMARY KEY (pick_date, subscriber_id)
 );
 CREATE INDEX daily_deliveries_status ON daily_deliveries(pick_date, status);`;
-const afterD1Baseline: Migration[] = [dailyMigration, dailyBankMigration];
+const folderWriteMigration = `ALTER TABLE users ADD COLUMN folders_initialized INTEGER NOT NULL DEFAULT 1;
+DROP INDEX IF EXISTS submissions_queue;`;
+
+const afterD1Baseline: Migration[] = [dailyMigration, dailyBankMigration, folderWriteMigration];
 
 /** 마이그레이션 하나를 적용하고 _migrations에 기록한다 */
 function applyMigration(db: Db, m: Migration, i: number) {

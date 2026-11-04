@@ -93,8 +93,8 @@ export class SubmissionStore {
     const [res] = await this.sql.batch([
       stmt(
         `UPDATE submissions SET status = ?, case_ids = ?, result = ?, score = ?, error = ?, finished_at = ?
-         WHERE id = ? AND status IN ('queued','running')`,
-        s.status, JSON.stringify(s.caseIds), s.result ? JSON.stringify(s.result) : null, s.score, s.error, s.finishedAt, s.id,
+         WHERE id = ? AND status IN ('queued','running') AND (status <> ? OR case_ids <> ? OR result IS NOT ? OR score IS NOT ? OR error IS NOT ? OR finished_at IS NOT ?)`,
+        s.status, JSON.stringify(s.caseIds), s.result ? JSON.stringify(s.result) : null, s.score, s.error, s.finishedAt, s.id, s.status, JSON.stringify(s.caseIds), s.result ? JSON.stringify(s.result) : null, s.score, s.error, s.finishedAt,
       ),
     ]);
     const r = await this.row(s.id);
@@ -118,14 +118,13 @@ export class SubmissionStore {
   }
 
   async detail(id: string, userId: string) {
-    const row = await this.sql.get<{ code: string; problem_title: string | null }>(
-      `SELECT s.code, p.title AS problem_title FROM submissions s
+    const row = await this.sql.get<Row & { problem_title: string | null }>(
+      `SELECT s.*, p.title AS problem_title FROM submissions s
        LEFT JOIN problems p ON p.id = s.problem_id WHERE s.id = ? AND s.user_id = ? AND s.kind = 'submit'`,
       id,
       userId,
     );
-    const submission = row ? await this.get(id) : null;
-    return row && submission ? SubmissionDetail.parse({ ...submission, code: row.code, problemTitle: row.problem_title }) : null;
+    return row ? SubmissionDetail.parse({ ...this.toSubmission(row), code: row.code, problemTitle: row.problem_title }) : null;
   }
 
   /** judge가 받지 않은 제출(잘못된 케이스 등)의 기록을 지운다 */
