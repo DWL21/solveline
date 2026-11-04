@@ -115,28 +115,42 @@ jobs:
           git apply --index qa/out/patch.diff
           git commit -q -m "$title" -m "QA 에이전트(0011)가 이슈 #$ISSUE를 맡아 만들었다. 실행 기록: $RUN_URL"
           git push -q -f origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
           node scripts/qa-agent.mjs pr-body qa/issue.json qa/out > qa/pr-body.md
           if url=$(gh pr view "$branch" -R "$REPO" --json url,state --jq 'select(.state == "OPEN") | .url' 2>/dev/null) && [ -n "$url" ]; then
             gh pr edit "$branch" -R "$REPO" --title "$title" --body-file qa/pr-body.md > /dev/null
-          else
-            url=$(gh pr create -R "$REPO" --draft --base main --head "$branch" --title "$title" --body-file qa/pr-body.md --label "$KIND")
+          elif ! url=$(gh pr create -R "$REPO" --draft --base main --head "$branch" --title "$title" --body-file qa/pr-body.md --label "$KIND" 2> qa/pr-error.txt); then
+            # 저장소 설정(Actions의 PR 만들기·승인 허용)이 꺼져 있으면 PR을 못 만든다. 브랜치는 두고 사람이 열 수 있게 링크를 남긴다
+            url=""
+            compare="$GITHUB_SERVER_URL/$REPO/compare/main...$(jq -rn --arg b "$branch" '$b | @uri')?expand=1&title=$(jq -rn --arg t "$title" '$t | @uri')&body=$(jq -rn --arg b "Closes #$ISSUE (QA 에이전트, $RUN_URL)" '$b | @uri')"
+            { echo "compare=$compare"; echo "pr_error=$(tr '\n' ' ' < qa/pr-error.txt | cut -c1-300)"; } >> "$GITHUB_OUTPUT"
+            cat qa/pr-error.txt
           fi
           gh workflow run ci.yml -R "$REPO" --ref "$branch"
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "draft PR: $url"
+          echo "draft PR: ${url:-없음(브랜치만)}"
 
       - name: 이슈에 결과
         if: always() && steps.decide.outputs.action == 'run'
         env:
           URL: ${{ steps.pr.outputs.url }}
+          COMPARE: ${{ steps.pr.outputs.compare }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          PR_ERROR: ${{ steps.pr.outputs.pr_error }}
+          CHECK_OK: ${{ steps.check.outputs.ok }}
           CHECK_REASON: ${{ steps.check.outputs.reason }}
+          PR_OUTCOME: ${{ steps.pr.outcome }}
         run: |
           if [ -n "$URL" ]; then
             node scripts/qa-agent.mjs comment "done" "" "$URL"
+          elif [ -n "$COMPARE" ]; then
+            node scripts/qa-agent.mjs comment branch "$PR_ERROR" "$COMPARE" "$BRANCH"
+          elif [ -s qa/out/error.txt ]; then
+            node scripts/qa-agent.mjs comment failed "$(cat qa/out/error.txt)"
+          elif [ "$CHECK_OK" = false ]; then
+            node scripts/qa-agent.mjs comment failed "$CHECK_REASON"
           else
-            reason=$(cat qa/out/error.txt 2>/dev/null || true)
-            [ -n "$reason" ] || reason="${CHECK_REASON:-워크플로 단계가 실패했습니다(실행 기록 참고)}"
-            node scripts/qa-agent.mjs comment failed "$reason"
+            node scripts/qa-agent.mjs comment failed "워크플로 단계가 실패했습니다(PR 단계: ${PR_OUTCOME:-안 돎}, 실행 기록 참고)"
           fi | gh issue comment "$ISSUE" -R "$REPO" --body-file -
 
       - uses: actions/upload-artifact@v7

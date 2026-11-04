@@ -4,7 +4,7 @@
 //   node scripts/qa-agent.mjs check <patch.diff> <kind>         → GITHUB_OUTPUT에 ok=true|false, reason, files, lines
 //   node scripts/qa-agent.mjs title <issue.json> <kind>          → 커밋·PR 제목
 //   node scripts/qa-agent.mjs pr-body <issue.json> <결과 폴더>    → PR 본문(표준 출력), env: KIND RUN_URL
-//   node scripts/qa-agent.mjs comment <state> [이유] [PR 주소]    → 이슈 진행 댓글, env: RUN_URL
+//   node scripts/qa-agent.mjs comment <state> [이유] [PR 주소] [브랜치] → 이슈 진행 댓글, env: RUN_URL
 // 이슈 본문과 에이전트가 만든 패치는 신뢰하지 않는 입력이다. 이 모듈은 읽고 검사만 하고 실행하지 않는다.
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -111,8 +111,15 @@ export function prBody({ issue, report, verify, check, runUrl }) {
 }
 
 /** 이슈 진행 댓글(표식으로 하나만 갱신) */
-export function issueComment({ state, reason = '', prUrl = '', runUrl }) {
-  const head = { start: '⏳ QA 에이전트가 작업을 시작했습니다.', done: `✓ draft PR을 열었습니다: ${prUrl}`, failed: `✗ PR을 만들지 못했습니다: ${safe(reason, 500)}`, rejected: `– 맡지 않았습니다: ${safe(reason, 300)}` }[state];
+export function issueComment({ state, reason = '', prUrl = '', branch = '', runUrl }) {
+  const head = {
+    start: '⏳ QA 에이전트가 작업을 시작했습니다.',
+    done: `✓ draft PR을 열었습니다: ${prUrl}`,
+    // PR을 자동으로 못 만들면(저장소 설정 등) 브랜치는 두고 사람이 한 번 눌러 열게 한다
+    branch: `– 브랜치 \`${safe(branch, 80)}\`에 커밋하고 CI를 시작했지만 PR은 자동으로 만들지 못했습니다(${safe(reason, 300)}). [PR 만들기](${prUrl})`,
+    failed: `✗ PR을 만들지 못했습니다: ${safe(reason, 500)}`,
+    rejected: `– 맡지 않았습니다: ${safe(reason, 300)}`,
+  }[state];
   return [MARKER, head, '', `[실행 기록](${runUrl})`].join('\n');
 }
 
@@ -140,8 +147,8 @@ function main([cmd, ...args]) {
     const c = checkPatch(readFileSync(join(dir, 'patch.diff'), 'utf8'), process.env.KIND);
     process.stdout.write(prBody({ issue, report: readJson(join(dir, 'report.json')), verify: readJson(join(dir, 'verify.json')), check: c, runUrl: process.env.RUN_URL }));
   } else if (cmd === 'comment') {
-    const [state, reason = '', prUrl = ''] = args;
-    process.stdout.write(issueComment({ state, reason, prUrl, runUrl: process.env.RUN_URL }));
+    const [state, reason = '', prUrl = '', branch = ''] = args;
+    process.stdout.write(issueComment({ state, reason, prUrl, branch, runUrl: process.env.RUN_URL }));
   } else {
     console.error('사용법: decide <issue.json> | task <issue.json> <base> | check <patch> <kind> | title <issue.json> <kind> | pr-body <issue.json> <dir> | comment <state> [reason] [pr]');
     process.exit(2);
