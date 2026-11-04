@@ -1,0 +1,7 @@
+{
+  "$comment": "LLM QA 대상 판정 규칙(0010). 누구의 코드를 pahidc 테스트 환경에서 돌릴지 정하는 보안 경계라, 바꾸면 scripts/llm-qa-report.test.mjs의 결정표도 함께 고친다. 판정은 scripts/llm-qa-report.mjs의 decide()가 한다.",
+  "trustedAuthors": ["OWNER", "MEMBER", "COLLABORATOR"],
+  "allowLabel": "qa:llm",
+  "appPaths": ["apps/web/", "apps/api/", "apps/judge/", "packages/shared/", "runner/", "docker/"],
+  "ignorePaths": ["*.md"]
+}

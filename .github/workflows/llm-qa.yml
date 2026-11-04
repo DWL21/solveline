@@ -45,46 +45,42 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
-      - name: 대상 PR·조건
+      - name: 대상 PR·판정
         id: target
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
+          mkdir -p qa
           pr="$EVENT_PR"
           # 포크 PR은 workflow_run에 PR 번호가 없어 커밋으로 찾는다
           [ -n "$pr" ] || pr=$(gh api "repos/$REPO/commits/$EVENT_SHA/pulls" --jq '[.[] | select(.state == "open")][0].number // empty')
-          [ -n "$pr" ] || { echo "열린 PR이 없습니다."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
-          info=$(gh api "repos/$REPO/pulls/$pr")
-          sha=$(jq -r .head.sha <<< "$info")
-          assoc=$(jq -r .author_association <<< "$info")
-          labeled=$(jq -r '[.labels[].name] | index("qa:llm") != null' <<< "$info")
-          state=$(jq -r .state <<< "$info")
-          # 새 커밋이 올라왔으면 그 커밋의 CI가 다시 부른다
-          if [ "$MANUAL" != true ] && [ "$sha" != "$EVENT_SHA" ]; then echo "PR #$pr에 더 새 커밋이 있습니다."; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          trusted=false
-          case "$assoc" in OWNER|MEMBER|COLLABORATOR) trusted=true ;; esac
-          go=false
-          if [ "$state" = open ] && { [ "$MANUAL" = true ] || [ "$trusted" = true ] || [ "$labeled" = true ]; }; then go=true; fi
-          echo "PR #$pr ($sha) 작성자 $assoc, qa:llm $labeled → $go"
-          { echo "pr=$pr"; echo "sha=$sha"; echo "go=$go"; } >> "$GITHUB_OUTPUT"
+          [ -n "$pr" ] || { echo "열린 PR이 없습니다."; echo "action=skip" >> "$GITHUB_OUTPUT"; exit 0; }
+          files=$(gh api --paginate "repos/$REPO/pulls/$pr/files" --jq '.[].filename' | jq -R . | jq -s .)
+          # 판정 규칙은 scripts/llm-qa/policy.json, 판정은 decide()가 한다(결정표 테스트: scripts/llm-qa-report.test.mjs)
+          gh api "repos/$REPO/pulls/$pr" | jq --argjson files "$files" --arg manual "$MANUAL" --arg ci "${CI_CONCLUSION:-}" --arg ciSha "${EVENT_SHA:-}" \
+            '{number, state, headSha: .head.sha, authorAssociation: .author_association, labels: [.labels[].name], files: $files,
+              manual: ($manual == "true"), ciConclusion: $ci, ciSha: $ciSha}' > qa/pr.json
+          { echo "pr=$pr"; echo "sha=$(jq -r .headSha qa/pr.json)"; } >> "$GITHUB_OUTPUT"
+          node scripts/llm-qa-report.mjs decide qa/pr.json
 
       - name: 요청서
         id: request
-        if: steps.target.outputs.go == 'true'
+        if: steps.target.outputs.action == 'run'
         env:
           PR: ${{ steps.target.outputs.pr }}
           SHA: ${{ steps.target.outputs.sha }}
-        run: |
-          mkdir -p qa
-          node scripts/llm-qa-report.mjs request qa/request.json
+        run: node scripts/llm-qa-report.mjs request qa/request.json
 
-      - name: 대상 아님(문서·설정만 바꿈)
-        if: steps.request.outputs.relevant == 'false' && env.MANUAL != 'true'
+      - name: 대상 아님(화면·API 코드 변경 없음)
+        if: steps.target.outputs.action == 'not-applicable'
         env:
           SHA: ${{ steps.target.outputs.sha }}
-        run: node scripts/llm-qa-report.mjs status success "대상 아님(화면·API 코드 변경 없음)"
+          REASON: ${{ steps.target.outputs.reason }}
+        run: node scripts/llm-qa-report.mjs status success "$REASON"
 
       - name: pahidc에서 QA
         id: run
-        if: steps.request.outputs.relevant == 'true' || (steps.request.outcome == 'success' && env.MANUAL == 'true')
+        if: steps.request.outcome == 'success'
         env:
           PR: ${{ steps.target.outputs.pr }}
           SHA: ${{ steps.target.outputs.sha }}

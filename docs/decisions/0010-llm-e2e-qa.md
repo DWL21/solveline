@@ -57,9 +57,10 @@ llm-qa.yml  스크린샷 → qa-reports 브랜치 llm-qa/pr-<n>/<sha7>/
 ### 대상 판정 (llm-qa.yml)
 
 - `workflow_run`(CI 완료, 성공)으로 돈다. 기본 브랜치의 코드만 실행하고 PR 코드는 Actions에서 실행하지 않는다(`qa-report.yml`과 같은 방식). PR 글은 파일로만 넘긴다.
+- 판정 규칙(신뢰 작성자 등급·허락 레이블·대상 경로·제외 패턴)은 `scripts/llm-qa/policy.json` 한 곳에 두고, 판정은 `scripts/llm-qa-report.mjs`의 `decide()`가 한다. 결과는 `run`(QA 실행) / `not-applicable`(상태만 "대상 아님") / `skip`(아무것도 안 함)이고, 결정표 단위 테스트(`scripts/llm-qa-report.test.mjs`)로 지킨다. 규칙을 바꾸면 결정표도 함께 고친다.
 - 아래를 모두 만족해야 QA를 부른다.
   - 작성자가 `OWNER`·`MEMBER`·`COLLABORATOR`이거나, 관리자가 `qa:llm` 레이블을 붙였다. 외부 PR은 사람이 내용을 읽고 레이블로 허락한다. 레이블을 붙인 뒤에는 Actions 탭에서 `LLM QA`를 PR 번호로 직접 실행한다(`workflow_dispatch`).
-  - 변경이 화면·API 동작에 닿는다(`apps/web`·`apps/api`·`apps/judge`·`packages/shared`·`runner`·`docker`). 아니면 상태를 `success`("대상 아님")로 단다.
+  - 변경이 화면·API 동작에 닿는다(`apps/web`·`apps/api`·`apps/judge`·`packages/shared`·`runner`·`docker`, 그 안의 `*.md`는 뺀다). 아니면 상태를 `success`("대상 아님")로 단다.
   - CI 전체가 성공했다. 빌드가 깨진 PR에 LLM 사용량을 쓰지 않는다.
   - 그 사이 새 커밋이 올라왔으면 건너뛴다(새 커밋의 CI가 다시 부른다).
 - 요청서(`scripts/llm-qa-report.mjs request`): PR 번호·head SHA·제목, PR 본문의 `## 변경 사항`(그림 제외, 4000자), 연결 이슈(`Closes`)의 `## 완료 기준` 항목, 변경 파일(80개까지). 모두 **신뢰하지 않는 입력**이다.

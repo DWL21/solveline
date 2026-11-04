@@ -1,5 +1,6 @@
 // LLM QA(0010)의 Actions 쪽: 요청서를 만들고, pahidc가 돌려준 결과를 PR 댓글·커밋 상태 llm-qa·실패 이슈로 올린다.
-//   node scripts/llm-qa-report.mjs request <request.json>       env: REPO PR SHA          → GITHUB_OUTPUT에 relevant=true|false
+//   node scripts/llm-qa-report.mjs decide <pr.json>             대상 판정(policy.json)   → GITHUB_OUTPUT에 action=run|not-applicable|skip, reason
+//   node scripts/llm-qa-report.mjs request <request.json>       env: REPO PR SHA
 //   node scripts/llm-qa-report.mjs status <state> <설명>         env: REPO SHA RUN_URL
 //   node scripts/llm-qa-report.mjs report <결과 폴더> <request.json>  env: REPO PR SHA RUN_URL SHOTS_BASE [LLM_QA_DRY_RUN=1]
 // 요청서·결과의 글(PR 본문, 모델이 쓴 글)은 신뢰하지 않는 입력이다. 셸에 넣지 않고, 올릴 때는 멘션·자동 연결을 끊고 길이를 자른다.
@@ -11,11 +12,33 @@ import { fileURLToPath } from 'node:url';
 
 export const MARKER = '<!-- llm-qa -->';
 export const MAX_ISSUES = 5;
-const APP_PATHS = /^(apps\/(web|api|judge)|packages\/shared|runner|docker)\//;
+export const POLICY = JSON.parse(readFileSync(new URL('./llm-qa/policy.json', import.meta.url), 'utf8'));
 const VERDICT = { pass: '✓ 통과', fail: '✗ 실패', blocked: '– 확인 못 함' };
 
+/** `*.md`처럼 파일 이름 끝만 보는 간단한 패턴 */
+const matches = (file, pattern) => (pattern.startsWith('*') ? file.endsWith(pattern.slice(1)) : file === pattern);
+
 /** 화면·API 동작에 닿는 변경인지(문서·워크플로만 바꾼 PR은 대상 아님) */
-export const relevant = (files) => files.some((f) => APP_PATHS.test(f));
+export const relevant = (files, policy = POLICY) =>
+  files.some((f) => policy.appPaths.some((p) => f.startsWith(p)) && !policy.ignorePaths.some((p) => matches(f, p)));
+
+/**
+ * LLM QA를 돌릴지 정한다(0010). 규칙은 scripts/llm-qa/policy.json.
+ *   run            pahidc QA를 부른다
+ *   not-applicable 상태를 success("대상 아님")로만 단다
+ *   skip           아무것도 하지 않는다(상태도 달지 않음)
+ * 손 실행(manual)은 쓰기 권한이 있는 사람만 할 수 있어 작성자·레이블·경로를 보지 않는다.
+ */
+export function decide(pr, policy = POLICY) {
+  if (pr.state !== 'open') return { action: 'skip', reason: '열린 PR이 아닙니다' };
+  if (pr.manual) return { action: 'run', reason: '손으로 실행했습니다' };
+  if (pr.ciConclusion !== 'success') return { action: 'skip', reason: 'CI가 성공하지 않았습니다' };
+  if (pr.headSha !== pr.ciSha) return { action: 'skip', reason: 'PR에 더 새 커밋이 있습니다(새 커밋의 CI가 다시 판정)' };
+  const trusted = policy.trustedAuthors.includes(pr.authorAssociation) || pr.labels.includes(policy.allowLabel);
+  if (!trusted) return { action: 'skip', reason: `신뢰된 작성자가 아니고 ${policy.allowLabel} 레이블이 없습니다` };
+  if (!relevant(pr.files, policy)) return { action: 'not-applicable', reason: '대상 아님(화면·API 코드 변경 없음)' };
+  return { action: 'run', reason: '화면·API 코드를 바꾼 신뢰된 PR입니다' };
+}
 
 /** 모델·PR 글: @멘션과 #숫자 자동 연결을 끊고, 표·HTML을 깨지 않게 다듬고, 길이를 자른다 */
 export function safe(text, max = 600) {
@@ -225,9 +248,12 @@ async function main([cmd, ...args]) {
     const issues = linked.map((i) => ghJson(['api', `repos/${repo}/issues/${i.number}`, '--jq', '{number, body}']));
     const req = buildRequest({ pr, sha: need('SHA'), title: p.title, body: p.body, files, issues });
     writeFileSync(out, JSON.stringify(req, null, 2));
-    const rel = relevant(files);
-    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `relevant=${rel}\n`);
-    console.log(`요청서: 변경 파일 ${files.length}개, 완료 기준 ${req.criteria.length}개, 대상 ${rel ? '맞음' : '아님'}`);
+    console.log(`요청서: 변경 파일 ${files.length}개, 완료 기준 ${req.criteria.length}개`);
+  } else if (cmd === 'decide') {
+    const [input] = args;
+    const d = decide(JSON.parse(readFileSync(input, 'utf8')));
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `action=${d.action}\nreason=${d.reason}\n`);
+    console.log(`판정: ${d.action} — ${d.reason}`);
   } else if (cmd === 'status') {
     const [state, description] = args;
     setStatus(need('REPO'), need('SHA'), { state, description }, need('RUN_URL'));
@@ -256,7 +282,7 @@ async function main([cmd, ...args]) {
     setStatus(repo, sha, st, runUrl);
     console.log(`상태 ${st.state}: ${st.description} / 이슈 새로 ${filed.filter((f) => f.created).length}개, 기존 ${filed.filter((f) => !f.created).length}개`);
   } else {
-    console.error('사용법: request <out> | status <state> <설명> | report <결과 폴더> <request.json>');
+    console.error('사용법: decide <pr.json> | request <out> | status <state> <설명> | report <결과 폴더> <request.json>');
     process.exit(2);
   }
 }
