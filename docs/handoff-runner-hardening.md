@@ -6,7 +6,7 @@ pahidc에 접속할 수 있는 로컬 세션이 이 문서만 보고 이어서 �
 
 ## 무엇이 바뀌었나
 
-점검 결과는 [docs/security/2026-11-04-runner-audit.md](security/2026-11-04-runner-audit.md)(F1~F6), 설계는 [0012](decisions/0012-runner-fast-concurrent-secure.md)에 있다. 이 PR(브랜치 `fix/runner-hardening`)은 다음을 바꾼다.
+점검 결과는 [docs/security/2026-11-04-runner-audit.md](security/2026-11-04-runner-audit.md)(F1~F6), 설계는 [0012](decisions/0012-runner-fast-concurrent-secure.md)에 있다. 이 PR([DWL21/solveline#203](https://github.com/DWL21/solveline/pull/203), 브랜치 `fix/runner-hardening`)은 다음을 바꾼다.
 
 | 구성 | 전 | 후 |
 |---|---|---|
