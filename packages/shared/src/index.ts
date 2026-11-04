@@ -352,6 +352,49 @@ export const RunResult = z.object({
 });
 export type RunResult = z.infer<typeof RunResult>;
 
+/** runner가 직접 쓰는 안내 문구. 사용자 코드의 출력이 아니므로 제출 결과에 그대로 둔다. */
+const RUNNER_NOTICES = [
+  '프로세스가 강제 종료되었습니다 (메모리 초과 가능).',
+  '전체 실행 시간 제한으로 건너뛰었습니다.',
+  '중지되어 실행하지 않았습니다.',
+  'Solution 클래스가 없습니다.',
+  'solution 함수가 없습니다.',
+  '실행 결과를 읽지 못했습니다.',
+];
+const PYTHON_ERRORS = new Set([
+  'ArithmeticError', 'AssertionError', 'AttributeError', 'BaseException', 'EOFError', 'Exception', 'FileNotFoundError',
+  'FloatingPointError', 'ImportError', 'IndentationError', 'IndexError', 'KeyError', 'KeyboardInterrupt', 'LookupError',
+  'MemoryError', 'ModuleNotFoundError', 'NameError', 'NotImplementedError', 'OSError', 'OverflowError', 'PermissionError',
+  'RecursionError', 'RuntimeError', 'StopIteration', 'SyntaxError', 'SystemError', 'SystemExit', 'TabError', 'TimeoutError',
+  'TypeError', 'UnboundLocalError', 'UnicodeDecodeError', 'UnicodeEncodeError', 'UnicodeError', 'ValueError', 'ZeroDivisionError',
+]);
+
+/**
+ * 제출(히든 케이스) 결과의 오류 출력을 오류 종류로만 줄인다. 사용자 코드의 오류 메시지·출력에는 히든 입력이 담길 수 있다.
+ * 예외 이름은 표준 예외(Python 내장, java·javax·jdk 패키지)일 때만 남긴다(사용자가 만든 이름으로 값을 내보내지 못하게).
+ */
+export function submitErrorSummary(stderr: string, status: CaseStatus): string {
+  const text = stderr.trim();
+  if (!text) return '';
+  const notice = RUNNER_NOTICES.find((n) => text.includes(n));
+  if (notice) return notice;
+  if (status !== 'error') return '';
+  const java = /(?:^|[\s(])((?:java|javax|jdk)\.[A-Za-z0-9_.$]*?\.([A-Z][A-Za-z0-9_$]*(?:Exception|Error)))(?=$|[\s:])/m.exec(text);
+  if (java) return `런타임 에러 (${java[2]})`;
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const name = /^([A-Za-z_][A-Za-z0-9_]*)(?::|$)/.exec(lines.at(-1) ?? '')?.[1];
+  if (name && PYTHON_ERRORS.has(name)) return `런타임 에러 (${name})`;
+  return '런타임 에러';
+}
+
+/** 제출 결과에서 반환값·출력·오류 원문을 지운다(judge가 저장하기 전, API가 돌려주기 전 모두 적용). */
+export function redactSubmitResult(result: RunResult): RunResult {
+  return {
+    compile: result.compile,
+    results: result.results.map((r) => ({ ...r, actual: null, stdout: '', stderr: submitErrorSummary(r.stderr, r.status) })),
+  };
+}
+
 /** 채점 결과로 마지막 제출 기록을 만든다. 서버가 저장하는 값과 화면에 바로 반영하는 값이 같다. total은 채점한 케이스 수. */
 export function lastSubmissionOf(result: RunResult, total: number, language: Language, at: string): LastSubmission {
   const passed = result.compile.ok ? result.results.filter((r) => r.status === 'pass').length : 0;

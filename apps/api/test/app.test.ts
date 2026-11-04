@@ -700,6 +700,22 @@ describe('제출 큐', () => {
     expect((await store.history(user.id, 20)).nextOffset).toBeNull();
   });
 
+  it('예전에 저장한 제출 결과도 돌려줄 때 반환값·출력·오류 원문을 지운다(히든 데이터)', async () => {
+    const db = openDb(':memory:');
+    const store = new SubmissionStore(sqliteSql(db));
+    const user = await new UserStore(sqliteSql(db)).create({ sub: 'redact', email: 'redact@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
+    const base = { userId: user.id, problemId: null, language: 'python' as const, mode: 'function' as const, code: 'x', cases: [], testsetHash: null, timeLimitMs: 10_000 };
+    const leaked = { id: 'h1', status: 'error' as const, actual: '[3, 1, 4]', stdout: 'hidden 3 1 4', stderr: 'Traceback (most recent call last):\nValueError: [3, 1, 4]', timeMs: 1, memoryMb: 1 };
+    const status = (id: string) => ({ id, status: 'done' as const, ahead: null, caseIds: ['h1'], result: { compile: { ok: true, output: '' }, results: [leaked] }, score: 0, error: null, finishedAt: '2026-01-01T00:00:00.000Z' });
+    await store.insert({ ...base, id: 'sub', kind: 'submit' });
+    await store.insert({ ...base, id: 'run', kind: 'run' });
+    await store.apply(status('sub'));
+    await store.apply(status('run'));
+    expect((await store.get('sub'))?.result?.results[0]).toMatchObject({ actual: null, stdout: '', stderr: '런타임 에러 (ValueError)' });
+    // 코드 실행(보이는 케이스)은 그대로 보여 준다
+    expect((await store.get('run'))?.result?.results[0]).toMatchObject({ actual: '[3, 1, 4]', stderr: leaked.stderr });
+  });
+
   it('코드 실행은 보이는 케이스만, 결과는 제출 id로 조회한다', async () => {
     const call = await authed();
     const p = (await call('POST', '/api/problems', problem)).body.data;

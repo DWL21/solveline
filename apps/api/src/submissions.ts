@@ -1,4 +1,4 @@
-import { Submission, SubmissionDetail, SubmissionHistory, type JudgeStatus, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
+import { redactSubmitResult, Submission, SubmissionDetail, SubmissionHistory, type JudgeStatus, type Language, type ProblemMode, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
 import { stmt, type Sql } from './sql.ts';
 
 type Row = {
@@ -70,7 +70,8 @@ export class SubmissionStore {
       status: r.status,
       ahead: r.status === 'queued' ? ahead : null,
       caseIds: JSON.parse(r.case_ids) as string[],
-      result: r.result ? (JSON.parse(r.result) as RunResult) : null,
+      // 예전에 저장한 제출 결과에도 히든 데이터가 남지 않게 돌려줄 때 다시 지운다
+      result: r.result ? (r.kind === 'submit' ? redactSubmitResult(JSON.parse(r.result) as RunResult) : (JSON.parse(r.result) as RunResult)) : null,
       score: r.score,
       error: r.error,
       createdAt: r.created_at,

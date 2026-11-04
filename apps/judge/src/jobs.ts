@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { JudgeStatus, lastSubmissionOf, type JudgeJob, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
+import { JudgeStatus, lastSubmissionOf, submitErrorSummary, type JudgeJob, type RunResult, type SubmissionKind, type TestCase } from '@solveline/shared';
 import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
 import { log, redact } from './redact.ts';
@@ -10,11 +10,12 @@ const RUN_TEXT_LIMIT = 20_000;
 const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}\n… (${t.length.toLocaleString()}자 중 ${n.toLocaleString()}자만 표시)` : t);
 
 /**
- * 결과를 작게 유지한다. 채점(submit)은 화면에 반환값·출력을 보여 주지 않으므로 남기지 않고,
+ * 결과를 작게 유지한다. 채점(submit)은 히든 케이스이므로 반환값·출력을 남기지 않고 오류는 종류만 남기며,
  * 코드 실행(run)은 반환값·출력을 잘라 둔다(큰 효율성 케이스가 수 MB를 반환해도 응답이 작다).
  */
 function trimResult(r: RunResult['results'][number], kind: SubmissionKind): RunResult['results'][number] {
-  if (kind === 'submit') return { ...r, actual: null, stdout: '', stderr: cut(r.stderr, 2000) };
+  // 제출은 히든 케이스라 반환값·출력·오류 원문을 남기지 않는다(오류 종류만)
+  if (kind === 'submit') return { ...r, actual: null, stdout: '', stderr: submitErrorSummary(r.stderr, r.status) };
   return { ...r, actual: r.actual === null ? null : cut(r.actual, RUN_TEXT_LIMIT), stdout: cut(r.stdout, RUN_TEXT_LIMIT), stderr: cut(r.stderr, RUN_TEXT_LIMIT) };
 }
 
