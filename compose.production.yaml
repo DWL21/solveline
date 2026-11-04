@@ -11,14 +11,22 @@ services:
       context: .
       dockerfile: docker/runner.Dockerfile
     restart: unless-stopped
-    # 인터넷이 차단된 내부 네트워크에만 연결한다.
-    networks: [sandbox]
+    # 네트워크가 없다(루프백만). judge와는 공유 볼륨의 unix 소켓으로만 통신한다.
+    network_mode: none
     read_only: true
     tmpfs:
       - /tmp:size=768m,mode=1777
+      # 히든 테스트셋 캐시: 사용자 코드가 쓰는 /tmp와 나누고 root만 읽는다
+      - /var/cache/solveline-testsets:size=224m,mode=0700
+    volumes:
+      - runner-socket:/run/solveline-runner
     environment:
       RUN_SLOTS: "2"
       TESTSET_CACHE_MB: "200"
+      TESTSET_DIR: /var/cache/solveline-testsets
+      RUNNER_SOCKET: /run/solveline-runner/runner.sock
+      # judge 컨테이너의 node 사용자(gid 1000)만 소켓을 열 수 있다
+      RUNNER_SOCKET_GID: "1000"
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
     security_opt: [no-new-privileges:true]
@@ -32,8 +40,8 @@ services:
       context: .
       dockerfile: docker/judge.Dockerfile
     restart: unless-stopped
-    # runner(sandbox)와 게이트웨이(default) 사이에 있다. 포트를 호스트에 열지 않는다.
-    networks: [default, sandbox]
+    # 게이트웨이(default)에만 붙는다. runner는 unix 소켓으로 부른다. 포트를 호스트에 열지 않는다.
+    networks: [default]
     # JUDGE_SECRET·R2_PROXY_SECRET(배포 시 생성). 사용자 데이터·로그인 비밀은 받지 않는다.
     env_file:
       - path: /etc/solveline/judge.env
@@ -46,11 +54,12 @@ services:
       WEB_ORIGIN: https://solveline.simplyimg.com
       # 채점 결과를 보낼 API(Worker, 서명, 성공할 때까지 재시도)
       RESULTS_URL: https://solveline.simplyimg.com
-      # runner를 늘리면 쉼표로 더한다 (예: http://runner:8000,http://runner2:8000)
-      RUNNER_URLS: http://runner:8000
+      # runner를 늘리면 쉼표로 더한다 (예: unix:/run/solveline-runner/runner.sock,unix:/run/solveline-runner2/runner.sock)
+      RUNNER_URLS: unix:/run/solveline-runner/runner.sock
       RUNNER_SLOTS: "2"
     volumes:
       - /var/lib/solveline:/data
+      - runner-socket:/run/solveline-runner
     depends_on:
       runner:
         condition: service_healthy
@@ -65,6 +74,5 @@ services:
     depends_on:
       judge:
         condition: service_healthy
-networks:
-  sandbox:
-    internal: true
+volumes:
+  runner-socket:

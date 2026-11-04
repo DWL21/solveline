@@ -18,10 +18,10 @@ solveline.simplyimg.com ─ Cloudflare Pages (web 정적 파일)
                                                    └─ Cloudflare Tunnel → pahidc 127.0.0.1:8083
                                                        └─ nginx → api:8787 (Hono, SQLite, 제출 기록)
                                                                   └─ judge:8790 (대기열·디스패처·테스트셋 캐시, HMAC 서명)
-                                                                     └─ runner:8000 (internal 네트워크)
+                                                                     └─ runner (네트워크 없음, unix 소켓)
 ```
 
-api는 runner에 직접 닿지 않습니다(sandbox 네트워크 밖). 실행은 judge에 맡기고, judge가 끝난 결과를 api의 `/api/internal/judge/results`로 보냅니다([`decisions/0007-serverless-worker-and-judge.md`](decisions/0007-serverless-worker-and-judge.md)).
+api는 runner에 직접 닿지 않습니다. runner 컨테이너는 네트워크가 없고 judge와 공유 볼륨의 unix 소켓으로만 통신합니다. 실행은 judge에 맡기고, judge가 끝난 결과를 api의 `/api/internal/judge/results`로 보냅니다([`decisions/0007-serverless-worker-and-judge.md`](decisions/0007-serverless-worker-and-judge.md)).
 
 채점 흐름(자세히는 [`decisions/0003-judge-pipeline.md`](decisions/0003-judge-pipeline.md)):
 

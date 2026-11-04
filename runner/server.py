@@ -1,17 +1,20 @@
 """코드 실행 서버 (runner 컨테이너 전용, 인터넷 차단 네트워크).
 
-api만 이 서버를 호출한다. 서버는 root로 돌고, 사용자 코드는 항상 sandbox uid로
-낮춘 별도 프로세스 그룹에서 rlimit·시간 제한을 걸어 실행한다.
+judge만 이 서버를 호출한다(운영은 네트워크 없이 unix 소켓, RUNNER_SOCKET). 서버는 root로 돌고,
+사용자 코드는 실행 슬롯마다 다른 sandbox uid로 낮춘 별도 프로세스 그룹에서 rlimit·시간 제한을 걸어 실행한다.
+작업이 끝나면 그 uid의 남은 프로세스와 파일을 지운 뒤 다음 작업에 넘긴다.
 서버에 남기는 capability(CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL)는 setuid 후 자식에 남지 않는다.
 Python 표준 라이브러리만 쓴다 (사용자 코드와 같은 인터프리터).
 """
 import hashlib
 import json
 import os
+import queue
 import re
 import resource
 import shutil
 import signal
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -24,6 +27,14 @@ JAVA_HARNESS_CP = os.environ.get("JAVA_HARNESS_CP", os.path.join(HARNESS_DIR, "j
 SANDBOX_UID = int(os.environ.get("SANDBOX_UID", "-1"))  # -1이면 낮추지 않음 (로컬 개발)
 WORK_ROOT = os.environ.get("WORK_ROOT", tempfile.gettempdir())
 PORT = int(os.environ.get("PORT", "8000"))
+# 운영: TCP 대신 이 unix 소켓으로만 받는다(컨테이너는 네트워크 없음). 소켓은 root와 RUNNER_SOCKET_GID(judge)만 연다.
+SOCKET_PATH = os.environ.get("RUNNER_SOCKET", "")
+SOCKET_GID = int(os.environ.get("RUNNER_SOCKET_GID", "-1"))
+# 동시에 실행하는 요청 수. 슬롯마다 uid가 다르다: SANDBOX_UID+1 … SANDBOX_UID+RUN_SLOTS.
+# SANDBOX_UID 자체는 기준 시간 측정(신뢰 코드)에만 쓴다.
+RUN_SLOTS = max(1, int(os.environ.get("RUN_SLOTS", "2")))
+# uid 하나가 만들 수 있는 프로세스·스레드 수(JVM 스레드 포함)
+NPROC_LIMIT = int(os.environ.get("NPROC_LIMIT", "128"))
 
 RUN_TIMEOUT_S = float(os.environ.get("RUN_TIMEOUT_S", "10"))  # 문제가 시간 제한을 정하지 않으면 10초
 # 시간 제한은 solution 호출(입출력형은 실행) 시간 기준이다. 프로세스는 언어별 시작 시간만큼 여유를 두고 종료한다.
@@ -31,6 +42,10 @@ STARTUP_SLACK_S = {"java": 3.0, "python": 1.0}
 COMPILE_TIMEOUT_S = 30.0
 JAVA_XMX = os.environ.get("JAVA_XMX", "512m")
 PY_AS_LIMIT = int(os.environ.get("PY_AS_LIMIT_MB", "1024")) * 1024 * 1024
+# 함수형 시간 초과는 하네스가 보고한 시간(사용자 프로세스 안)만 믿지 않는다. 바깥에서 잰 시간에서
+# 언어별 기동 기준값을 뺀 값이 제한 + 여유(+ 인자 크기에 따른 파싱 여유)를 넘어도 시간 초과다.
+TRUST_SLACK_MS = float(os.environ.get("TRUST_SLACK_MS", "150"))
+ARG_MS_PER_MB = float(os.environ.get("ARG_MS_PER_MB", "200"))
 OUTPUT_LIMIT = 64 * 1024
 MAX_CASES = 200
 # 요청 하나의 전체 실행 시간 상한. (api는 비동기 큐라 Cloudflare 응답 제한과 무관하다)
@@ -38,6 +53,7 @@ TOTAL_BUDGET_S = float(os.environ.get("TOTAL_BUDGET_S", "600"))
 MAX_CODE = 200 * 1024
 
 # 테스트셋 캐시: api가 해시만 보내고, 없을 때만 내용을 올린다(파일은 내용이 바뀌지 않는다).
+# 히든 테스트셋은 root만 읽는다(폴더 0700, 파일 0600). 운영은 사용자 코드가 쓰는 /tmp 밖의 별도 tmpfs에 둔다.
 TESTSET_DIR = os.environ.get("TESTSET_DIR", os.path.join(WORK_ROOT, "testsets"))
 TESTSET_CACHE_BYTES = int(os.environ.get("TESTSET_CACHE_MB", "200")) * 1024 * 1024
 _testset_lock = threading.Lock()
@@ -47,6 +63,20 @@ def testset_path(h):
     if not re.fullmatch(r"[0-9a-f]{64}", h or ""):
         raise ValueError("테스트셋 해시가 올바르지 않습니다.")
     return os.path.join(TESTSET_DIR, h + ".json")
+
+
+def _ensure_testset_dir():
+    os.makedirs(TESTSET_DIR, mode=0o700, exist_ok=True)
+    os.chmod(TESTSET_DIR, 0o700)
+
+
+def secure_testsets():
+    """시작할 때 이미 있는 캐시의 권한도 고친다."""
+    if not os.path.isdir(TESTSET_DIR):
+        return
+    _ensure_testset_dir()
+    for n in os.listdir(TESTSET_DIR):
+        os.chmod(os.path.join(TESTSET_DIR, n), 0o600)
 
 
 def load_testset(h):
@@ -66,10 +96,11 @@ def store_testset(h, raw):
         raise ValueError("테스트셋 내용이 해시와 다릅니다.")
     json.loads(raw)
     with _testset_lock:
-        os.makedirs(TESTSET_DIR, exist_ok=True)
+        _ensure_testset_dir()
         tmp = testset_path(h) + ".tmp"
-        with open(tmp, "wb") as f:
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
             f.write(raw)
+        os.chmod(tmp, 0o600)
         os.replace(tmp, testset_path(h))
         # 용량을 넘으면 오래 안 쓴 것부터 지운다
         files = [os.path.join(TESTSET_DIR, n) for n in os.listdir(TESTSET_DIR) if n.endswith(".json")]
@@ -100,7 +131,9 @@ SOLUTION_FILE = "solution.py"
 
 
 class Job:
-    def __init__(self):
+    def __init__(self, uid=None):
+        # 이 작업의 사용자 코드를 실행할 uid(execute가 슬롯 uid를 넣는다)
+        self.uid = SANDBOX_UID if uid is None else uid
         self.cancelled = threading.Event()
         self.pgid = None
         self.lock = threading.Lock()
@@ -135,8 +168,61 @@ def cancel(job_id):
     job.kill()
 
 
-# 한 번에 실행하는 요청 수 (단일 사용자, 4코어 서버)
-_slots = threading.BoundedSemaphore(int(os.environ.get("RUN_SLOTS", "2")))
+# 실행 슬롯 = uid. 꺼내 쓰고, 정리한 뒤 돌려준다(동시에 도는 두 작업은 항상 uid가 다르다).
+_uid_pool = queue.Queue()
+for _i in range(RUN_SLOTS):
+    _uid_pool.put(SANDBOX_UID + 1 + _i if SANDBOX_UID >= 0 else -1)
+
+
+def _uid_procs(uid):
+    """/proc에서 실제·유효 uid가 uid인 프로세스"""
+    pids = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open("/proc/%s/status" % name) as f:
+                for line in f:
+                    if line.startswith("Uid:"):
+                        real, eff = line.split()[1:3]
+                        if uid in (int(real), int(eff)):
+                            pids.append(int(name))
+                        break
+        except (OSError, ValueError):
+            pass
+    return pids
+
+
+def reap_uid(uid):
+    """작업이 끝난 uid의 남은 프로세스(새 세션으로 빠져나간 것 포함)와 공용 쓰기 폴더의 파일을 지운다."""
+    if uid < 0:
+        return
+    for _ in range(50):
+        pids = _uid_procs(uid)
+        if not pids:
+            break
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        time.sleep(0.02)
+    for root in {WORK_ROOT, "/dev/shm"}:
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for n in names:
+            path = os.path.join(root, n)
+            try:
+                if os.lstat(path).st_uid != uid:
+                    continue
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.unlink(path)
+            except OSError:
+                pass
 
 
 def _versions():
@@ -156,16 +242,17 @@ VERSIONS = _versions()
 # ─── 프로세스 실행 ───
 
 class Proc:
-    def __init__(self, status, exit_code, stdout, stderr, time_ms, memory_kb):
+    def __init__(self, status, exit_code, stdout, stderr, time_ms, memory_kb, cpu_ms=0.0):
         self.status = status  # ok | timeout | error
         self.exit_code = exit_code
         self.stdout = stdout
         self.stderr = stderr
         self.time_ms = time_ms
         self.memory_kb = memory_kb
+        self.cpu_ms = cpu_ms  # 자식이 쓴 CPU 시간(사용자 + 커널), 바깥에서 잰 값
 
 
-def _preexec(as_limit):
+def _preexec(as_limit, uid):
     def fn():
         os.setsid()
         resource.setrlimit(resource.RLIMIT_FSIZE, (64 << 20, 64 << 20))
@@ -177,11 +264,11 @@ def _preexec(as_limit):
                 resource.setrlimit(resource.RLIMIT_AS, (as_limit, as_limit))
             except (ValueError, OSError):  # macOS(로컬 개발)는 RLIMIT_AS를 지원하지 않는다
                 pass
-        if SANDBOX_UID >= 0:
-            resource.setrlimit(resource.RLIMIT_NPROC, (512, 512))
+        if uid >= 0:
+            resource.setrlimit(resource.RLIMIT_NPROC, (NPROC_LIMIT, NPROC_LIMIT))
             os.setgroups([])
-            os.setgid(SANDBOX_UID)
-            os.setuid(SANDBOX_UID)
+            os.setgid(uid)
+            os.setuid(uid)
     return fn
 
 
@@ -254,7 +341,7 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
     start = time.monotonic()
     p = subprocess.Popen(
         cmd, cwd=cwd, env=_sandbox_env(cwd), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        preexec_fn=_preexec(as_limit), close_fds=True,
+        preexec_fn=_preexec(as_limit, job.uid if job else SANDBOX_UID), close_fds=True,
     )
     _set_job_pgid(job, p.pid)
     out, err = [], []
@@ -285,7 +372,8 @@ def run_proc(cmd, cwd, stdin_data=b"", timeout=None, as_limit=0, job=None):
         timed_out.set()
     return Proc(_proc_status(job, timed_out.is_set(), p.returncode), p.returncode, b"".join(out).decode("utf-8", "replace"),
                 b"".join(err).decode("utf-8", "replace"), round(elapsed, 2),
-                usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss)
+                usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss,
+                round((usage.ru_utime + usage.ru_stime) * 1000, 2))
 
 
 # ─── 결과 비교 ───
@@ -337,8 +425,9 @@ def prepare(lang, code, work, job=None):
     with open(os.path.join(work, name), "w", encoding="utf-8") as f:
         f.write(code)
     os.makedirs(os.path.join(work, "out"), exist_ok=True)
-    if SANDBOX_UID >= 0:
-        os.chown(os.path.join(work, "out"), SANDBOX_UID, SANDBOX_UID)
+    uid = job.uid if job else SANDBOX_UID
+    if uid >= 0:
+        os.chown(os.path.join(work, "out"), uid, uid)
     p = run_proc(["javac", "-J-Xmx384m", "-encoding", "UTF-8", "-g:none", "-Xlint:deprecation", "-d", "out", "-cp", JAVA_HARNESS_CP, name],
                  work, timeout=COMPILE_TIMEOUT_S, job=job)
     if p.status != "ok":
@@ -380,14 +469,79 @@ def _function_proc(lang, work, limit_s, job):
     return run_proc(java_cmd("SolvelineHarness", work), work, timeout=timeout, job=job)
 
 
-def _judge_value(res, r, expected, limit_s):
-    """하네스가 돌려준 값으로 판정한다."""
+# ─── 기동 기준값: 아무것도 하지 않는 풀이의 바깥 측정 시간(벽시계, CPU) ───
+
+_TRIVIAL = {"python": "def solution(x):\n    return x\n", "java": "class Solution { int solution(int x) { return x; } }"}
+_baselines = {}
+_baseline_lock = threading.Lock()
+
+
+def _calibrate(lang):
+    job = Job(uid=SANDBOX_UID)
+    work = tempfile.mkdtemp(prefix="cal-", dir=WORK_ROOT)
+    try:
+        os.chmod(work, 0o700)
+        if SANDBOX_UID >= 0:
+            os.chown(work, SANDBOX_UID, SANDBOX_UID)
+        ok, _ = prepare(lang, _TRIVIAL[lang], work, job)
+        if not ok:
+            return None
+        walls, cpus = [], []
+        for _ in range(5):
+            with open(os.path.join(work, "case.json"), "w", encoding="utf-8") as f:
+                json.dump({"args": [1]}, f)
+            p = _function_proc(lang, work, 1.0, job)
+            if p.status != "ok":
+                return None
+            walls.append(p.time_ms)
+            cpus.append(p.cpu_ms)
+        return sorted(walls)[2], sorted(cpus)[2]
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def baseline(lang):
+    """(벽시계 ms, CPU ms). 측정에 실패하면 None(바깥 시간 검사를 하지 않는다)."""
+    with _baseline_lock:
+        if lang not in _baselines:
+            try:
+                _baselines[lang] = _calibrate(lang)
+            except Exception as e:  # noqa: BLE001 - 기준값이 없어도 실행은 한다
+                sys.stderr.write("baseline %s failed: %r\n" % (lang, e))
+                _baselines[lang] = None
+            if _baselines[lang] is None:
+                sys.stderr.write("baseline %s unavailable\n" % lang)
+        return _baselines[lang]
+
+
+def _external_ms(lang, p):
+    """바깥에서 잰 실행 시간에서 기동 기준값을 뺀 값. 다른 작업과 CPU를 나눠 벽시계가 늘거나,
+    JIT·GC 스레드로 CPU 시간이 늘 수 있으므로 둘 중 작은 값을 쓴다."""
+    b = baseline(lang)
+    if b is None:
+        return None
+    return max(0.0, min(p.time_ms - b[0], p.cpu_ms - b[1]))
+
+
+def _judge_value(res, r, expected, limit_s, external_ms=None, allowance_ms=0.0):
+    """하네스가 돌려준 값으로 판정한다. 하네스는 사용자 코드와 같은 프로세스라 값을 믿지 않는다:
+    반환값은 정답 비교에만 쓰고, 시간은 바깥 측정으로 상한을 확인한다."""
+    if not isinstance(r, dict):
+        r = {"ok": False, "error": "실행 결과를 읽지 못했습니다."}
     if not r.get("ok"):
-        res["stderr"] = (res["stderr"] + "\n" + r.get("error", "")).strip()
+        err = r.get("error", "")
+        res["stderr"] = (res["stderr"] + "\n" + (err if isinstance(err, str) else "")).strip()
         return res
-    res["timeMs"] = r.get("timeMs", res["timeMs"])
+    if "value" not in r:
+        res["stderr"] = (res["stderr"] + "\n실행 결과를 읽지 못했습니다.").strip()
+        return res
+    t = r.get("timeMs")
+    res["timeMs"] = t if isinstance(t, (int, float)) and not isinstance(t, bool) and t >= 0 else res["timeMs"]
     res["actual"] = json.dumps(r["value"], ensure_ascii=False)
-    if res["timeMs"] > limit_s * 1000:
+    over = external_ms is not None and external_ms > limit_s * 1000 + allowance_ms
+    if over:
+        res["timeMs"] = max(res["timeMs"], round(external_ms, 2))
+    if over or res["timeMs"] > limit_s * 1000:
         res["status"] = "timeout"
     elif expected is None:
         res["status"] = "done"
@@ -401,8 +555,9 @@ def run_function_case(lang, work, args, expected, limit_s, job=None):
     result_path = os.path.join(work, "result.json")
     if os.path.exists(result_path):
         os.remove(result_path)
+    case_text = json.dumps({"args": args}, ensure_ascii=False)
     with open(case_path, "w", encoding="utf-8") as f:
-        json.dump({"args": args}, f, ensure_ascii=False)
+        f.write(case_text)
     p = _function_proc(lang, work, limit_s, job)
 
     res = _base_result(p, None)
@@ -413,7 +568,8 @@ def run_function_case(lang, work, args, expected, limit_s, job=None):
     if not r or p.status != "ok":
         _explain_kill(p, res)
         return res
-    return _judge_value(res, r, expected, limit_s)
+    allowance = TRUST_SLACK_MS + ARG_MS_PER_MB * len(case_text.encode("utf-8")) / 1_000_000
+    return _judge_value(res, r, expected, limit_s, _external_ms(lang, p), allowance)
 
 
 def run_stdin_case(lang, code, work, stdin, expected, limit_s, job=None):
@@ -514,8 +670,8 @@ def _compile_and_run(lang, mode, code, cases, limit_s, job):
     work = tempfile.mkdtemp(prefix="run-", dir=WORK_ROOT)
     try:
         os.chmod(work, 0o700)
-        if SANDBOX_UID >= 0:
-            os.chown(work, SANDBOX_UID, SANDBOX_UID)
+        if job.uid >= 0:
+            os.chown(work, job.uid, job.uid)
         ok, msg = prepare(lang, code, work, job)
         if job.cancelled.is_set():
             return _cancelled_result([], len(cases))
@@ -531,8 +687,13 @@ def execute(req):
     job_id = req.get("jobId")
     job = _job(job_id) if job_id else Job()
     try:
-        with _slots:
+        uid = _uid_pool.get()
+        try:
+            job.uid = uid
             return _compile_and_run(lang, mode, code, cases, limit_s, job)
+        finally:
+            reap_uid(uid)
+            _uid_pool.put(uid)
     finally:
         if job_id:
             with _jobs_lock:
@@ -594,6 +755,43 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s\n" % (fmt % args))
 
 
+class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+    def get_request(self):
+        req, _ = super().get_request()
+        return req, ("unix", 0)
+
+
+def serve_unix(path, gid=-1):
+    """unix 소켓 서버를 만든다. 소켓 0660·폴더 0750(gid가 있으면 root:gid, 없으면 root만)."""
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    if gid >= 0:
+        os.chown(d, 0, gid)
+    os.chmod(d, 0o750 if gid >= 0 else 0o700)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    old = os.umask(0o177)
+    try:
+        httpd = UnixHTTPServer(path, Handler)
+    finally:
+        os.umask(old)
+    if gid >= 0:
+        os.chown(path, 0, gid)
+        os.chmod(path, 0o660)
+    return httpd
+
+
 if __name__ == "__main__":
-    print("solveline-runner :%d %s" % (PORT, VERSIONS), flush=True)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    secure_testsets()
+    # 기동 기준값을 미리 잰다(첫 요청이 기다리지 않게)
+    threading.Thread(target=lambda: [baseline(lang) for lang in ("python", "java")], daemon=True).start()
+    if SOCKET_PATH:
+        print("solveline-runner unix:%s %s" % (SOCKET_PATH, VERSIONS), flush=True)
+        serve_unix(SOCKET_PATH, SOCKET_GID).serve_forever()
+    else:
+        print("solveline-runner :%d %s" % (PORT, VERSIONS), flush=True)
+        ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

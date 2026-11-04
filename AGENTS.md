@@ -65,10 +65,12 @@
 ## 코드 실행 샌드박스 규칙
 
 - 사용자 코드는 `runner` 컨테이너에서만 실행한다. api·judge·web 컨테이너에서 실행하지 않는다.
-- `sandbox` 네트워크에는 runner와 judge만 붙는다. api는 runner에 직접 닿지 않는다.
-- runner는 `internal: true` 네트워크에만 붙어 **인터넷에 나갈 수 없다**. 포트를 호스트에 열지 않는다.
-- runner 서버는 root로 돌지만 capability는 `CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`만 남긴다. 사용자 코드는 항상 `sandbox`(uid 10001)로 낮추고 새 세션·rlimit(CPU, 파일 크기, 프로세스 수, Python 주소 공간)·10초 제한을 건다.
-- 루트 파일시스템은 읽기 전용, 쓰기는 `/tmp` tmpfs(512MB)만. 컨테이너 메모리 1.5GB, CPU 2, PID 512.
+- runner 컨테이너는 **네트워크가 없다**(`network_mode: none`, 루프백만). judge와는 공유 볼륨 `runner-socket`의 unix 소켓(`/run/solveline-runner/runner.sock`, root:1000 `0660`)으로만 통신한다. judge의 `RUNNER_URLS`는 `unix:<경로>`. 포트를 열지 않는다. 로컬 개발(`pnpm dev:runner`)만 TCP 8000을 쓴다.
+- runner 서버는 root로 돌지만 capability는 `CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`만 남긴다. 사용자 코드는 **실행 슬롯마다 다른 uid**(10002~, `RUN_SLOTS`개)로 낮추고 새 세션·rlimit(CPU, 파일 크기, uid당 프로세스 128, Python 주소 공간)·10초 제한을 건다. 작업이 끝나면 그 uid의 남은 프로세스와 `/tmp`·`/dev/shm`의 파일을 지운 뒤 슬롯을 돌려준다. uid 10001은 기동 기준값 측정(신뢰 코드)에만 쓴다.
+- 히든 테스트셋 캐시는 사용자 코드가 쓰는 `/tmp`와 나눈 tmpfs(`TESTSET_DIR=/var/cache/solveline-testsets`)에 두고 root만 읽는다(폴더 0700, 파일 0600).
+- 루트 파일시스템은 읽기 전용, 쓰기는 `/tmp` tmpfs만. 컨테이너 메모리 1.5GB, CPU 2, PID 512.
+- 사용자 프로세스가 만든 값은 정답 비교용 반환값 외에는 판정에 쓰지 않는다. 함수형 시간 초과는 하네스 보고값과 함께, 바깥에서 잰 시간(벽시계·CPU 중 작은 값 − 언어별 기동 기준값)이 제한 + 여유(`TRUST_SLACK_MS`, 인자 크기 여유 `ARG_MS_PER_MB`)를 넘는지도 본다.
+- 제출(히든 케이스) 결과에는 반환값·출력을 남기지 않고, 오류는 종류만(`submitErrorSummary`: runner 안내 문구, 표준 예외 이름) 남긴다. API도 돌려줄 때 다시 지운다.
 - 샌드박스 옵션을 바꾸면 `runner/selftest.py`의 격리 검사도 함께 고치고 CI `docker` 잡에서 통과시킨다.
 
 ## 기존 동등성
@@ -98,7 +100,7 @@
 - 실행은 반드시 제출 기록(`submissions`)과 judge의 대기열을 거친다. judge만 runner를 부른다. 우선순위: 코드 실행(0) > 제출(1).
 - api와 judge는 서로의 요청에 공유 비밀 `JUDGE_SECRET` HMAC 서명과 시각(±5분)을 붙인다(`packages/shared`의 `judgeHeaders`). judge는 결과를 api `/api/internal/judge/results`로 보내고, 실패하면 남겨 두었다가 다시 보낸다. 결과의 원본은 api(SQLite, 나중에 D1)다.
 - 히든 케이스는 문제 본문에 넣지 않는다. judge가 `DATA_DIR/testsets/<sha256>.json`(바뀌지 않는 파일)에 두고 R2 `testsets/`에 올린다. 본문에는 `hiddenTestset {hash, count}`만 둔다.
-- runner는 상태가 없다. 테스트셋은 해시로 캐시하고, 없으면 409를 돌려 디스패처가 올리게 한다. runner를 늘릴 때는 `RUNNER_URLS`에 더한다.
+- runner는 상태가 없다. 테스트셋은 해시로 캐시하고, 없으면 409를 돌려 디스패처가 올리게 한다. runner를 늘릴 때는 소켓 볼륨을 따로 둔 runner 서비스를 더하고 `RUNNER_URLS`에 `unix:` 항목을 더한다.
 - 디스패처는 judge 프로세스 안에 있으므로 judge는 1대만 띄운다(대기열은 `DATA_DIR/judge/judge.db`).
 - 백업: 사용자 데이터는 D1 Time Travel과 매일 암호화 백업(R2 `solveline-backup`, 7일)으로 지킨다. pahidc에는 사용자 데이터를 두지 않는다. 테스트셋 원본은 R2 `testsets/`다.
 
