@@ -91,6 +91,8 @@ jobs:
           SSH_KEY: ${{ secrets.LLM_QA_SSH_KEY }}
           SSH_HOST: ${{ secrets.LLM_QA_SSH_HOST }}
           KNOWN_HOSTS: ${{ vars.LLM_QA_SSH_KNOWN_HOSTS }}
+          CLOUDFLARED_VERSION: "2026.10.1"
+          CLOUDFLARED_SHA256: 3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586
         run: |
           mkdir -p qa/out
           if [ -z "$SSH_KEY" ] || [ -z "$SSH_HOST" ] || [ -z "$KNOWN_HOSTS" ]; then
@@ -98,11 +100,16 @@ jobs:
             exit 0
           fi
           node scripts/llm-qa-report.mjs status pending "실행 중"
+          # pahidc 22번은 호스팅 방화벽이 막으므로 기존 Cloudflare Tunnel의 QA 전용 sshd로 들어간다(버전·해시 고정)
+          curl -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  /tmp/cloudflared" | sha256sum -c -
+          install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared 2>/dev/null || sudo install -m 755 /tmp/cloudflared /usr/local/bin/cloudflared
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/llm_qa && chmod 600 ~/.ssh/llm_qa
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           # 강제 명령이라 이 키로는 QA 명령 하나만 돈다. 결과는 tar.gz로 표준 출력에 온다
-          if ssh -i ~/.ssh/llm_qa -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ConnectTimeout=20 "ubuntu@$SSH_HOST" "run $PR $SHA" < qa/request.json > qa/out.tgz; then
+          if ssh -i ~/.ssh/llm_qa -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ConnectTimeout=30 \
+            -o ProxyCommand="cloudflared access ssh --hostname %h" "ubuntu@$SSH_HOST" "run $PR $SHA" < qa/request.json > qa/out.tgz; then
             tar -xzf qa/out.tgz -C qa/out
           else
             echo "pahidc에 접속하지 못했거나 QA 명령이 실패했습니다(ssh 종료 코드 $?)." > qa/out/error.txt

@@ -67,9 +67,10 @@ llm-qa.yml  스크린샷 → qa-reports 브랜치 llm-qa/pr-<n>/<sha7>/
 ### pahidc QA 명령
 
 - 설치: 저장소 main을 받아 `scripts/llm-qa/install.sh <Actions 공개 키>`. `/opt/solveline-llm-qa`(지침·결과 형식·seed, Playwright MCP 0.0.83, Chromium)와 `/usr/local/bin/solveline-llm-qa`를 둔다. 지침(`guide.md`)을 고치면 다시 설치해야 반영된다.
+- 접속 경로: pahidc 22번은 호스팅 방화벽이 정해진 주소에만 연다(첫 실제 실행 #189에서 Actions 러너가 시간 초과). 그래서 이미 도는 Cloudflare Tunnel에 `llm-qa-ssh.simplyimg.com` → `ssh://127.0.0.1:2222`를 더하고, 그 뒤에 **QA 전용 sshd**를 둔다(`scripts/llm-qa/tunnel-ssh.sh`). 이 sshd는 QA 키 하나(`/etc/ssh/llm_qa_authorized_keys`)만 받고 `ForceCommand`로 QA 명령만 실행한다(비밀번호·root·포워딩·터미널 불가). 22번 허용 목록은 그대로다. Actions는 cloudflared(버전·해시 고정)를 받아 `ProxyCommand`로 들어간다.
 - 접속 설정(사람이 한다):
-  - pahidc `~/.ssh/authorized_keys`: `command="/usr/local/bin/solveline-llm-qa",restrict ssh-ed25519 …` (install.sh가 공개 키를 받으면 더한다)
-  - 저장소 비밀 `LLM_QA_SSH_KEY`(그 키의 비공개 키)·`LLM_QA_SSH_HOST`, 저장소 변수 `LLM_QA_SSH_KNOWN_HOSTS`(`ssh-keyscan` 결과). 없으면 상태가 `error`("접속 설정 없음")가 된다.
+  - pahidc: `scripts/llm-qa/tunnel-ssh.sh <QA 공개 키>` (QA 전용 sshd·터널 주소·DNS)
+  - 저장소 비밀 `LLM_QA_SSH_KEY`(그 키의 비공개 키)·`LLM_QA_SSH_HOST`(터널 주소), 저장소 변수 `LLM_QA_SSH_KNOWN_HOSTS`(`<터널 주소> ssh-ed25519 <호스트 키>`, 스크립트가 끝에 출력). 없으면 상태가 `error`("접속 설정 없음")가 된다.
 - PR 코드는 테스트 환경 이미지 빌드와 컨테이너 안에서만 돈다. 호스트에서 도는 정의(`compose.test.yaml`, `scripts/test-env.sh`)는 main 것을 쓰므로, PR이 이 두 파일을 바꾸면 바뀐 내용은 QA에 반영되지 않는다.
 - 자원: 운영 judge·runner가 우선이다.
   - 2026-11-03 시험에서 잰 양: 테스트 환경 컨테이너 넷 약 350MB, 브라우저·Codex·MCP 약 1.6GB, 이미지 약 1.3GB.
