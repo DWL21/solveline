@@ -22,6 +22,10 @@ function trimResult(r: RunResult['results'][number], kind: SubmissionKind): RunR
 
 /** 숫자가 작을수록 먼저. 코드 실행이 제출 채점 뒤에 밀리지 않게 한다. */
 export const PRIORITY: Record<SubmissionKind, number> = { run: 0, submit: 1 };
+/** 기다린 시간만큼 우선순위를 올린다: AGING_S초마다 1단계(0011 6장 굶주림 방지). 코드 실행이 계속 들어와도 제출이 밀리지 않는다 */
+export const AGING_S = Math.max(1, Number(process.env.JUDGE_AGING_S) || 30);
+/** 꺼내는 순서(작을수록 먼저). 매개변수: 지금 시각, AGING_S */
+const EFFECTIVE = '(priority - (julianday(?) - julianday(created_at)) * 86400.0 / ?)';
 
 type Row = {
   id: string;
@@ -105,12 +109,15 @@ export class JobStore {
   }
 
   private toStatus(r: Row): JudgeStatus {
+    // 실행 중인 작업과, 꺼내는 순서(EFFECTIVE)가 앞선 대기 작업
+    const now = new Date();
+    const mine = r.priority - (now.getTime() - Date.parse(r.created_at)) / 1000 / AGING_S;
     const ahead =
       r.status === 'queued'
         ? (this.db
-            .prepare("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running') AND id != ? AND (priority < ? OR (priority = ? AND created_at <= ?))")
+            .prepare(`SELECT COUNT(*) FROM jobs WHERE id != ? AND (status = 'running' OR (status = 'queued' AND (${EFFECTIVE} < ? OR (${EFFECTIVE} <= ? AND created_at <= ?))))`)
             .pluck()
-            .get(r.id, r.priority, r.priority, r.created_at) as number)
+            .get(r.id, now.toISOString(), AGING_S, mine, now.toISOString(), AGING_S, mine, r.created_at) as number)
         : null;
     return JudgeStatus.parse({
       id: r.id,
@@ -124,10 +131,10 @@ export class JobStore {
     });
   }
 
-  /** 다음 작업을 꺼내 running으로 바꾼다(없으면 null). 한 프로세스 안에서만 부르므로 경쟁이 없다. */
+  /** 다음 작업을 꺼내 running으로 바꾼다(없으면 null). 우선순위에 기다린 시간을 반영한다. 한 프로세스 안에서만 부르므로 경쟁이 없다. */
   claim(now = new Date()): Row | null {
     return this.db.transaction(() => {
-      const r = this.db.prepare("SELECT * FROM jobs WHERE status = 'queued' ORDER BY priority, created_at LIMIT 1").get() as Row | undefined;
+      const r = this.db.prepare(`SELECT * FROM jobs WHERE status = 'queued' ORDER BY ${EFFECTIVE}, created_at LIMIT 1`).get(now.toISOString(), AGING_S) as Row | undefined;
       if (!r) return null;
       this.db.prepare("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?").run(now.toISOString(), r.id);
       return { ...r, status: 'running' as const };

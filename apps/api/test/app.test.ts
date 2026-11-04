@@ -37,9 +37,9 @@ const fakeGoogle: GoogleClient = {
 
 /**
  * 가짜 runner: 기댓값이 '"fail"'인 케이스만 실패. 테스트셋은 첫 호출에 409를 흉내 내고 raw를 받아 캐시한다.
- * 코드가 'hold'면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
+ * 코드가 'hold'로 시작하면 cancel(jobId)이 올 때까지 끝나지 않는다(무한 루프 흉내).
  */
-function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null = null, opts: { d1?: boolean } = {}) {
+function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null = null, opts: { d1?: boolean; busy?: boolean } = {}) {
   const config = loadConfig({ SESSION_SECRET: 'x'.repeat(40), JUDGE_SECRET: JUDGE_SECRET, DATA_DIR: ':memory:', OWNER_EMAIL: OWNER, ...env });
   const calls: RunJob[] = [];
   const uploads: string[] = [];
@@ -47,7 +47,7 @@ function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null
   const runner = {
     run: async (job: RunJob) => {
       calls.push(job);
-      if (job.code === 'hold') {
+      if (job.code.startsWith('hold')) {
         await new Promise<void>((resolve) => held.set(job.jobId!, resolve));
         const skipped = { status: 'skipped' as const, actual: null, stdout: '', stderr: '중지', timeMs: 0, memoryMb: 0 };
         return { compile: { ok: true, output: '' }, results: (job.cases ?? []).map(() => skipped), cancelled: true };
@@ -79,7 +79,11 @@ function setup(env: Record<string, string> = {}, objectStore: ObjectStore | null
     mirror: objectStore ? new TestsetMirror(objectStore, testsets) : null,
     fetch: async (url, init) => apiApp!.request(url.replace('http://api', ''), init),
   });
-  const judge = new HttpJudge('http://judge', JUDGE_SECRET, async (url, init) => judgeSvc.app.request(url.replace('http://judge', ''), init));
+  // busy: judge가 새 작업을 받지 않는다(예상 대기 시간이 상한을 넘었을 때의 503)
+  const busyResponse = () =>
+    new Response(JSON.stringify({ error: { code: 'busy', message: '지금 채점 요청이 많아요. 약 2분 뒤 다시 시도해 주세요.' } }), { status: 503, headers: { 'retry-after': '120' } });
+  const judge = new HttpJudge('http://judge', JUDGE_SECRET, async (url, init) =>
+    opts.busy && init.method === 'POST' && url.startsWith('http://judge/jobs?') ? busyResponse() : judgeSvc.app.request(url.replace('http://judge', ''), init));
   const created = createApp({ config, db, sql, judge, google: fakeGoogle, objectStore });
   apiApp = created.app;
   const { app, catalog } = created;
@@ -795,6 +799,46 @@ describe('제출 큐', () => {
     expect((await waiting).body.data.status).toBe('cancelled');
   });
 
+  it('받아들이기 제어: 같은 내용은 기존 제출을 돌려주고, 코드 실행은 2건을 넘으면 가장 오래된 것을 중지하며, 제출은 1건까지', async () => {
+    const call = await authed();
+    const p = (await call('POST', '/api/problems', problem)).body.data;
+    const run = (code: string) => call('POST', '/api/submissions?wait=0', { problemId: p.id, kind: 'run', language: 'python', mode: 'function', code, cases: problem.cases });
+    const status = async (id: string) => (await call('GET', `/api/submissions/${id}`)).body.data.status as string;
+    const a = (await run('hold a')).body.data.id;
+    // 같은 내용을 다시 보내면 새로 넣지 않는다
+    expect((await run('hold a')).body.data.id).toBe(a);
+    const b = (await run('hold b')).body.data.id;
+    expect(await status(a)).not.toBe('cancelled');
+    // 세 번째 실행은 가장 오래된 실행(a)을 중지하고 들어간다
+    const c = (await run('hold c')).body.data.id;
+    expect(await status(a)).toBe('cancelled');
+    expect([await status(b), await status(c)].every((x) => x === 'queued' || x === 'running')).toBe(true);
+
+    const submit = (code: string) => call('POST', '/api/submissions?wait=0', { problemId: p.id, kind: 'submit', language: 'python', mode: 'function', code, cases: problem.cases });
+    const first = await submit('hold s1');
+    expect(first.status).toBe(202);
+    const second = await submit('hold s2');
+    expect(second.status).toBe(429);
+    expect(second.body.error?.code).toBe('submit_in_progress');
+    // 끝나면 다시 낼 수 있다
+    await call('POST', `/api/submissions/${first.body.data.id}/cancel`);
+    expect((await submit('done s3')).status).not.toBe(429);
+  });
+
+  it('judge가 요청이 많다고(503) 거절하면 기록을 지우고 Retry-After와 함께 돌려준다', async () => {
+    const s = setup({}, null, { busy: true });
+    const cookie = await login(s);
+    const res = await s.app.request('/api/submissions', {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ problemId: null, kind: 'run', language: 'python', mode: 'function', code: 'x', cases: problem.cases }),
+    });
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('120');
+    expect(((await res.json()) as { error: { code: string; message: string } }).error).toMatchObject({ code: 'busy' });
+    expect(s.db.prepare('SELECT COUNT(*) FROM submissions').pluck().get()).toBe(0);
+  });
+
   it('제출은 히든 테스트셋(해시)으로 채점하고 점수를 서버가 기록한다', async () => {
     const call = await authed();
     const hidden = [
@@ -870,10 +914,10 @@ describe('제출 큐', () => {
 
   it('대기 중인 제출은 runner에 보내지 않고 바로 중지한다', async () => {
     const call = await authed();
-    const body = { problemId: null, kind: 'run', language: 'python', mode: 'function', code: 'hold', cases: problem.cases };
-    // 슬롯(기본 2개)을 모두 채운 뒤의 제출은 대기열에 남는다
+    const body = (kind: string, code: string) => ({ problemId: null, kind, language: 'python', mode: 'function', code, cases: problem.cases });
+    // 슬롯(기본 2개)을 모두 채운 뒤의 제출은 대기열에 남는다(사용자당 코드 실행 2건·제출 1건)
     const ids: string[] = [];
-    for (let i = 0; i < 3; i++) ids.push((await call('POST', '/api/submissions', body)).body.data.id);
+    for (const [kind, code] of [['run', 'hold 1'], ['run', 'hold 2'], ['submit', 'hold 3']]) ids.push((await call('POST', '/api/submissions', body(kind!, code!))).body.data.id);
     const queued = ids[2]!;
     expect((await call('GET', '/api/submissions/' + queued)).body.data.status).toBe('queued');
     const res = await call('POST', `/api/submissions/${queued}/cancel`);

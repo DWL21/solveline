@@ -9,6 +9,8 @@ export class JudgeError extends Error {
     public status: number,
     public code: string,
     message: string,
+    /** 503(채점 요청이 많음)일 때 다시 시도할 때까지의 초 */
+    public retryAfter: number | null = null,
   ) {
     super(message);
   }
@@ -57,7 +59,8 @@ export class HttpJudge implements Judge {
     if (res.status === 404) return null;
     if (!res.ok) {
       const err = ErrorEnvelope.safeParse(json);
-      throw err.success ? new JudgeError(res.status, err.data.error.code, err.data.error.message) : new JudgeError(502, 'judge_error', `채점 서버 오류 (${res.status})`);
+      const retry = Number(res.headers.get('retry-after')) || null;
+      throw err.success ? new JudgeError(res.status, err.data.error.code, err.data.error.message, retry) : new JudgeError(502, 'judge_error', `채점 서버 오류 (${res.status})`);
     }
     return schema.parse(Envelope.parse(json).data);
   }

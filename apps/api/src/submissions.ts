@@ -39,6 +39,8 @@ export const isTerminal = (s: Submission['status']) => TERMINAL.has(s);
  * 제출 기록(사용자 데이터). 실행은 judge가 하고, 끝난 결과를 apply로 반영한다.
  * 대기열의 원본은 judge이므로 여기의 queued·running은 마지막으로 들은 상태다.
  */
+export type ActiveSubmission = { id: string; problemId: string | null; kind: SubmissionKind; language: string; mode: string; code: string };
+
 export class SubmissionStore {
   constructor(private sql: Sql) {}
 
@@ -125,6 +127,20 @@ export class SubmissionStore {
       userId,
     );
     return row ? SubmissionDetail.parse({ ...this.toSubmission(row), code: row.code, problemTitle: row.problem_title }) : null;
+  }
+
+  /**
+   * 이 사용자의 대기·실행 중인 제출(받아들이기 제어). 결과를 못 들은 기록이 영원히 막지 않게 최근 것만 본다
+   * (제출 하나의 실행 상한은 600초). 오래된 것부터.
+   */
+  async active(userId: string, since: Date): Promise<ActiveSubmission[]> {
+    const rows = await this.sql.all<{ id: string; problem_id: string | null; kind: string; language: string; mode: string; code: string }>(
+      `SELECT id, problem_id, kind, language, mode, code FROM submissions
+       WHERE user_id = ? AND created_at >= ? AND status IN ('queued','running') ORDER BY created_at, rowid`,
+      userId,
+      since.toISOString(),
+    );
+    return rows.map((r) => ({ id: r.id, problemId: r.problem_id, kind: r.kind as SubmissionKind, language: r.language, mode: r.mode, code: r.code }));
   }
 
   /** judge가 받지 않은 제출(잘못된 케이스 등)의 기록을 지운다 */

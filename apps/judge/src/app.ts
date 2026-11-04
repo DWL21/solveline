@@ -6,7 +6,7 @@ import type { TestsetMirror } from './mirror.ts';
 import { CaseInputError, validateCases, type RunnerClient } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
 import { log } from './redact.ts';
-import { collectMetrics, pruneStats, STATS_RETENTION_DAYS } from './metrics.ts';
+import { collectMetrics, estimateWaitMs, pruneStats, STATS_RETENTION_DAYS } from './metrics.ts';
 
 type Runner = Pick<RunnerClient, 'run' | 'runtime' | 'cancel'>;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -27,7 +27,12 @@ export type JudgeDeps = {
 };
 
 const RESULTS_PATH = '/api/internal/judge/results';
-const fail = (c: Context, status: 400 | 401 | 404 | 409 | 502, code: string, message: string) => c.json({ error: { code, message } }, status);
+const fail = (c: Context, status: 400 | 401 | 404 | 409 | 502 | 503, code: string, message: string) => c.json({ error: { code, message } }, status);
+/** 받아들이는 예상 대기 시간 상한(0011 6장): 코드 실행은 짧게, 제출은 기다릴 이유가 커서 길게 */
+const MAX_WAIT_MS = {
+  run: (Number(process.env.JUDGE_MAX_WAIT_RUN_S) || 60) * 1000,
+  submit: (Number(process.env.JUDGE_MAX_WAIT_SUBMIT_S) || 300) * 1000,
+};
 
 /**
  * judge: 제출 대기열과 runner 실행만 맡는다(사용자 데이터 없음). 모든 경로는 API와의 HMAC 서명이 있어야 한다.
@@ -96,6 +101,14 @@ export function createJudge(deps: JudgeDeps) {
     } catch (e) {
       if (e instanceof CaseInputError) return fail(c, 400, 'invalid_case', e.message);
       throw e;
+    }
+    // 받아들이기 제어(0011 6장 3번): 예상 대기 시간이 상한을 넘으면 넣지 않는다. 같은 id를 다시 보낸 것은 그대로 받는다.
+    if (!jobs.status(job.id)) {
+      const wait = estimateWaitMs(deps.db, job.kind, deps.runners.length * deps.slotsPerRunner);
+      if (wait > MAX_WAIT_MS[job.kind]) {
+        c.header('Retry-After', String(Math.min(300, Math.ceil(wait / 1000))));
+        return fail(c, 503, 'busy', `지금 채점 요청이 많아요. 약 ${Math.max(1, Math.ceil(wait / 60_000))}분 뒤 다시 시도해 주세요.`);
+      }
     }
     jobs.insert(job, cases.map((x) => x.id));
     dispatcher.kick();

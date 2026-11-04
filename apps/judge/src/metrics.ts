@@ -107,3 +107,30 @@ export function collectMetrics(db: Database.Database, slots: number, now = new D
     retentionDays: STATS_RETENTION_DAYS,
   };
 }
+
+/** 최근 평균 실행 시간이 없을 때의 가정값(ms). 0011 5장 측정(2026-11-04)보다 넉넉하게 둔다 */
+const DEFAULT_RUN_MS: Record<string, number> = { run: 1000, submit: 3000 };
+
+/** 이 종류의 최근 평균 실행 시간(최근 30분, 없으면 7일, 그것도 없으면 가정값) */
+export function recentRunMs(db: Database.Database, kind: string, now = new Date()): number {
+  for (const ms of [30 * 60_000, 7 * 24 * 3600_000]) {
+    const avg = db
+      .prepare("SELECT AVG(run_ms) FROM job_stats WHERE kind = ? AND status = 'done' AND run_ms IS NOT NULL AND finished_at >= ?")
+      .pluck()
+      .get(kind, new Date(now.getTime() - ms).toISOString()) as number | null;
+    if (avg !== null) return avg;
+  }
+  return DEFAULT_RUN_MS[kind] ?? 3000;
+}
+
+/**
+ * 지금 넣으면 실행을 시작하기까지 기다릴 예상 시간(ms) = 앞에 있는 작업 수 ÷ 슬롯 × 최근 평균 실행 시간.
+ * 코드 실행은 실행 중인 것과 대기 중인 코드 실행만, 제출은 대기 중인 모든 작업을 앞에 둔다(aging은 무시해 넉넉하게 센다).
+ */
+export function estimateWaitMs(db: Database.Database, kind: 'run' | 'submit', slots: number, now = new Date()): number {
+  const ahead = db
+    .prepare(`SELECT COUNT(*) FROM jobs WHERE status = 'running' OR (status = 'queued' AND (? = 'submit' OR kind = 'run'))`)
+    .pluck()
+    .get(kind) as number;
+  return (ahead / Math.max(1, slots)) * recentRunMs(db, kind, now);
+}
