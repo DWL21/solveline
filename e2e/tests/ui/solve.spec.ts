@@ -84,7 +84,7 @@ test.describe('문제 풀기', { tag: '@R3' }, () => {
     await expect(home.folder(folder.name, 1)).toBeVisible();
     await page.reload();
     await home.folder(folder.name, 1).click();
-    await expect(home.heading).toHaveText(folder.name);
+    await expect(home.heading).toHaveText(`${folder.name} 1`);
     await expect(home.row(p.title)).toBeVisible();
   });
 });
