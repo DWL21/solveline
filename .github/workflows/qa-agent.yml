@@ -24,7 +24,7 @@ jobs:
     name: QA agent
     if: github.repository == 'DWL21/solveline' && (github.event_name == 'workflow_dispatch' || github.event.label.name == 'qa:agent')
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -141,13 +141,40 @@ jobs:
             done
           fi
           [ "$approved" = 1 ] || gh workflow run ci.yml -R "$REPO" --ref "$branch"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          { echo "url=$url"; echo "title=$title"; } >> "$GITHUB_OUTPUT"
           echo "draft PR: ${url:-없음(브랜치만)}"
+
+      # 테스트 종류는 e2e/만 바꿔 제품 동작이 바뀌지 않는다. 패치 검사·pahidc 검증·PR CI가 모두 통과하면 사람 없이 머지한다(0011).
+      # 봇(GITHUB_TOKEN)의 머지는 main의 CI·배포를 부르지 않으므로 main CI를 직접 시작한다(e2e만 바뀌어 배포는 필요 없다)
+      - name: CI 기다리기·자동 머지
+        id: merge
+        if: steps.pr.outputs.url != ''
+        env:
+          KIND: ${{ steps.decide.outputs.kind }}
+          URL: ${{ steps.pr.outputs.url }}
+          TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          # 필수 체크가 PR에 붙을 때까지 기다린 뒤(최대 5분), 끝날 때까지 본다
+          for _ in $(seq 1 20); do
+            [ "$(gh pr view "$URL" --json statusCheckRollup --jq '.statusCheckRollup | length')" -gt 0 ] && break
+            sleep 15
+          done
+          if gh pr checks "$URL" --required --watch --fail-fast --interval 30; then ci=success; else ci=failure; fi
+          decision=$(node scripts/qa-agent.mjs mergeable qa/out "$KIND" "$ci")
+          echo "$decision"
+          if [ "$(sed -n 's/^ok=//p' <<< "$decision")" = true ]; then
+            gh pr ready "$URL"
+            gh pr merge "$URL" --squash --delete-branch --subject "$TITLE (#${URL##*/})"
+            gh workflow run ci.yml -R "$REPO" --ref main
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 이슈에 결과
         if: always() && steps.decide.outputs.action == 'run'
         env:
           URL: ${{ steps.pr.outputs.url }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+          HOLD_REASON: ${{ steps.merge.outputs.reason }}
           COMPARE: ${{ steps.pr.outputs.compare }}
           BRANCH: ${{ steps.pr.outputs.branch }}
           PR_ERROR: ${{ steps.pr.outputs.pr_error }}
@@ -155,7 +182,11 @@ jobs:
           CHECK_REASON: ${{ steps.check.outputs.reason }}
           PR_OUTCOME: ${{ steps.pr.outcome }}
         run: |
-          if [ -n "$URL" ]; then
+          if [ "$MERGED" = true ]; then
+            node scripts/qa-agent.mjs comment merged "" "$URL"
+          elif [ -n "$URL" ] && [ -n "$HOLD_REASON" ]; then
+            node scripts/qa-agent.mjs comment held "$HOLD_REASON" "$URL"
+          elif [ -n "$URL" ]; then
             node scripts/qa-agent.mjs comment "done" "" "$URL"
           elif [ -n "$COMPARE" ]; then
             node scripts/qa-agent.mjs comment branch "$PR_ERROR" "$COMPARE" "$BRANCH"

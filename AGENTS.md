@@ -24,7 +24,7 @@
 2. **브랜치** — 최신 `main`에서 `<type>/<이슈번호>` (예: `feat/12`, `fix/18`, `docs/23`). 한 브랜치에는 한 이슈만.
 3. **커밋** — Conventional Commits. `<type>(<scope>): <한국어 요약>`, 명령형, 마침표 없음. 한 커밋은 한 가지 의도.
 4. **PR** — base는 `main`. 제목은 커밋 규칙과 같다. 본문은 `## 변경 사항` / `## 검증` / `Closes #n`. 검증에는 실제로 실행한 명령과 결과만 적는다. 레이블 1개 이상.
-5. **머지** — CI(`check`, `docker`, `secret-scan`) 통과 후 squash 머지. main 머지 = 운영 배포.
+5. **머지** — CI(`check`, `docker`, `secret-scan`) 통과 후 squash 머지. main 머지 = 운영 배포. 예외: QA 에이전트의 테스트 종류 PR(`e2e/`만 바꿈)은 패치 검사·pahidc 검증·필수 체크가 모두 통과하면 워크플로가 자동으로 머지한다([0011](docs/decisions/0011-qa-agent-loop.md)).
 6. **완료 전 확인** — `pnpm check`, `git diff --check`, `git status`로 의도하지 않은 파일이 없는지 확인한다.
 
 레이블: `feat` `fix` `bug` `docs` `chore` `refactor` `test` `style` `ci` `build` `perf` `revert`

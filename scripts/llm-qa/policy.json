@@ -34,7 +34,8 @@
         ],
         "branch": "test",
         "commitType": "test",
-        "commitScope": "e2e"
+        "commitScope": "e2e",
+        "autoMerge": true
       }
     },
     "deny": [
