@@ -171,6 +171,7 @@ AWS의 SQS 기반 확장 방식과 같다: 큐 길이를 실행기 수로 나눈
 ### Tier 0 — 지금 바로 할 일 (브로커 바꾸지 않음)
 
 1. 실행 시간 측정(5장 SQL)과 지표 노출: judge `/metrics`에 대기 수(종류별), 실행 중 수, 최근 5분 S̄, 대기 시간 p95.
+   - 구현(#221): 끝난 작업마다 `job_stats`(종류·언어·상태·케이스 수·대기/실행 ms, 코드·결과 없음)를 90일 남긴다. judge `GET /metrics`(API 서명 필요)는 지금 대기·실행 수와 슬롯, 최근 5분·24시간·7일의 종류·언어별 건수·실행 p50/p95·대기 p95·분당 최대를 돌려준다. 운영자는 `sudo docker exec solveline-production-judge-1 node --import tsx src/metrics-main.ts`(읽기 전용)로 본다.
 2. 받아들이기 제어 6장 1~4.
 3. 굶주림 방지(aging) — `claim()`의 정렬을 `priority - (기다린 초 / 30)`처럼 바꾼다.
 4. pahidc 여유가 있으면 runner를 늘린다(compose에 runner2, `RUNNER_URLS`). 늘리기 전 pahidc의 vCPU·메모리를 확인한다(슬롯 1 ≈ vCPU 1, 0.75GB).
