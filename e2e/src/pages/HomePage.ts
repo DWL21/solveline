@@ -44,4 +44,8 @@ export class HomePage {
   logo() {
     return this.page.getByRole('link', { name: 'Solveline' }).or(this.page.getByTitle('문제 선택 화면으로')).first();
   }
+
+  themeToggle(next: 'light' | 'dark') {
+    return this.page.getByRole('button', { name: next === 'light' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기' });
+  }
 }
