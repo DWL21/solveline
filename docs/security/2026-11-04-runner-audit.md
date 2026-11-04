@@ -2,18 +2,18 @@
 
 - 범위: 코드 실행기 `runner`(Java·Python)와 judge의 결과 처리. 사용자가 임의의 코드를 제출할 수 있다는 전제에서 히든 데이터 노출, 판정 조작, 다른 사용자 간섭, 외부 접근을 확인했다.
 - 방법: main(`274e529`)의 `docker/runner.Dockerfile` 이미지를 운영 compose와 같은 옵션(`read_only`, capability 6개, `no-new-privileges`, 메모리 1.5GB, CPU 2, PID 512, `RUN_SLOTS=2`, `/tmp` tmpfs)으로 로컬에서 띄우고 runner `/run`에 직접 요청했다. 운영 서버(pahidc)와 운영 데이터는 사용하지 않았다.
-- 상태: **미수정**. 수정 계획은 [0012](../decisions/0012-runner-fast-concurrent-secure.md) 4장·6장 1~3단계.
+- 상태: **코드 수정 완료, 운영 배포·확인 대기**(브랜치 `fix/runner-hardening`). 운영 확인은 [인수인계](../handoff-runner-hardening.md). 남은 강화는 [0012](../decisions/0012-runner-fast-concurrent-secure.md) 4.3 B(샌드박스 엔진).
 
 ## 요약
 
 | # | 심각도 | 항목 | 상태 |
 |---|---|---|---|
-| F1 | 높음 | runner에 캐시된 히든 테스트셋(기댓값 포함)을 사용자 코드가 읽을 수 있다 | 미수정 |
-| F2 | 높음 | 제출 결과의 stderr로 히든 입력값이 API 응답에 나간다 | 미수정 |
-| F3 | 중간 | 함수형 문제의 시간 초과 판정을 사용자 코드가 조작할 수 있다 | 미수정 |
-| F4 | 중간 | 동시에 실행 중인 다른 사용자의 소스 코드를 읽을 수 있다 | 미수정 |
-| F5 | 중간 | 동시에 실행 중인 다른 사용자의 프로세스를 종료할 수 있다 | 미수정 |
-| F6 | 낮음~중간 | 사용자 코드가 인증 없는 runner API에 접속할 수 있다 | 미수정 |
+| F1 | 높음 | runner에 캐시된 히든 테스트셋(기댓값 포함)을 사용자 코드가 읽을 수 있다 | 수정(배포 대기) |
+| F2 | 높음 | 제출 결과의 stderr로 히든 입력값이 API 응답에 나간다 | 수정(배포 대기) |
+| F3 | 중간 | 함수형 문제의 시간 초과 판정을 사용자 코드가 조작할 수 있다 | 수정(배포 대기) |
+| F4 | 중간 | 동시에 실행 중인 다른 사용자의 소스 코드를 읽을 수 있다 | 수정(배포 대기) |
+| F5 | 중간 | 동시에 실행 중인 다른 사용자의 프로세스를 종료할 수 있다 | 수정(배포 대기) |
+| F6 | 낮음~중간 | 사용자 코드가 인증 없는 runner API에 접속할 수 있다 | 수정(배포 대기) |
 
 이미 지켜지고 있는 것: 인터넷 차단(`internal` 네트워크), 읽기 전용 루트 파일시스템, 최소 capability, 비root uid로 실행, CPU·파일 크기·프로세스 수·주소 공간 rlimit, 출력 크기 제한, 제출 결과에서 반환값·표준 출력 제거, 실행 환경 변수 정리(비밀 없음).
 
@@ -78,3 +78,15 @@
 
 - 같은 방법(운영 옵션의 runner 이미지 + `/run` 직접 요청)으로 F1~F6을 다시 확인하고 이 문서의 상태를 바꾼다.
 - 0012의 워밍 실행기·C++·샌드박스 엔진(nsjail/gVisor)을 들일 때마다 같은 항목을 다시 확인한다.
+
+## 수정 내용 (fix/runner-hardening)
+
+| # | 수정 | 확인 |
+|---|---|---|
+| F1 | 캐시를 `/var/cache/solveline-testsets`(별도 tmpfs, 0700)로 옮기고 폴더 0700·파일 0600으로 만든다. 시작할 때 기존 캐시 권한도 고친다(`runner/server.py` `store_testset`·`secure_testsets`) | 같은 재현에서 사용자 코드가 아무것도 읽지 못함. selftest "testset cache root only" |
+| F2 | 제출 결과의 stderr를 오류 종류로만 바꾼다(`packages/shared` `submitErrorSummary`·`redactSubmitResult`). judge가 저장 전에, API가 돌려주기 전에(예전 기록 포함) 적용 | `apps/judge/test/hardening.test.ts`, `apps/api/test/app.test.ts` |
+| F3 | 바깥에서 잰 시간(벽시계·CPU 중 작은 값 − 기동 기준값)이 제한 + 여유(150ms + 인자 1MB당 200ms)를 넘으면 시간 초과. 하네스 값은 형식을 검사하고 표시에만 쓴다 | 같은 재현에서 `timeout`. selftest "startup baseline measured", 기존 "time limit excludes JVM startup" 통과 |
+| F4·F5 | 슬롯마다 다른 uid(10002~), uid당 프로세스 128, 작업이 끝나면 그 uid의 남은 프로세스·파일 정리 | 같은 재현에서 다른 작업의 소스를 못 읽고, 다른 작업이 정상 종료. selftest "concurrent jobs use different uids" |
+| F6 | runner를 `network_mode: none`으로 두고 공유 볼륨의 unix 소켓(root:1000 0660)으로만 받는다. judge는 `RUNNER_URLS=unix:…` | 루프백 TCP 닫힘, 샌드박스 uid는 소켓 접속 거부, gid 1000만 응답. selftest "runner socket 0660 root:judge" |
+
+판정이 바뀔 수 있는 점: 함수형에서 모듈 최상위 코드(전처리)와 인자 파싱도 바깥 시간에 들어간다. 제한에 아주 가까운 풀이는 여유(150ms + 인자 크기)를 넘으면 시간 초과가 될 수 있다.
