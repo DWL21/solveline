@@ -4,6 +4,7 @@ judge만 이 서버를 호출한다(운영은 네트워크 없이 unix 소켓, R
 사용자 코드는 실행 슬롯마다 다른 sandbox uid로 낮춘 별도 프로세스 그룹에서 rlimit·시간 제한을 걸어 실행한다.
 작업이 끝나면 그 uid의 남은 프로세스와 파일을 지운 뒤 다음 작업에 넘긴다.
 서버에 남기는 capability(CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL)는 setuid 후 자식에 남지 않는다.
+자식은 setuid 뒤 seccomp 필터(seccomp_filter.py)를 걸고 exec한다.
 Python 표준 라이브러리만 쓴다 (사용자 코드와 같은 인터프리터).
 """
 import hashlib
@@ -22,6 +23,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import seccomp_filter
+
 HARNESS_DIR = os.environ.get("HARNESS_DIR", os.path.dirname(os.path.abspath(__file__)))
 JAVA_HARNESS_CP = os.environ.get("JAVA_HARNESS_CP", os.path.join(HARNESS_DIR, "java"))
 SANDBOX_UID = int(os.environ.get("SANDBOX_UID", "-1"))  # -1이면 낮추지 않음 (로컬 개발)
@@ -35,6 +38,8 @@ SOCKET_GID = int(os.environ.get("RUNNER_SOCKET_GID", "-1"))
 RUN_SLOTS = max(1, int(os.environ.get("RUN_SLOTS", "2")))
 # uid 하나가 만들 수 있는 프로세스·스레드 수(JVM 스레드 포함)
 NPROC_LIMIT = int(os.environ.get("NPROC_LIMIT", "128"))
+# 사용자 코드에 거는 seccomp 필터. uid를 낮추는 환경(컨테이너)에서만 쓴다. 만들 수 없으면 서버가 뜨지 않는다.
+SECCOMP = seccomp_filter.load() if SANDBOX_UID >= 0 else None
 
 RUN_TIMEOUT_S = float(os.environ.get("RUN_TIMEOUT_S", "10"))  # 문제가 시간 제한을 정하지 않으면 10초
 # 시간 제한은 solution 호출(입출력형은 실행) 시간 기준이다. 프로세스는 언어별 시작 시간만큼 여유를 두고 종료한다.
@@ -269,6 +274,8 @@ def _preexec(as_limit, uid):
             os.setgroups([])
             os.setgid(uid)
             os.setuid(uid)
+            if SECCOMP:
+                SECCOMP.install()
     return fn
 
 

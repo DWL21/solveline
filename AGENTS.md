@@ -66,7 +66,7 @@
 
 - 사용자 코드는 `runner` 컨테이너에서만 실행한다. api·judge·web 컨테이너에서 실행하지 않는다.
 - runner 컨테이너는 **네트워크가 없다**(`network_mode: none`, 루프백만). judge와는 공유 볼륨 `runner-socket`의 unix 소켓(`/run/solveline-runner/runner.sock`, root:1000 `0660`)으로만 통신한다. judge의 `RUNNER_URLS`는 `unix:<경로>`. 포트를 열지 않는다. 로컬 개발(`pnpm dev:runner`)만 TCP 8000을 쓴다.
-- runner 서버는 root로 돌지만 capability는 `CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`만 남긴다. 사용자 코드는 **실행 슬롯마다 다른 uid**(10002~, `RUN_SLOTS`개)로 낮추고 새 세션·rlimit(CPU, 파일 크기, uid당 프로세스 128, Python 주소 공간)·10초 제한을 건다. 작업이 끝나면 그 uid의 남은 프로세스와 `/tmp`·`/dev/shm`의 파일을 지운 뒤 슬롯을 돌려준다. uid 10001은 기동 기준값 측정(신뢰 코드)에만 쓴다.
+- runner 서버는 root로 돌지만 capability는 `CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`만 남긴다. 사용자 코드는 **실행 슬롯마다 다른 uid**(10002~, `RUN_SLOTS`개)로 낮추고 seccomp 필터(`runner/seccomp_filter.py`: 소켓 생성·프로세스 추적·네임스페이스·마운트·커널 모듈·bpf·io_uring 등 차단, 다른 아키텍처 호출은 종료)·새 세션·rlimit(CPU, 파일 크기, uid당 프로세스 128, Python 주소 공간)·10초 제한을 건다. 작업이 끝나면 그 uid의 남은 프로세스와 `/tmp`·`/dev/shm`의 파일을 지운 뒤 슬롯을 돌려준다. uid 10001은 기동 기준값 측정(신뢰 코드)에만 쓴다.
 - 히든 테스트셋 캐시는 사용자 코드가 쓰는 `/tmp`와 나눈 tmpfs(`TESTSET_DIR=/var/cache/solveline-testsets`)에 두고 root만 읽는다(폴더 0700, 파일 0600).
 - 루트 파일시스템은 읽기 전용, 쓰기는 `/tmp` tmpfs만. 컨테이너 메모리 1.5GB, CPU 2, PID 512.
 - 사용자 프로세스가 만든 값은 정답 비교용 반환값 외에는 판정에 쓰지 않는다. 함수형 시간 초과는 하네스 보고값과 함께, 바깥에서 잰 시간(벽시계·CPU 중 작은 값 − 언어별 기동 기준값)이 제한 + 여유(`TRUST_SLACK_MS`, 인자 크기 여유 `ARG_MS_PER_MB`)를 넘는지도 본다.

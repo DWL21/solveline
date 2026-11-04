@@ -81,6 +81,51 @@ print(a + b)
 """
 
 
+# seccomp: 막아야 할 호출은 EPERM, 채점에 필요한 스레드·자식 프로세스는 그대로 된다
+PY_SECCOMP = """
+import ctypes, errno, os, socket, subprocess, threading
+def solution():
+    def eperm(fn):
+        try:
+            fn()
+            return False
+        except OSError as e:
+            return e.errno == errno.EPERM
+    libc = ctypes.CDLL(None, use_errno=True)
+    def ptrace_me():
+        if libc.ptrace(0, 0, None, None) != 0:
+            raise OSError(ctypes.get_errno(), 'ptrace')
+    mode = [l.split()[1] for l in open('/proc/self/status') if l.startswith('Seccomp:')][0]
+    t = threading.Thread(target=lambda: None)
+    t.start()
+    t.join()
+    child = subprocess.run(['/bin/true']).returncode == 0
+    return {
+        'filter': mode == '2',
+        'socket': eperm(lambda: socket.socket(socket.AF_INET, socket.SOCK_STREAM)),
+        'unix_socket': eperm(lambda: socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)),
+        'unshare': eperm(lambda: os.unshare(os.CLONE_NEWUSER)),
+        'ptrace': eperm(ptrace_me),
+        'threads_and_child': child,
+    }
+"""
+
+JAVA_SECCOMP = """
+class Solution {
+    boolean solution() throws Exception {
+        Thread t = new Thread(() -> {});
+        t.start();
+        t.join();
+        try {
+            java.nio.channels.SocketChannel.open();
+            return false;
+        } catch (java.io.IOException e) {
+            return true;
+        }
+    }
+}
+"""
+
 PY_ESCAPE = """
 import os
 def solution():
@@ -250,6 +295,17 @@ def main():
         r = run({"language": "python", "mode": "function", "code": PY_ESCAPE,
                             "cases": [{"args": [], "expected": [True, True, False]}]})
         ok &= check("sandbox isolation", r["results"][0]["status"] == "pass", r)
+        want = {"filter": True, "socket": True, "unix_socket": True, "unshare": True, "ptrace": True, "threads_and_child": True}
+        r = run({"language": "python", "mode": "function", "code": PY_SECCOMP, "cases": [{"args": [], "expected": want}]})
+        ok &= check("seccomp blocks socket/ptrace/unshare (python)", r["results"][0]["status"] == "pass", r)
+        r = run({"language": "java", "mode": "function", "code": JAVA_SECCOMP, "cases": [{"args": [], "expected": True}]})
+        ok &= check("seccomp blocks socket (java)", r["results"][0]["status"] == "pass", r)
+        import seccomp_filter
+        ok &= check("seccomp filter has no other arch path", seccomp_filter.program("i386") is None
+                    and all(code & 0x07 != 0x05 or i + 1 + max(jt, jf) < len(prog)  # 점프는 프로그램 안에 떨어진다
+                            for prog in [seccomp_filter.program("x86_64"), seccomp_filter.program("aarch64")]
+                            for i, (code, jt, jf, _) in enumerate(prog))
+                    and all(prog[-1][0] == 0x06 for prog in [seccomp_filter.program("x86_64"), seccomp_filter.program("aarch64")]), "")
 
     ok &= hardening_checks()
     print("versions", server.VERSIONS)
