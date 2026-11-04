@@ -18,8 +18,8 @@
 ---
 
 <p align="center">
-  <a href="https://www.youtube.com/shorts/HfLgXt2_xjs"><img src="docs/assets/demo-poster.jpg" alt="Cover of the 30-second Solveline demo video (in Korean)" width="270"></a><br>
-  <a href="https://www.youtube.com/shorts/HfLgXt2_xjs">▶ Watch the 30-second demo (in Korean)</a>
+  <a href="https://www.youtube.com/shorts/X6JTinG-edU"><img src="docs/assets/demo-poster.jpg" alt="Cover of the 30-second Solveline demo video (in Korean)" width="270"></a><br>
+  <a href="https://www.youtube.com/shorts/X6JTinG-edU">▶ Watch the 30-second demo (in Korean)</a>
 </p>
 
 Solveline is a web IDE that puts the problem statement, code editor and run results on one screen, like a real coding test, and runs and grades Java and Python code.

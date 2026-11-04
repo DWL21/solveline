@@ -18,8 +18,8 @@
 ---
 
 <p align="center">
-  <a href="https://www.youtube.com/shorts/HfLgXt2_xjs"><img src="docs/assets/demo-poster.jpg" alt="Solveline 30초 데모 영상 표지" width="270"></a><br>
-  <a href="https://www.youtube.com/shorts/HfLgXt2_xjs">▶ 30초 데모 영상 보기</a>
+  <a href="https://www.youtube.com/shorts/X6JTinG-edU"><img src="docs/assets/demo-poster.jpg" alt="Solveline 30초 데모 영상 표지" width="270"></a><br>
+  <a href="https://www.youtube.com/shorts/X6JTinG-edU">▶ 30초 데모 영상 보기</a>
 </p>
 
 실제 코딩 테스트 화면처럼 문제 설명·코드 에디터·실행 결과를 한 화면에 두고, Java·Python 코드를 실행·채점하는 웹 IDE입니다.
