@@ -61,6 +61,14 @@ MAX_CODE = 200 * 1024
 # 히든 테스트셋은 root만 읽는다(폴더 0700, 파일 0600). 운영은 사용자 코드가 쓰는 /tmp 밖의 별도 tmpfs에 둔다.
 TESTSET_DIR = os.environ.get("TESTSET_DIR", os.path.join(WORK_ROOT, "testsets"))
 TESTSET_CACHE_BYTES = int(os.environ.get("TESTSET_CACHE_MB", "200")) * 1024 * 1024
+# Java 컴파일 캐시(0012 4단계): 같은 코드면 class 파일을 다시 쓴다(실행 뒤 같은 코드로 제출). 테스트셋처럼 root만 읽는다.
+CLASS_CACHE_DIR = os.environ.get("CLASS_CACHE_DIR", os.path.join(TESTSET_DIR, "classes"))
+CLASS_CACHE_BYTES = int(os.environ.get("CLASS_CACHE_MB", "16")) * 1024 * 1024
+# 예열 컴파일 서버: 전용 uid로 떠 있는 JVM에서 javac를 부른다. off면 매번 javac 명령(예전 방식).
+JAVA_COMPILE_SERVER = os.environ.get("JAVA_COMPILE_SERVER", "on") != "off"
+COMPILER_UID = int(os.environ.get("COMPILER_UID", "-1"))
+COMPILER_CP = os.environ.get("COMPILER_CP", os.path.join(HARNESS_DIR, "compiler"))
+COMPILER_XMX = os.environ.get("COMPILER_XMX", "256m")
 _testset_lock = threading.Lock()
 
 
@@ -418,6 +426,249 @@ def _java_main_class(code):
     names = re.findall(r"\b(?:class|record|enum|interface)\s+([A-Za-z_]\w*)", head)
     return names[-1] if names else "Solution"
 
+# ─── Java 컴파일: 캐시와 예열 컴파일 서버 (0012 4단계) ───
+# 판정에 쓰는 class 파일은 javac 출력 그대로다(사용자 코드를 실행하기 전에 저장하고, 같은 코드에만 다시 쓴다).
+JAVAC_OPTS = ["-encoding", "UTF-8", "-g:none", "-Xlint:deprecation"]
+COMPILE_TIMEOUT_MSG = "컴파일 시간이 초과되었습니다."
+_class_lock = threading.Lock()
+
+
+def _class_key(code, name):
+    h = hashlib.sha256()
+    for part in ("v1", VERSIONS.get("java") or "", " ".join(JAVAC_OPTS), JAVA_HARNESS_CP, name, code):
+        h.update(part.encode("utf-8") + b"\0")
+    return h.hexdigest()
+
+
+def _copy_tree(src, dst, uid):
+    """src의 파일을 dst로 복사한다. uid가 있으면 그 uid 소유로(작업 폴더) 바꾼다."""
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        target = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(target, exist_ok=True)
+        if uid >= 0:
+            os.chown(target, uid, uid)
+        for n in files:
+            d = os.path.join(target, n)
+            shutil.copyfile(os.path.join(root, n), d)
+            os.chmod(d, 0o644)
+            if uid >= 0:
+                os.chown(d, uid, uid)
+
+
+def _tree_size(path):
+    return sum(os.path.getsize(os.path.join(r, n)) for r, _, fs in os.walk(path) for n in fs)
+
+
+def class_cache_load(key, out, uid):
+    """캐시에 있으면 out에 복사하고 True"""
+    path = os.path.join(CLASS_CACHE_DIR, key)
+    with _class_lock:
+        if not os.path.isdir(path):
+            return False
+        os.utime(path)
+        _copy_tree(path, out, uid)
+    return True
+
+
+def class_cache_store(key, out):
+    """사용자 코드를 실행하기 전의 컴파일 결과를 넣는다. 용량을 넘으면 오래 안 쓴 것부터 지운다."""
+    if CLASS_CACHE_BYTES <= 0:
+        return
+    with _class_lock:
+        os.makedirs(CLASS_CACHE_DIR, mode=0o700, exist_ok=True)
+        os.chmod(CLASS_CACHE_DIR, 0o700)
+        path = os.path.join(CLASS_CACHE_DIR, key)
+        if os.path.isdir(path):
+            return
+        tmp = tempfile.mkdtemp(prefix=".tmp-", dir=CLASS_CACHE_DIR)
+        _copy_tree(out, tmp, -1)
+        os.rename(tmp, path)
+        entries = [os.path.join(CLASS_CACHE_DIR, n) for n in os.listdir(CLASS_CACHE_DIR) if not n.startswith(".")]
+        entries.sort(key=lambda e: os.stat(e).st_mtime)
+        sizes = {e: _tree_size(e) for e in entries}
+        total = sum(sizes.values())
+        while entries and total > CLASS_CACHE_BYTES and entries[0] != path:
+            e = entries.pop(0)
+            total -= sizes[e]
+            shutil.rmtree(e, ignore_errors=True)
+
+
+def _compiler_preexec():
+    def fn():
+        os.setsid()
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (64 << 20, 64 << 20))
+        if COMPILER_UID >= 0:
+            resource.setrlimit(resource.RLIMIT_NPROC, (NPROC_LIMIT, NPROC_LIMIT))
+            os.setgroups([])
+            os.setgid(COMPILER_UID)
+            os.setuid(COMPILER_UID)
+            if SECCOMP:
+                SECCOMP.install()
+    return fn
+
+
+class CompileServer:
+    """runner/java/SolvelineCompiler를 띄워 두고 요청을 보낸다. 쓸 수 없으면 compile()이 None(예전 방식으로)."""
+
+    RESTART_GAP_S = 10.0
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.proc = None
+        self.pending = {}
+        self.seq = 0
+        self.started_at = 0.0
+        self.disabled = not JAVA_COMPILE_SERVER or not os.path.isdir(COMPILER_CP)
+
+    def _start(self):
+        """lock을 잡고 부른다. 준비(예열)가 끝날 때까지 기다린다."""
+        if self.proc and self.proc.poll() is None:
+            return True
+        if time.monotonic() - self.started_at < self.RESTART_GAP_S:
+            return False  # 방금 죽었다: 잠시 예전 방식으로
+        self.started_at = time.monotonic()
+        cmd = ["java", "-Xmx" + COMPILER_XMX, "-XX:+UseSerialGC", "-Xshare:auto", "-Dfile.encoding=UTF-8", "-Djava.io.tmpdir=" + WORK_ROOT,
+               "-cp", COMPILER_CP, "SolvelineCompiler", str(RUN_SLOTS), JAVA_HARNESS_CP]
+        try:
+            p = subprocess.Popen(cmd, cwd=WORK_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 env=_sandbox_env(WORK_ROOT), preexec_fn=_compiler_preexec(), close_fds=True)
+        except OSError as e:
+            print("[runner] compile server unavailable:", e, flush=True)
+            return False
+        if p.stdout.readline() != b"ready\n":
+            _kill_group(p.pid)
+            p.wait()
+            print("[runner] compile server failed to start", flush=True)
+            return False
+        self.proc = p
+        threading.Thread(target=self._read, args=(p,), daemon=True).start()
+        return True
+
+    def _read(self, p):
+        try:
+            while True:
+                head = p.stdout.readline()
+                if not head:
+                    break
+                rid, code, size = head.decode().split()
+                body = p.stdout.read(int(size)) if int(size) else b""
+                with self.lock:
+                    slot = self.pending.pop(rid, None)
+                if slot:
+                    slot[1].append((int(code), body.decode("utf-8", "replace")))
+                    slot[0].set()
+        except (ValueError, OSError):
+            pass
+        finally:
+            with self.lock:
+                if self.proc is p:
+                    self.proc = None
+                waiting = list(self.pending.values())
+                self.pending.clear()
+            for ev, _ in waiting:
+                ev.set()  # 결과 없이 깨운다 → 예전 방식으로
+            _kill_group(p.pid)
+            p.wait()
+
+    def warm(self):
+        if not self.disabled:
+            with self.lock:
+                self._start()
+
+    def stop(self):
+        with self.lock:
+            p = self.proc
+            self.proc = None
+        if p:
+            _kill_group(p.pid)
+
+    def compile(self, code, name, timeout=COMPILE_TIMEOUT_S):
+        """(ok, 메시지, out 폴더를 가진 임시 폴더) 또는 None. 임시 폴더는 부른 쪽이 지운다."""
+        if self.disabled:
+            return None
+        stage = tempfile.mkdtemp(prefix="compile-", dir=WORK_ROOT)
+        try:
+            os.chmod(stage, 0o700)
+            os.makedirs(os.path.join(stage, "out"))
+            src = os.path.join(stage, name)
+            with open(src, "w", encoding="utf-8") as f:
+                f.write(code)
+            if COMPILER_UID >= 0:
+                for path in (stage, os.path.join(stage, "out"), src):
+                    os.chown(path, COMPILER_UID, COMPILER_UID)
+            ev, box = threading.Event(), []
+            with self.lock:
+                if not self._start():
+                    shutil.rmtree(stage, ignore_errors=True)
+                    return None
+                self.seq += 1
+                rid = str(self.seq)
+                self.pending[rid] = (ev, box)
+                p = self.proc
+                try:
+                    p.stdin.write(("%s %s %s\n" % (rid, stage, name)).encode())
+                    p.stdin.flush()
+                except OSError:
+                    self.pending.pop(rid, None)
+                    shutil.rmtree(stage, ignore_errors=True)
+                    return None
+            if not ev.wait(timeout):
+                # 한 요청이 오래 걸리면 서버를 끝낸다(같이 기다리던 요청은 예전 방식으로 다시 컴파일한다)
+                _kill_group(p.pid)
+                shutil.rmtree(stage, ignore_errors=True)
+                return False, COMPILE_TIMEOUT_MSG, None
+            if not box:
+                shutil.rmtree(stage, ignore_errors=True)
+                return None
+            code_, msg = box[0]
+            # javac 명령은 작업 폴더에서 상대 경로로 돌았다: 같은 문구가 되게 폴더 경로를 지운다
+            return code_ == 0, msg.replace(stage + "/", ""), stage
+        except BaseException:
+            shutil.rmtree(stage, ignore_errors=True)
+            raise
+
+
+COMPILER = CompileServer()
+
+
+def _javac_cold(name, work, job):
+    p = run_proc(["javac", "-J-Xmx384m"] + JAVAC_OPTS + ["-d", "out", "-cp", JAVA_HARNESS_CP, name], work, timeout=COMPILE_TIMEOUT_S, job=job)
+    if p.status == "ok":
+        return True, ""
+    return False, COMPILE_TIMEOUT_MSG if p.status == "timeout" else (p.stderr or p.stdout)
+
+
+def _prepare_java(code, work, job):
+    name = _java_file_name(code)
+    with open(os.path.join(work, name), "w", encoding="utf-8") as f:
+        f.write(code)
+    out = os.path.join(work, "out")
+    os.makedirs(out, exist_ok=True)
+    uid = job.uid if job else SANDBOX_UID
+    if uid >= 0:
+        os.chown(out, uid, uid)
+    key = _class_key(code, name)
+    if class_cache_load(key, out, uid):
+        return True, ""
+    res = COMPILER.compile(code, name)
+    if res is None:
+        ok, msg = _javac_cold(name, work, job)
+    else:
+        ok, msg, stage = res
+        try:
+            if ok:
+                _copy_tree(os.path.join(stage, "out"), out, uid)
+        finally:
+            if stage:
+                shutil.rmtree(stage, ignore_errors=True)
+    if ok:
+        # 아직 사용자 코드를 실행하지 않았다: out은 javac 출력 그대로다
+        class_cache_store(key, out)
+    return ok, msg
+
 
 def prepare(lang, code, work, job=None):
     """컴파일한다. 실패 시 (False, 메시지)."""
@@ -428,21 +679,7 @@ def prepare(lang, code, work, job=None):
         if p.status != "ok":
             return False, (p.stderr or p.stdout).replace(work + "/", "")
         return True, ""
-    name = _java_file_name(code)
-    with open(os.path.join(work, name), "w", encoding="utf-8") as f:
-        f.write(code)
-    os.makedirs(os.path.join(work, "out"), exist_ok=True)
-    uid = job.uid if job else SANDBOX_UID
-    if uid >= 0:
-        os.chown(os.path.join(work, "out"), uid, uid)
-    p = run_proc(["javac", "-J-Xmx384m", "-encoding", "UTF-8", "-g:none", "-Xlint:deprecation", "-d", "out", "-cp", JAVA_HARNESS_CP, name],
-                 work, timeout=COMPILE_TIMEOUT_S, job=job)
-    if p.status != "ok":
-        msg = p.stderr or p.stdout
-        if p.status == "timeout":
-            msg = "컴파일 시간이 초과되었습니다."
-        return False, msg
-    return True, ""
+    return _prepare_java(code, work, job)
 
 
 def java_cmd(*rest):
@@ -794,8 +1031,8 @@ def serve_unix(path, gid=-1):
 
 if __name__ == "__main__":
     secure_testsets()
-    # 기동 기준값을 미리 잰다(첫 요청이 기다리지 않게)
-    threading.Thread(target=lambda: [baseline(lang) for lang in ("python", "java")], daemon=True).start()
+    # 컴파일 서버를 띄워 예열하고, 기동 기준값을 미리 잰다(첫 요청이 기다리지 않게). 예열과 겹치지 않게 차례로.
+    threading.Thread(target=lambda: [COMPILER.warm()] + [baseline(lang) for lang in ("python", "java")], daemon=True).start()
     if SOCKET_PATH:
         print("solveline-runner unix:%s %s" % (SOCKET_PATH, VERSIONS), flush=True)
         serve_unix(SOCKET_PATH, SOCKET_GID).serve_forever()

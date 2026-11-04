@@ -1,6 +1,7 @@
 """runner 자체 검사. CI에서 runner 이미지 안에서 실행한다: python3 selftest.py"""
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -177,6 +178,62 @@ def hardening_checks():
     return ok
 
 
+def java_compile_checks():
+    """0012 4단계: 예열 컴파일 서버와 컴파일 캐시. 판정·오류 문구는 예전 방식(javac 명령)과 같아야 한다."""
+    ok = True
+    bad = "class Solution {\n    int solution(int a) {\n        return a +;\n    }\n}\n"
+    good = "class Solution { int solution(int a) { return a * 2; } }"
+
+    def cold(code):
+        work = tempfile.mkdtemp(dir=server.WORK_ROOT)
+        try:
+            os.chown(work, server.SANDBOX_UID, server.SANDBOX_UID) if server.SANDBOX_UID >= 0 else None
+            with open(os.path.join(work, "Solution.java"), "w") as f:
+                f.write(code)
+            os.makedirs(os.path.join(work, "out"))
+            if server.SANDBOX_UID >= 0:
+                os.chown(os.path.join(work, "out"), server.SANDBOX_UID, server.SANDBOX_UID)
+            return server._javac_cold("Solution.java", work, server.Job())
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    warm = server.COMPILER.compile(bad, "Solution.java")
+    if warm and warm[2]:
+        shutil.rmtree(warm[2], ignore_errors=True)
+    ref = cold(bad)
+    ok &= check("compile server output == javac command", warm is not None and warm[:2] == ref, (warm and warm[:2], ref))
+    proc = server.COMPILER.proc
+    status = {}
+    if proc:
+        with open("/proc/%d/status" % proc.pid) as f:
+            status = dict(l.split(":", 1) for l in f if ":" in l)
+    ok &= check("compile server runs as compiler uid with seccomp", proc is not None
+                and status.get("Uid", "").split()[:1] == [str(server.COMPILER_UID)] and status.get("Seccomp", "").strip() == "2", status.get("Uid"))
+
+    r1 = run({"language": "java", "mode": "function", "code": good, "cases": [{"args": [3], "expected": 6}]})
+    key = server._class_key(good, "Solution.java")
+    cached = os.path.isdir(os.path.join(server.CLASS_CACHE_DIR, key))
+    calls = []
+    orig = server.COMPILER.compile
+    server.COMPILER.compile = lambda *a, **k: calls.append(a) or orig(*a, **k)
+    try:
+        r2 = run({"language": "java", "mode": "function", "code": good, "cases": [{"args": [4], "expected": 8}]})
+    finally:
+        server.COMPILER.compile = orig
+    ok &= check("class cache hit skips compile", cached and not calls and r1["results"][0]["status"] == "pass"
+                and r2["results"][0]["status"] == "pass", (cached, calls, r1, r2))
+    st = os.stat(server.CLASS_CACHE_DIR)
+    ok &= check("class cache root only (0700)", stat.S_IMODE(st.st_mode) == 0o700 and st.st_uid == 0, oct(st.st_mode))
+
+    # 시간 초과면 서버를 끝내고, 다음 컴파일은 예전 방식(또는 다시 띄운 서버)으로 된다
+    t = server.COMPILER.compile(good + " ", "Solution.java", timeout=0.0001)
+    if t and t[2]:
+        shutil.rmtree(t[2], ignore_errors=True)
+    r3 = run({"language": "java", "mode": "function", "code": good + "  ", "cases": [{"args": [5], "expected": 10}]})
+    ok &= check("compile timeout recovers", t is not None and t[:2] == (False, server.COMPILE_TIMEOUT_MSG) and r3["results"][0]["status"] == "pass", (t, r3))
+    return ok
+
+
 def check(name, cond, detail):
     print(("PASS " if cond else "FAIL ") + name)
     if not cond:
@@ -308,6 +365,8 @@ def main():
                     and all(prog[-1][0] == 0x06 for prog in [seccomp_filter.program("x86_64"), seccomp_filter.program("aarch64")]), "")
 
     ok &= hardening_checks()
+    if server.SANDBOX_UID >= 0:
+        ok &= java_compile_checks()
     print("versions", server.VERSIONS)
     sys.exit(0 if ok else 1)
 
