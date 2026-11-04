@@ -81,6 +81,7 @@ test('PR 본문: 사람 검토 안내·변경·검증 표·Closes를 담고 멘�
     runUrl: 'https://run',
   });
   assert.match(body, /모두 통과하면 자동으로 머지/);
+  assert.doesNotMatch(body, /draft/);
   assert.match(body, /\| 패치 검사\(경로·크기\) \| ✓ 통과 \| 1개 파일, 30줄 \|/);
   assert.match(body, /\| 바뀐 e2e 실행 \| ✗ 실패 \| 1 failed \\\| 2 passed \|/);
   assert.match(body, /Closes #7/);
@@ -89,6 +90,7 @@ test('PR 본문: 사람 검토 안내·변경·검증 표·Closes를 담고 멘�
 
 test('이슈 진행 댓글은 표식으로 시작한다', () => {
   assert.ok(issueComment({ state: 'start', runUrl: 'https://run' }).startsWith(MARKER));
+  assert.match(issueComment({ state: 'done', prUrl: 'https://pr', runUrl: 'r' }), /PR을 열었습니다/);
   assert.match(issueComment({ state: 'failed', reason: '바꾼 것이 없습니다', runUrl: 'r' }), /PR을 만들지 못했습니다: 바꾼 것이 없습니다/);
 });
 
