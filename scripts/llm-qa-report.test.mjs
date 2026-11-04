@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { buildRequest, comment, counts, fingerprint, issueDrafts, linkShots, MARKER, MAX_ISSUES, relevant, safe, section, status } from './llm-qa-report.mjs';
+import { buildRequest, comment, counts, decide, fingerprint, issueDrafts, linkShots, MARKER, MAX_ISSUES, POLICY, relevant, safe, section, status } from './llm-qa-report.mjs';
 
 const script = fileURLToPath(new URL('./llm-qa-report.mjs', import.meta.url));
 const scenario = (verdict, i = 1) => ({
@@ -21,10 +21,45 @@ const scenario = (verdict, i = 1) => ({
 const result = (...verdicts) => ({ summary: '요약', scenarios: verdicts.map((v, i) => scenario(v, i + 1)), suggestions: [] });
 const request = { pr: 171, sha: '9abf4260000000000000000000000000000000ff' };
 
-test('화면·API 코드를 바꾼 PR만 대상이다', () => {
+test('화면·API 코드를 바꾼 PR만 대상이다(앱 폴더 안의 문서는 빼고)', () => {
   assert.equal(relevant(['docs/a.md', '.github/workflows/ci.yml']), false);
   assert.equal(relevant(['apps/web/src/App.tsx']), true);
   assert.equal(relevant(['packages/shared/src/index.ts']), true);
+  assert.equal(relevant(['apps/api/README.md']), false);
+});
+
+// 결정표: 한 줄이 판정 하나. policy.json을 바꾸면 이 표도 함께 고친다(0010)
+const pr = (over = {}) => ({
+  state: 'open', manual: false, ciConclusion: 'success', headSha: 'a', ciSha: 'a',
+  authorAssociation: 'OWNER', labels: [], files: ['apps/web/src/App.tsx'], ...over,
+});
+const table = [
+  ['신뢰된 작성자 + 화면 코드', {}, 'run'],
+  ['협업자', { authorAssociation: 'COLLABORATOR' }, 'run'],
+  ['외부 기여자', { authorAssociation: 'CONTRIBUTOR' }, 'skip'],
+  ['처음 기여자', { authorAssociation: 'FIRST_TIME_CONTRIBUTOR' }, 'skip'],
+  ['외부 기여자 + qa:llm 레이블', { authorAssociation: 'NONE', labels: ['qa:llm'] }, 'run'],
+  ['문서·워크플로만 바꿈', { files: ['docs/x.md', '.github/workflows/ci.yml'] }, 'not-applicable'],
+  ['외부 기여자 + 문서만(상태도 달지 않음)', { authorAssociation: 'NONE', files: ['docs/x.md'] }, 'skip'],
+  ['더 새 커밋이 있음', { headSha: 'b' }, 'skip'],
+  ['CI 실패', { ciConclusion: 'failure' }, 'skip'],
+  ['닫힌 PR', { state: 'closed' }, 'skip'],
+  ['손 실행은 작성자·경로·커밋을 보지 않음', { manual: true, authorAssociation: 'NONE', files: ['docs/x.md'], headSha: 'b', ciConclusion: '' }, 'run'],
+  ['손 실행도 닫힌 PR은 안 함', { manual: true, state: 'closed' }, 'skip'],
+];
+for (const [name, over, action] of table) {
+  test(`판정: ${name} → ${action}`, () => {
+    const d = decide(pr(over));
+    assert.equal(d.action, action);
+    assert.ok(d.reason.length > 0);
+  });
+}
+
+test('판정 규칙은 policy.json에서 읽고, 다른 정책을 넘기면 그대로 따른다', () => {
+  assert.deepEqual(POLICY.trustedAuthors, ['OWNER', 'MEMBER', 'COLLABORATOR']);
+  const strict = { ...POLICY, trustedAuthors: ['OWNER'], allowLabel: 'qa:run' };
+  assert.equal(decide(pr({ authorAssociation: 'COLLABORATOR' }), strict).action, 'skip');
+  assert.equal(decide(pr({ authorAssociation: 'NONE', labels: ['qa:run'] }), strict).action, 'run');
 });
 
 test('모델·PR 글의 멘션과 이슈 자동 연결을 끊고 HTML을 막는다', () => {
