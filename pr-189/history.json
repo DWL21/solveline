@@ -33,5 +33,12 @@
     "runId": 41757661541,
     "key": "41757661541-llm-41758156162",
     "note": "PR stage report + LLM e2e QA (CI #41757661541, LLM QA #41758156162)"
+  },
+  {
+    "version": "1.0",
+    "date": "2026-11-04T02:17:34Z",
+    "runId": 41759176502,
+    "key": "41759176502",
+    "note": "Post-merge: deployment and production smoke (CI #41759176502)"
   }
 ]
