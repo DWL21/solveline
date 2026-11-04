@@ -17,10 +17,6 @@ export class HomePage {
     await expect(this.heading).toContainText('컬렉션');
   }
 
-  themeButton(next: '라이트' | '다크') {
-    return this.page.getByRole('button', { name: `${next} 모드로 바꾸기` });
-  }
-
   async showAll() {
     await this.page.getByRole('button', { name: '전체 보기' }).click();
     await expect(this.heading).toContainText('전체 문제');
