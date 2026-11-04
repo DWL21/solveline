@@ -1,6 +1,10 @@
 """runner 자체 검사. CI에서 runner 이미지 안에서 실행한다: python3 selftest.py"""
 import json
+import os
+import stat
 import sys
+import tempfile
+import threading
 
 import server
 
@@ -90,6 +94,42 @@ def solution():
     write_harness = denied(lambda: open('/opt/runner/server.py', 'a'))
     return [kill_server, write_harness, os.getuid() == 0]
 """
+
+
+PY_UID = "import os, time\ndef solution():\n    time.sleep(1)\n    return os.getuid()\n"
+
+
+def hardening_checks():
+    """설정 확인(docs/security/2026-11-04-runner-audit.md): 테스트셋 권한, 슬롯별 uid, 소켓 권한, 기동 기준값."""
+    ok = True
+    mode = lambda p: stat.S_IMODE(os.stat(p).st_mode)  # noqa: E731
+    files = [f for f in os.listdir(server.TESTSET_DIR) if f.endswith(".json")] if os.path.isdir(server.TESTSET_DIR) else []
+    ok &= check("testset cache root only (dir 0700, files 0600)",
+                files and mode(server.TESTSET_DIR) == 0o700 and all(mode(os.path.join(server.TESTSET_DIR, f)) == 0o600 for f in files),
+                (oct(mode(server.TESTSET_DIR)) if os.path.isdir(server.TESTSET_DIR) else None, files))
+    if server.SANDBOX_UID >= 0 and server.RUN_SLOTS >= 2:
+        out = []
+        threads = [threading.Thread(target=lambda: out.append(run({"language": "python", "mode": "function", "code": PY_UID,
+                                                                   "cases": [{"args": [], "expected": None}]})))
+                   for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        uids = sorted(json.loads(r["results"][0]["actual"]) for r in out)
+        ok &= check("concurrent jobs use different uids", len(set(uids)) == 2 and all(u > server.SANDBOX_UID for u in uids), uids)
+    d = tempfile.mkdtemp(prefix="selftest-sock-")
+    httpd = server.serve_unix(os.path.join(d, "s", "runner.sock"), 1000)
+    try:
+        st = os.stat(os.path.join(d, "s", "runner.sock"))
+        ok &= check("runner socket 0660 root:judge", stat.S_IMODE(st.st_mode) == 0o660 and st.st_uid == 0 and st.st_gid == 1000
+                    and mode(os.path.join(d, "s")) == 0o750, oct(st.st_mode))
+    finally:
+        httpd.server_close()
+    for lang in ("python", "java"):
+        b = server.baseline(lang)
+        ok &= check("startup baseline measured (%s)" % lang, b is not None and b[0] > 0, b)
+    return ok
 
 
 def check(name, cond, detail):
@@ -211,6 +251,7 @@ def main():
                             "cases": [{"args": [], "expected": [True, True, False]}]})
         ok &= check("sandbox isolation", r["results"][0]["status"] == "pass", r)
 
+    ok &= hardening_checks()
     print("versions", server.VERSIONS)
     sys.exit(0 if ok else 1)
 

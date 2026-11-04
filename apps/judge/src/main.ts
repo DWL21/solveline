@@ -4,7 +4,7 @@ import { createJudge } from './app.ts';
 import { openJobsDb } from './jobs.ts';
 import { TestsetMirror } from './mirror.ts';
 import { R2ObjectStore, WorkerR2Store } from './r2.ts';
-import { RunnerClient } from './runner.ts';
+import { runnerFromUrl } from './runner.ts';
 import { TestsetStore } from './testsets.ts';
 import { log, registerSecret } from './redact.ts';
 
@@ -20,7 +20,8 @@ registerSecret(secret);
 registerSecret(env.R2_SECRET_ACCESS_KEY);
 registerSecret(env.R2_PROXY_SECRET);
 const dataDir = env.DATA_DIR ?? './data';
-const runners = (env.RUNNER_URLS ?? 'http://127.0.0.1:8000').split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean).map((u) => new RunnerClient(u));
+// RUNNER_URLS: 쉼표 구분. http://… 또는 unix:/소켓/경로(운영)
+const runners = (env.RUNNER_URLS ?? 'http://127.0.0.1:8000').split(',').map((u) => u.trim()).filter(Boolean).map(runnerFromUrl);
 const testsets = new TestsetStore(join(dataDir, 'testsets'));
 const r2 =
   env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET

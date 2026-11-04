@@ -1,3 +1,4 @@
+import { request } from 'node:http';
 import type { RunRequest, RunResult, Runtime, TestCase } from '@solveline/shared';
 
 export class RunnerError extends Error {}
@@ -51,6 +52,40 @@ export type RunJob = {
   /** runner 캐시에서 꺼내 쓰는 테스트셋(제출). raw는 캐시에 없을 때 한 번 올린다. */
   testset?: { hash: string; raw: () => string | null };
 };
+
+/**
+ * unix 소켓으로 보내는 fetch. 운영 runner는 네트워크가 없고(network_mode: none) 공유 볼륨의 소켓으로만 받는다.
+ * RunnerClient가 쓰는 만큼만(메서드·헤더·문자열 본문·signal) 구현한다.
+ */
+export function unixSocketFetch(socketPath: string): typeof fetch {
+  const impl = (input: string | URL | Request, init: RequestInit = {}) =>
+    new Promise<Response>((resolve, reject) => {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+      const body = typeof init.body === 'string' ? init.body : undefined;
+      const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+      if (body !== undefined) headers['content-length'] = String(Buffer.byteLength(body));
+      const req = request({ socketPath, path: url.pathname + url.search, method: init.method ?? 'GET', headers }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode ?? 500 })));
+        res.on('error', reject);
+      });
+      const signal = init.signal;
+      const abort = () => req.destroy(signal?.reason instanceof Error ? signal.reason : new Error('aborted'));
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+      req.on('error', reject);
+      req.end(body);
+    });
+  return impl as typeof fetch;
+}
+
+/** RUNNER_URLS 한 항목: http(s) 주소 또는 unix:<소켓 경로> */
+export function runnerFromUrl(entry: string): RunnerClient {
+  const u = entry.trim().replace(/\/$/, '');
+  if (u.startsWith('unix:')) return new RunnerClient('http://runner', unixSocketFetch(u.slice('unix:'.length)));
+  return new RunnerClient(u);
+}
 
 /** runner 한 대. 결과의 순서는 케이스 순서와 같다(id는 호출한 쪽이 붙인다). */
 export class RunnerClient {

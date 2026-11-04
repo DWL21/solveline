@@ -8,13 +8,20 @@ services:
       dockerfile: docker/runner.Dockerfile
     # 운영 서버와 같은 x86_64. Apple Silicon에서는 에뮬레이션으로 돈다(JDK 21.0.2가 arm64 일부 CPU에서 멈추기 때문).
     platform: linux/amd64
-    networks: [sandbox]
+    # 운영과 같이 네트워크 없이 unix 소켓으로만 받는다
+    network_mode: none
     read_only: true
     tmpfs:
       - /tmp:size=768m,mode=1777
+      - /var/cache/solveline-testsets:size=224m,mode=0700
+    volumes:
+      - runner-socket:/run/solveline-runner
     environment:
       RUN_SLOTS: "2"
       TESTSET_CACHE_MB: "200"
+      TESTSET_DIR: /var/cache/solveline-testsets
+      RUNNER_SOCKET: /run/solveline-runner/runner.sock
+      RUNNER_SOCKET_GID: "1000"
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
     security_opt: [no-new-privileges:true]
@@ -24,7 +31,9 @@ services:
     build:
       context: .
       dockerfile: docker/judge.Dockerfile
-    networks: [default, sandbox]
+    networks: [default]
+    volumes:
+      - runner-socket:/run/solveline-runner
     tmpfs:
       - /data:uid=1000,gid=1000,mode=700
     environment:
@@ -32,7 +41,7 @@ services:
       PORT: "8790"
       DATA_DIR: /data
       RESULTS_URL: http://api:8787
-      RUNNER_URLS: http://runner:8000
+      RUNNER_URLS: unix:/run/solveline-runner/runner.sock
       RUNNER_SLOTS: "2"
       JUDGE_SECRET: ${E2E_JUDGE_SECRET:?scripts/test-env.sh로 실행하세요}
     depends_on:
@@ -72,6 +81,5 @@ services:
     depends_on:
       api:
         condition: service_healthy
-networks:
-  sandbox:
-    internal: true
+volumes:
+  runner-socket:
