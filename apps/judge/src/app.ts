@@ -6,6 +6,7 @@ import type { TestsetMirror } from './mirror.ts';
 import { CaseInputError, validateCases, type RunnerClient } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
 import { log } from './redact.ts';
+import { collectMetrics, pruneStats, STATS_RETENTION_DAYS } from './metrics.ts';
 
 type Runner = Pick<RunnerClient, 'run' | 'runtime' | 'cancel'>;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -73,6 +74,9 @@ export function createJudge(deps: JudgeDeps) {
     const all = await Promise.all(deps.runners.map((r) => r.runtime()));
     return c.json({ data: all.find((r) => r.runner === 'up') ?? all[0] ?? ({ runner: 'down', versions: { java: null, python: null } } satisfies Runtime) });
   });
+
+  // 채점 지표(대기·실행 수, 최근 실행·대기 시간). 사용자 정보 없음. 다른 경로처럼 서명이 있어야 한다.
+  app.get('/metrics', (c) => c.json({ data: collectMetrics(deps.db, deps.runners.length * deps.slotsPerRunner) }));
 
   app.post('/jobs', async (c) => {
     const parsed = JudgeJob.safeParse(await c.req.json().catch(() => null));
@@ -168,10 +172,11 @@ export function createJudge(deps: JudgeDeps) {
     start() {
       dispatcher.start();
       void deliver();
-      // 보내지 못한 결과를 10초마다 다시 보내고, 하루 지난 작업은 지운다
+      // 보내지 못한 결과를 10초마다 다시 보내고, 하루 지난 작업과 보관 기간이 지난 지표는 지운다
       timer = setInterval(() => {
         void deliver();
         jobs.prune(new Date(Date.now() - 24 * 3600_000));
+        pruneStats(deps.db, new Date(Date.now() - STATS_RETENTION_DAYS * 24 * 3600_000));
       }, 10_000);
       timer.unref();
     },

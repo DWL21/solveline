@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { judgeHeaders, judgeStreamHeaders, type JudgeJob, type JudgeStatus, type TestCase } from '@solveline/shared';
 import { createJudge } from '../src/app.ts';
 import { JobStore, openJobsDb } from '../src/jobs.ts';
+import { collectMetrics, pruneStats } from '../src/metrics.ts';
 import { TestsetMirror, testsetKey } from '../src/mirror.ts';
 import { MemoryObjectStore, R2ObjectStore, WorkerR2Store } from '../src/r2.ts';
 import { mask, redact, registerSecret } from '../src/redact.ts';
@@ -366,5 +367,70 @@ describe('저장소', () => {
     registerSecret('super-secret-value');
     expect(redact('key=super-secret-value Bearer abc.def')).not.toMatch(/super-secret-value|abc\.def/);
     expect(mask('short')).toBe('***');
+  });
+});
+
+describe('채점 지표', () => {
+  const ok = { result: { compile: { ok: true, output: '' }, results: [] }, score: null };
+  const at = (s: number) => new Date(Date.UTC(2026, 10, 4, 3, 0, s));
+
+  it('끝난 작업마다 대기·실행 시간만 남기고, 실행 전에 중지된 작업은 실행 시간이 없다', () => {
+    const db = openJobsDb(':memory:');
+    const store = new JobStore(db);
+    store.insert(job('a', { kind: 'submit', code: 'secret code' }), ['1', '2', '3'], at(0));
+    store.claim(at(2));
+    store.finish('a', ok, at(5));
+    store.insert(job('b'), ['1'], at(1));
+    store.cancelQueued('b', at(3));
+    const rows = db.prepare('SELECT * FROM job_stats ORDER BY id').all();
+    expect(rows).toEqual([
+      { id: 'a', kind: 'submit', language: 'python', status: 'done', cases: 3, queued_at: at(0).toISOString(), finished_at: at(5).toISOString(), wait_ms: 2000, run_ms: 3000 },
+      { id: 'b', kind: 'run', language: 'python', status: 'cancelled', cases: 1, queued_at: at(1).toISOString(), finished_at: at(3).toISOString(), wait_ms: null, run_ms: null },
+    ]);
+    // 코드·결과는 남기지 않는다
+    expect(JSON.stringify(rows)).not.toContain('secret code');
+  });
+
+  it('지금 대기열과 최근 구간의 건수·백분위수·분당 최대를 모은다', () => {
+    const db = openJobsDb(':memory:');
+    const store = new JobStore(db);
+    for (let i = 0; i < 4; i++) {
+      store.insert(job(`s${i}`, { kind: 'submit' }), ['1'], at(i));
+      store.claim(at(i));
+      store.finish(`s${i}`, ok, new Date(at(i).getTime() + (i + 1) * 100));
+    }
+    store.insert(job('q1'), ['1'], at(10));
+    store.insert(job('q2', { kind: 'submit' }), ['1'], at(11));
+    store.claim(at(12)); // run이 먼저 꺼내진다
+    const m = collectMetrics(db, 4, at(30));
+    expect(m.queue).toEqual({ queued: { run: 0, submit: 1 }, running: 1, slots: 4 });
+    expect(m.windows['5m'].count).toBe(4);
+    expect(m.windows['5m'].perMinutePeak).toBe(4);
+    expect(m.windows['5m'].groups).toEqual([
+      { kind: 'submit', language: 'python', count: 4, statuses: { done: 4 }, avgCases: 1, runMs: { avg: 250, p50: 200, p95: 400, max: 400 }, waitMs: { p50: 0, p95: 0, max: 0 } },
+    ]);
+    // 5분이 지나면 5분 구간에서 빠지고 24시간 구간에는 남는다
+    const later = collectMetrics(db, 4, new Date(at(0).getTime() + 10 * 60_000));
+    expect(later.windows['5m'].count).toBe(0);
+    expect(later.windows['24h'].count).toBe(4);
+  });
+
+  it('보관 기간이 지난 지표를 지운다', () => {
+    const db = openJobsDb(':memory:');
+    const store = new JobStore(db);
+    store.insert(job('old'), ['1'], at(0));
+    store.cancelQueued('old', at(1));
+    expect(pruneStats(db, new Date(at(1).getTime() + 1))).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) FROM job_stats').pluck().get()).toBe(0);
+  });
+
+  it('/metrics는 서명이 있어야 하고 대기열 상태를 돌려준다', async () => {
+    const { judge, call } = setup();
+    expect((await judge.app.request('/metrics')).status).toBe(401);
+    await call('POST', '/jobs?wait=5', job('m1'));
+    const res = await call('GET', '/metrics');
+    expect(res.status).toBe(200);
+    expect(res.body.data.queue.slots).toBe(2);
+    expect(res.body.data.windows['24h'].groups[0]).toMatchObject({ kind: 'run', language: 'python', count: 1, statuses: { done: 1 } });
   });
 });

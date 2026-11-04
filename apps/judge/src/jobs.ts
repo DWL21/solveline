@@ -5,6 +5,7 @@ import { JudgeStatus, lastSubmissionOf, submitErrorSummary, type JudgeJob, type 
 import type { RunnerClient, RunJob } from './runner.ts';
 import type { TestsetStore } from './testsets.ts';
 import { log, redact } from './redact.ts';
+import { createStatsTable, recordStats } from './metrics.ts';
 
 const RUN_TEXT_LIMIT = 20_000;
 const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}\n… (${t.length.toLocaleString()}자 중 ${n.toLocaleString()}자만 표시)` : t);
@@ -74,6 +75,7 @@ export function openJobsDb(dataDir: string): Database.Database {
   );
   CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status, priority, created_at);
   CREATE INDEX IF NOT EXISTS jobs_outbox ON jobs(delivered, finished_at);`);
+  createStatsTable(db);
   return db;
 }
 
@@ -137,11 +139,14 @@ export class JobStore {
       this.db.prepare("UPDATE jobs SET status = 'cancelled', result = ?, finished_at = ? WHERE id = ?").run(out.cancelled ? JSON.stringify(out.cancelled) : null, now.toISOString(), id);
     else if ('error' in out) this.db.prepare("UPDATE jobs SET status = 'error', error = ?, finished_at = ? WHERE id = ?").run(out.error, now.toISOString(), id);
     else this.db.prepare("UPDATE jobs SET status = 'done', result = ?, score = ?, finished_at = ? WHERE id = ?").run(JSON.stringify(out.result), out.score, now.toISOString(), id);
+    recordStats(this.db, id);
   }
 
   /** 대기 중인 작업을 바로 중지한다. 바뀌었으면 true */
   cancelQueued(id: string, now = new Date()): boolean {
-    return this.db.prepare("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'queued'").run(now.toISOString(), id).changes > 0;
+    const changed = this.db.prepare("UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'queued'").run(now.toISOString(), id).changes > 0;
+    if (changed) recordStats(this.db, id);
+    return changed;
   }
 
   /** 프로세스가 죽어 running으로 남은 작업을 다시 대기열로 */
