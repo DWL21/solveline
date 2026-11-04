@@ -101,7 +101,7 @@ export function prBody({ issue, report, verify, check, runUrl }) {
     ...(verify?.steps ?? []).map((s) => `| ${safe(s.name, 80)} | ${verdict(s.result)} | ${safe(s.detail ?? '', 200).replace(/\|/g, '\\|').replace(/\n/g, ' ')} |`),
     '',
     ...(report?.notes ? ['**에이전트 메모**', '', safe(report.notes, 1500), ''] : []),
-    `[에이전트 실행 기록](${runUrl}) · 이 PR의 CI는 에이전트 워크플로가 시작한다(GITHUB_TOKEN으로 만든 PR은 CI를 자동으로 부르지 않는다).`,
+    `[에이전트 실행 기록](${runUrl}) · Actions 봇이 연 PR의 CI는 승인 대기에 걸리므로 에이전트 워크플로가 이 커밋의 CI만 승인한다(안 되면 직접 시작).`,
     '',
     `Closes #${issue.number}`,
     '',
