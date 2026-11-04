@@ -3,6 +3,29 @@ import { evidence } from '../../src/evidence.ts';
 
 /** 비회원: 둘러보기는 되고, 코드 작성·실행은 로그인 뒤 */
 test.describe('비회원 둘러보기 @cross', { tag: '@R1' }, () => {
+  for (const deviceTheme of ['dark', 'light'] as const) {
+    test(`기기 ${deviceTheme} 테마를 따르고 직접 선택한 테마는 새로고침 후에도 유지한다`, async ({ page, home }) => {
+      const selectedTheme = deviceTheme === 'dark' ? 'light' : 'dark';
+      await page.emulateMedia({ colorScheme: deviceTheme });
+      await home.openCollections();
+      await expect(home.themeToggle(selectedTheme)).toBeVisible();
+      const deviceColor = await home.heading.evaluate((heading) => getComputedStyle(heading).color);
+
+      await page.reload();
+      await expect(home.themeToggle(selectedTheme)).toBeVisible();
+      await expect(home.heading).toHaveCSS('color', deviceColor);
+
+      await home.themeToggle(selectedTheme).click();
+      await expect(home.themeToggle(deviceTheme)).toBeVisible();
+      await expect(home.heading).not.toHaveCSS('color', deviceColor);
+      const selectedColor = await home.heading.evaluate((heading) => getComputedStyle(heading).color);
+
+      await page.reload();
+      await expect(home.themeToggle(deviceTheme)).toBeVisible();
+      await expect(home.heading).toHaveCSS('color', selectedColor);
+    });
+  }
+
   test('첫 화면의 컬렉션 카드에서 문제를 열면 읽기 전용이고, 로그인하기가 보인다', async ({ page, home, seedProblem, editorApi }) => {
     const p = await seedProblem();
     const col = await editorApi.createCollection({ name: `E2E 둘러보기/${p.id.slice(0, 6)}`, description: '첫 줄 설명\n둘째 줄은 카드에 안 보인다' });
