@@ -86,6 +86,7 @@ export class SubmissionStore {
 
   /**
    * judge가 알려 준 상태를 반영한다. 끝난 기록은 다시 바꾸지 않는다(콜백과 긴 조회가 같은 결과를 두 번 줘도 한 번만).
+   * 상태가 그대로면(긴 조회마다 오는 대기·실행 중) 쓰지 않는다(D1 쓰기 한도).
    * 이번에 처음 끝났으면 finished=true와 함께 기록을 돌려준다(마지막 제출 갱신에 쓴다).
    */
   async apply(s: JudgeStatus): Promise<{ submission: Submission; finished: boolean; userId: string | null } | null> {
@@ -93,8 +94,8 @@ export class SubmissionStore {
     const [res] = await this.sql.batch([
       stmt(
         `UPDATE submissions SET status = ?, case_ids = ?, result = ?, score = ?, error = ?, finished_at = ?
-         WHERE id = ? AND status IN ('queued','running')`,
-        s.status, JSON.stringify(s.caseIds), s.result ? JSON.stringify(s.result) : null, s.score, s.error, s.finishedAt, s.id,
+         WHERE id = ? AND status IN ('queued','running') AND status != ?`,
+        s.status, JSON.stringify(s.caseIds), s.result ? JSON.stringify(s.result) : null, s.score, s.error, s.finishedAt, s.id, s.status,
       ),
     ]);
     const r = await this.row(s.id);

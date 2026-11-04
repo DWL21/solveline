@@ -385,7 +385,11 @@ CREATE TABLE daily_deliveries (
   PRIMARY KEY (pick_date, subscriber_id)
 );
 CREATE INDEX daily_deliveries_status ON daily_deliveries(pick_date, status);`;
-const afterD1Baseline: Migration[] = [dailyMigration, dailyBankMigration];
+/** 기본 폴더 복사를 첫 변경 때로 미루고 쓰지 않는 제출 색인을 지운다(migrations/0004_lazy_folders.sql) */
+const lazyFoldersMigration = `ALTER TABLE users ADD COLUMN folders_copied INTEGER NOT NULL DEFAULT 0;
+UPDATE users SET folders_copied = 1;
+DROP INDEX submissions_queue;`;
+const afterD1Baseline: Migration[] = [dailyMigration, dailyBankMigration, lazyFoldersMigration];
 
 /** 마이그레이션 하나를 적용하고 _migrations에 기록한다 */
 function applyMigration(db: Db, m: Migration, i: number) {

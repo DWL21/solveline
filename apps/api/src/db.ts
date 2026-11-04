@@ -67,6 +67,33 @@ const parse = <T>(v: string | null | undefined): T | null => (v ? (JSON.parse(v)
 /** 일일 미니 문제(daily_bank)가 아닌 문제. 미니 문제는 일반 목록·카탈로그에 나오지 않는다 */
 const NOT_DAILY = 'NOT EXISTS (SELECT 1 FROM daily_bank d WHERE d.problem_id = p.id)';
 
+/** 이 사용자가 기본 폴더(틀)를 개인 폴더로 복사했는가. 복사 전에는 틀 폴더와 problems.folder_id를 개인 폴더처럼 보여 준다. */
+async function foldersCopied(sql: Sql, userId: string): Promise<boolean> {
+  return ((await sql.value<number>('SELECT folders_copied FROM users WHERE id = ?', userId)) ?? 1) === 1;
+}
+
+/**
+ * 폴더나 배치를 처음 바꾸기 직전에 틀을 개인 폴더로 복사한다. 가입할 때 복사하면 방문자(임시 계정)마다 수십 행을 써서
+ * D1 쓰기 한도를 빨리 쓴다(#225). 동시에 불려도 이름이 같은 폴더는 한 번만 생긴다(INSERT OR IGNORE).
+ */
+async function ensureFolders(sql: Sql, userId: string, now = new Date()): Promise<void> {
+  if (await foldersCopied(sql, userId)) return;
+  await sql.batch([...(await templateFolderCopies(sql, userId, now)), stmt('UPDATE users SET folders_copied = 1 WHERE id = ?', userId)]);
+}
+
+/** 화면이 가진 폴더 id를 이 사용자의 폴더 id로 바꾼다. 틀 폴더 id면 같은 이름의 개인 폴더(복사 직후 화면이 아직 틀 id를 들고 있다). */
+async function personalFolderId(sql: Sql, userId: string, folderId: string): Promise<string | null> {
+  return (
+    (await sql.value<string>(
+      'SELECT id FROM folders WHERE user_id = ? AND (id = ? OR name = (SELECT name FROM folders WHERE id = ? AND user_id IS NULL)) ORDER BY id = ? DESC LIMIT 1',
+      userId,
+      folderId,
+      folderId,
+      folderId,
+    )) ?? null
+  );
+}
+
 export class ProblemStore {
   constructor(private readonly sql: Sql) {}
 
@@ -75,16 +102,29 @@ export class ProblemStore {
    * problems를 훑지 않고 사용자 테이블만 user_id로 읽는다(D1은 읽은 행 수로 한도를 센다).
    */
   async mySummaries(userId: string): Promise<MyProblemSummary[]> {
-    const rows = await this.sql.all<{ id: string; language: string | null; timer: string | null; last_submission: string | null; bookmarked: number; folder_id: string | null }>(
-      `SELECT k.id, s.language, s.timer, s.last_submission, b.problem_id IS NOT NULL AS bookmarked, f.folder_id
-       FROM (SELECT problem_id AS id FROM user_problems WHERE user_id = ?
-             UNION SELECT problem_id FROM bookmarks WHERE user_id = ?
-             UNION SELECT problem_id FROM folder_items WHERE user_id = ?) k
-       LEFT JOIN user_problems s ON s.user_id = ? AND s.problem_id = k.id
-       LEFT JOIN bookmarks b ON b.user_id = ? AND b.problem_id = k.id
-       LEFT JOIN folder_items f ON f.user_id = ? AND f.problem_id = k.id`,
-      ...new Array<string>(6).fill(userId),
-    );
+    type SummaryRow = { id: string; language: string | null; timer: string | null; last_submission: string | null; bookmarked: number; folder_id: string | null };
+    const rows = (await foldersCopied(this.sql, userId))
+      ? await this.sql.all<SummaryRow>(
+          `SELECT k.id, s.language, s.timer, s.last_submission, b.problem_id IS NOT NULL AS bookmarked, f.folder_id
+           FROM (SELECT problem_id AS id FROM user_problems WHERE user_id = ?
+                 UNION SELECT problem_id FROM bookmarks WHERE user_id = ?
+                 UNION SELECT problem_id FROM folder_items WHERE user_id = ?) k
+           LEFT JOIN user_problems s ON s.user_id = ? AND s.problem_id = k.id
+           LEFT JOIN bookmarks b ON b.user_id = ? AND b.problem_id = k.id
+           LEFT JOIN folder_items f ON f.user_id = ? AND f.problem_id = k.id`,
+          ...new Array<string>(6).fill(userId),
+        )
+      : // 기본 폴더를 아직 복사하지 않았으면 틀 배치(problems.folder_id)가 내 폴더다
+        await this.sql.all<SummaryRow>(
+          `SELECT k.id, s.language, s.timer, s.last_submission, b.problem_id IS NOT NULL AS bookmarked, p.folder_id
+           FROM (SELECT problem_id AS id FROM user_problems WHERE user_id = ?
+                 UNION SELECT problem_id FROM bookmarks WHERE user_id = ?
+                 UNION SELECT id FROM problems WHERE folder_id IS NOT NULL) k
+           JOIN problems p ON p.id = k.id
+           LEFT JOIN user_problems s ON s.user_id = ? AND s.problem_id = k.id
+           LEFT JOIN bookmarks b ON b.user_id = ? AND b.problem_id = k.id`,
+          ...new Array<string>(4).fill(userId),
+        );
     return rows.map((r) => ({
       id: r.id,
       bookmarked: !!r.bookmarked,
@@ -148,8 +188,10 @@ export class ProblemStore {
 
   /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
   async list(userId: string | null): Promise<ProblemSummary[]> {
+    // 비회원이거나 기본 폴더를 아직 복사하지 않았으면 틀 배치
+    const template = userId === null || !(await foldersCopied(this.sql, userId)) ? 1 : 0;
     const rows = await this.sql.all<Row & { my_language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null }>(
-      `SELECT p.id, p.title, CASE WHEN ? IS NULL THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
+      `SELECT p.id, p.title, CASE WHEN ? = 1 THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
               s.language AS my_language, s.timer, s.last_submission, b.problem_id AS bookmark_id
        FROM problems p
        LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = ?
@@ -157,7 +199,8 @@ export class ProblemStore {
        LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = ?
        WHERE ${NOT_DAILY}
        ORDER BY p.title`,
-      ...new Array<string | null>(4).fill(userId),
+      template,
+      ...new Array<string | null>(3).fill(userId),
     );
     return rows.map((r) => ({
       id: r.id,
@@ -227,18 +270,22 @@ export class ProblemStore {
   /** 이 사용자가 문제를 넣어 둔 개인 폴더 */
   private async folderOf(id: string, userId: string | null): Promise<string | null> {
     if (!userId) return null;
+    if (!(await foldersCopied(this.sql, userId))) return (await this.sql.value<string>('SELECT folder_id FROM problems WHERE id = ?', id)) ?? null;
     return (await this.sql.value<string>('SELECT folder_id FROM folder_items WHERE user_id = ? AND problem_id = ?', userId, id)) ?? null;
   }
 
   /** 문제를 이 사용자의 개인 폴더에 넣는 문(null이면 폴더 없음). 남의 폴더에는 넣을 수 없다. */
   private async setFolder(id: string, userId: string, folderId: string | null): Promise<Stmt> {
+    // 배치를 처음 바꾸면 틀을 먼저 복사한다(그 뒤로는 개인 배치만 본다)
+    await ensureFolders(this.sql, userId);
     if (!folderId) return stmt('DELETE FROM folder_items WHERE user_id = ? AND problem_id = ?', userId, id);
-    if ((await this.sql.value('SELECT 1 FROM folders WHERE id = ? AND user_id = ?', folderId, userId)) === undefined) throw new StoreError('folder_not_found', '없는 폴더입니다.');
+    const own = await personalFolderId(this.sql, userId, folderId);
+    if (!own) throw new StoreError('folder_not_found', '없는 폴더입니다.');
     return stmt(
       'INSERT INTO folder_items (user_id, problem_id, folder_id) VALUES (?, ?, ?) ON CONFLICT (user_id, problem_id) DO UPDATE SET folder_id = excluded.folder_id',
       userId,
       id,
-      folderId,
+      own,
     );
   }
 
@@ -262,10 +309,10 @@ export class ProblemStore {
     const id = crypto.randomUUID();
     const ts = now.toISOString();
     // 폴더는 개인 정리용: 만든 사람의 폴더에만 넣는다
-    const folder = await this.setFolder(id, userId, input.folderId);
+    const folder = input.folderId ? [await this.setFolder(id, userId, input.folderId)] : [];
     await this.sql.batch([
       stmt('INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)', id, input.title, input.mode, input.language, JSON.stringify(this.toBody(input, null, hiddenRef)), ts, ts),
-      folder,
+      ...folder,
     ]);
     return (await this.get(id, userId))!;
   }
@@ -383,13 +430,14 @@ export class FolderStore {
   }
 
   async list(userId: string | null): Promise<Folder[]> {
-    const rows = userId
+    const rows = userId && (await foldersCopied(this.sql, userId))
       ? await this.sql.all<FolderRow>('SELECT * FROM folders WHERE user_id = ? ORDER BY position, name', userId)
       : await this.sql.all<FolderRow>('SELECT * FROM folders WHERE user_id IS NULL ORDER BY position, name');
     return rows.map((r) => this.toFolder(r));
   }
 
   async create(name: string, userId: string, now = new Date()): Promise<Folder> {
+    await ensureFolders(this.sql, userId, now);
     const id = crypto.randomUUID();
     const position = (await this.sql.value<number>('SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE user_id = ?', userId)) ?? 0;
     try {
@@ -401,7 +449,10 @@ export class FolderStore {
     return this.toFolder((await this.one(id, userId))!);
   }
 
-  async rename(id: string, name: string, userId: string): Promise<Folder | null> {
+  async rename(folderId: string, name: string, userId: string): Promise<Folder | null> {
+    await ensureFolders(this.sql, userId);
+    const id = await personalFolderId(this.sql, userId, folderId);
+    if (!id) return null;
     try {
       if (!(await this.sql.run('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?', name, id, userId)).changes) return null;
     } catch (e) {
@@ -412,8 +463,10 @@ export class FolderStore {
   }
 
   /** 폴더를 지워도 문제는 남는다(폴더 없음). */
-  async delete(id: string, userId: string): Promise<boolean> {
-    return (await this.sql.run('DELETE FROM folders WHERE id = ? AND user_id = ?', id, userId)).changes > 0;
+  async delete(folderId: string, userId: string): Promise<boolean> {
+    await ensureFolders(this.sql, userId);
+    const id = await personalFolderId(this.sql, userId, folderId);
+    return id !== null && (await this.sql.run('DELETE FROM folders WHERE id = ? AND user_id = ?', id, userId)).changes > 0;
   }
 }
 
@@ -516,7 +569,7 @@ export type GoogleProfile = { sub: string; email: string; name: string; picture:
 
 export type User = { id: string; email: string; name: string; picture: string; editor: boolean };
 
-/** 틀 폴더(user_id NULL)와 그 배치를 이 사용자의 개인 폴더로 복사하는 문(가입할 때) */
+/** 틀 폴더(user_id NULL)와 그 배치를 이 사용자의 개인 폴더로 복사하는 문(처음 폴더·배치를 바꿀 때) */
 async function templateFolderCopies(sql: Sql, userId: string, now: Date): Promise<Stmt[]> {
   const templates = await sql.all<{ id: string; name: string; position: number }>('SELECT id, name, position FROM folders WHERE user_id IS NULL ORDER BY position');
   return templates.flatMap((t) => {
@@ -561,8 +614,7 @@ export class UserStore {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id, p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, ts,
       ),
-      // 새 사용자도 기본 폴더 구성(틀)으로 시작한다
-      ...(await templateFolderCopies(this.sql, id, now)),
+      // 새 사용자도 기본 폴더 구성(틀)으로 시작한다. 복사는 처음 폴더·배치를 바꿀 때 한다(ensureFolders)
     ]);
     return (await this.byId(id))!;
   }

@@ -441,24 +441,47 @@ describe('공용 문제·사용자별 풀이', () => {
     expect(((await (await s.app.request('/api/collections')).json()) as { data: unknown[] }).data).toHaveLength(1);
   });
 
-  it('기본 폴더(틀)는 가입한 사용자마다 개인 폴더로 복사되고, 비회원은 틀을 본다', async () => {
+  it('기본 폴더(틀)는 처음 폴더·배치를 바꿀 때 개인 폴더로 복사되고, 그 전과 비회원은 틀을 본다', async () => {
     const s = setup();
     const E = as(s, await login(s));
     const p = (await E('POST', '/api/problems', problem)).body.data.id;
-    s.db.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES ('tpl', NULL, '구현', 0, '2026-01-01')").run();
-    s.db.prepare("UPDATE problems SET folder_id = 'tpl' WHERE id = ?").run(p);
+    const q = (await E('POST', '/api/problems', { ...problem, title: '둘째' })).body.data.id;
+    s.db.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES ('tpl', NULL, '구현', 0, '2026-01-01'), ('tpl2', NULL, '탐색', 1, '2026-01-01')").run();
+    s.db.prepare("UPDATE problems SET folder_id = 'tpl' WHERE id IN (?, ?)").run(p, q);
     const guestFolders = ((await (await s.app.request('/api/folders')).json()) as { data: { id: string; name: string }[] }).data;
-    expect(guestFolders.map((f) => f.name)).toEqual(['구현']);
+    expect(guestFolders.map((f) => f.name)).toEqual(['구현', '탐색']);
     expect(((await (await s.app.request('/api/problems')).json()) as { data: { folderId: string | null }[] }).data[0]!.folderId).toBe('tpl');
-    const U = as(s, await login(s, 'new@example.com'));
+
+    // 가입해도 폴더를 복사하지 않는다(D1 쓰기). 그동안은 틀이 내 폴더다
+    const U = as(s, await login(s, 'new@example.com'), 'new@example.com');
+    const uid = s.db.prepare("SELECT id FROM users WHERE email = 'new@example.com'").pluck().get() as string;
+    const personal = () => s.db.prepare('SELECT COUNT(*) FROM folders WHERE user_id = ?').pluck().get(uid) as number;
+    expect(personal()).toBe(0);
+    expect((await U('GET', '/api/folders')).body.data.map((f: { id: string }) => f.id)).toEqual(['tpl', 'tpl2']);
+    expect((await U('GET', '/api/problems')).body.data.map((x: { folderId: string }) => x.folderId)).toEqual(['tpl', 'tpl']);
+    expect((await U('GET', '/api/me/problems')).body.data.map((x: { folderId: string }) => x.folderId)).toEqual(['tpl', 'tpl']);
+    expect((await U('GET', `/api/me/problems/${p}`)).body.data.folderId).toBe('tpl');
+    expect(personal()).toBe(0);
+
+    // 화면이 들고 있는 틀 id로 옮기면 그때 복사하고 같은 이름의 내 폴더로 옮긴다
+    const moved = await U('PATCH', `/api/problems/${p}`, { folderId: 'tpl2' });
+    expect(moved.status).toBe(200);
     const folders = (await U('GET', '/api/folders')).body.data as { id: string; name: string }[];
-    expect(folders.map((f) => f.name)).toEqual(['구현']);
-    expect(folders[0]!.id).not.toBe('tpl');
-    expect((await U('GET', '/api/problems')).body.data[0].folderId).toBe(folders[0]!.id);
-    // 바꿔도 다른 사람에게는 영향이 없다
-    await U('PUT', `/api/folders/${folders[0]!.id}`, { name: '내 구현' });
+    expect(folders.map((f) => f.name)).toEqual(['구현', '탐색']);
+    expect(folders.some((f) => f.id.startsWith('tpl'))).toBe(false);
+    const mine = Object.fromEntries((await U('GET', '/api/me/problems')).body.data.map((x: { id: string; folderId: string }) => [x.id, x.folderId]));
+    expect(mine).toEqual({ [p]: folders[1]!.id, [q]: folders[0]!.id });
+    // 다시 불러도 한 번만 복사한다(틀 id로 이름 바꾸기도 내 폴더에 적용)
+    await U('PUT', '/api/folders/tpl', { name: '내 구현' });
+    expect(personal()).toBe(2);
+    expect((await U('GET', '/api/folders')).body.data.map((f: { name: string }) => f.name)).toEqual(['내 구현', '탐색']);
+
+    // 다른 사람에게는 영향이 없다
     const V = as(s, await login(s, 'other@example.com'));
-    expect((await V('GET', '/api/folders')).body.data.map((f: { name: string }) => f.name)).toEqual(['구현']);
+    expect((await V('GET', '/api/folders')).body.data.map((f: { name: string }) => f.name)).toEqual(['구현', '탐색']);
+    // 폴더를 처음 만들 때도 틀을 먼저 복사한다
+    expect((await V('POST', '/api/folders', { name: '새 폴더' })).status).toBe(200);
+    expect((await V('GET', '/api/folders')).body.data.map((f: { name: string }) => f.name)).toEqual(['구현', '탐색', '새 폴더']);
   });
 
   it('운영자가 가입하면 예전 작성 코드·채점 결과·컬렉션을 넘겨받고 편집 권한을 갖는다', async () => {
@@ -716,6 +739,28 @@ describe('제출 큐', () => {
     expect((await store.get('run'))?.result?.results[0]).toMatchObject({ actual: '[3, 1, 4]', stderr: leaked.stderr });
   });
 
+  it('상태가 그대로면 기록을 다시 쓰지 않고, 끝난 기록은 한 번만 반영한다(D1 쓰기)', async () => {
+    const db = openDb(':memory:');
+    const sql = sqliteSql(db);
+    const store = new SubmissionStore(sql);
+    const user = await new UserStore(sql).create({ sub: 'writes', email: 'writes@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
+    await store.insert({ id: 'w', userId: user.id, problemId: null, kind: 'submit', language: 'python', mode: 'function', code: 'x', cases: [], testsetHash: null, timeLimitMs: 10_000 });
+    const changes = () => db.prepare('SELECT total_changes()').pluck().get() as number;
+    const st = (status: 'queued' | 'running' | 'done') => ({ id: 'w', status, ahead: status === 'queued' ? 2 : null, caseIds: [], result: status === 'done' ? { compile: { ok: true, output: '' }, results: [] } : null, score: status === 'done' ? 100 : null, error: null, finishedAt: status === 'done' ? '2026-01-01T00:00:00.000Z' : null });
+    const writes = async (status: 'queued' | 'running' | 'done') => {
+      const before = changes();
+      const r = await store.apply(st(status));
+      return { rows: changes() - before, finished: r!.finished };
+    };
+    expect(await writes('queued')).toEqual({ rows: 0, finished: false }); // 넣을 때와 같은 상태
+    expect(await writes('running')).toEqual({ rows: 1, finished: false });
+    expect(await writes('running')).toEqual({ rows: 0, finished: false }); // 긴 조회마다 오는 같은 상태
+    expect(await writes('done')).toEqual({ rows: 1, finished: true });
+    expect(await writes('done')).toEqual({ rows: 0, finished: false });
+    // 쓰지 않는 대기열 색인은 없다(제출 저장·상태 변경마다 색인 쓰기가 늘어난다)
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'submissions' AND name NOT LIKE 'sqlite_%'").pluck().all()).toEqual(['submissions_user']);
+  });
+
   it('코드 실행은 보이는 케이스만, 결과는 제출 id로 조회한다', async () => {
     const call = await authed();
     const p = (await call('POST', '/api/problems', problem)).body.data;
@@ -949,6 +994,7 @@ describe('기존 데이터 정리', () => {
     s.db.prepare("INSERT INTO problems (id, title, mode, language, body, created_at, updated_at) VALUES ('\u0062\u006f\u006a-1003', '[\ubc31\uc900 1003] 피보나치 함수', 'function', 'java', ?, 'x', 'x')").run(body);
     const me = (s.db.prepare("SELECT id FROM users WHERE email = 'owner@example.com'").pluck().get()) as string;
     s.db.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES ('a', ?, '구현', 0, 'x'), ('b', ?, '\ubc31\uc900 · 구현', 1, 'x'), ('c', ?, '\ubc31\uc900 · 트리', 2, 'x')").run(me, me, me);
+    s.db.prepare('UPDATE users SET folders_copied = 1 WHERE id = ?').run(me); // 개인 폴더가 있는(복사를 마친) 사용자
     s.db.prepare("INSERT INTO folder_items (user_id, problem_id, folder_id) VALUES (?, '\u0062\u006f\u006a-1003', 'b')").run(me);
     s.db.prepare("INSERT INTO collections (id, user_id, name, description, created_at, updated_at) VALUES ('k', NULL, '세트', '후기 수준(\ubc31\uc900 실버) 3문제. 수준(\ud504\ub85c\uadf8\ub798\uba38\uc2a4 Lv1~Lv3).', 'x', 'x')").run();
     stripSourceMentions(s.db);
