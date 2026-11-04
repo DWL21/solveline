@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Problem, ProblemInput, ProblemPatch } from '@solveline/shared';
+import type { Folder, Problem, ProblemInput, ProblemPatch } from '@solveline/shared';
 import { api, qk } from './api.ts';
 import { DraftQueue } from './draft-queue.ts';
 
@@ -33,6 +33,13 @@ export function useDraftSync(owner: string | undefined) {
     queue.start();
     queue.onSaved = (id: string, problem: Problem) => {
       qc.setQueryData(qk.problem(id), problem);
+      // 기본 폴더(틀)로 처음 옮기면 서버가 개인 폴더로 복사해 새 id를 준다. 모르는 폴더면 폴더와 목록을 다시 읽는다.
+      const folders = qc.getQueryData<Folder[]>(qk.folders);
+      if (problem.folderId && folders && !folders.some((f) => f.id === problem.folderId)) {
+        void qc.invalidateQueries({ queryKey: qk.folders });
+        void qc.invalidateQueries({ queryKey: qk.problems });
+        return;
+      }
       // 목록은 코드·메모 입력마다 갱신할 필요가 없다. 열려 있을 때만 새로 읽는다.
       void qc.invalidateQueries({ queryKey: qk.problems, refetchType: 'none' });
     };

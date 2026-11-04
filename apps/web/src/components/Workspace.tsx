@@ -157,6 +157,13 @@ function useProblemDraft(problem: Problem, queue: Queue) {
     },
     [queue, problem.id],
   );
+  // 서버가 폴더 id를 바꿔 돌려주면(기본 폴더를 처음 옮길 때 개인 폴더로 복사) 화면 값도 맞춘다. 보내지 않은 폴더 변경이 있으면 그대로 둔다.
+  useEffect(() => {
+    const current = draftRef.current;
+    if (current.folderId === problem.folderId || queue?.read(problem.id)?.patch.folderId !== undefined) return;
+    draftRef.current = { ...current, folderId: problem.folderId };
+    setDraft(draftRef.current);
+  }, [problem.folderId, problem.id, queue]);
   return { draft, draftRef, patch };
 }
 
