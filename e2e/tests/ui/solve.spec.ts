@@ -52,6 +52,16 @@ test.describe('문제 풀기', { tag: '@R3' }, () => {
     await evidence(page, '컴파일 에러 메시지를 그대로 보여 준다');
   });
 
+  test('Python 문법 오류는 컴파일 에러가 아닌 문법 에러로 보여 준다', async ({ page, workspace, seedProblem }) => {
+    const p = await seedProblem({ language: 'python' });
+    await workspace.open(p.id);
+    await workspace.setCode(sumSolutions.python.compileError);
+    await workspace.run();
+    await workspace.waitResult();
+    await expect(page.getByText('문법 에러')).toBeVisible();
+    await expect(page.getByText('컴파일 에러')).toHaveCount(0);
+  });
+
   test('작성한 코드는 서버에 자동 저장되어 새로고침해도 남는다', { tag: '@R7' }, async ({ page, pageApi, workspace, seedProblem }) => {
     const p = await seedProblem({ language: 'python' });
     await workspace.open(p.id);

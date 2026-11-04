@@ -43,7 +43,7 @@ pnpm --filter @solveline/e2e exec playwright test --list --grep @R2   # 권한 �
 | TC-09 | R3 | 히든 케이스로 제출한다 | 점수를 매기고 히든 케이스의 반환값은 남기지 않는다 | 보안 관점 | `api/judge.spec.ts` |
 | TC-10 | R3 | 2^53을 넘는 정수를 비교한다 | 정확히 비교한다 | 경계값 | `api/judge.spec.ts` |
 | TC-11 | R3 | 화면에서 정답 코드를 실행하고 제출한다 | 2개 중 2개 성공, 정답입니다, 목록에 해결 표시 | 사용자 여정 | `ui/solve.spec.ts` |
-| TC-12 | R3 | 화면에서 오답·컴파일 에러 코드를 실행한다 | 실패 표시와 컴파일 에러 메시지 | 동등 분할 | `ui/solve.spec.ts` |
+| TC-12 | R3 | 화면에서 오답·컴파일 에러 코드를 실행한다 | 실패 표시와 오류 메시지(Java는 컴파일 에러, Python은 문법 에러) | 동등 분할 | `ui/solve.spec.ts` |
 | TC-13 | R4 | 두 사용자가 같은 문제에 코드·메모·폴더를 저장한다 | 서로 보이지 않고, 남의 폴더로 옮길 수 없다 | 동등 분할 | `api/isolation.spec.ts` |
 | TC-14 | R4 | 북마크를 저장한다 | 본인에게만 보인다 | 동등 분할 | `api/isolation.spec.ts` |
 | TC-15 | R5 | 문제 시간 제한을 99·100·10000·10001ms로 만든다 | 100~10000만 허용, 나머지 400 | 경계값 | `api/contract.spec.ts` |

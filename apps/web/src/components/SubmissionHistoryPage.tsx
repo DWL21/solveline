@@ -30,7 +30,7 @@ function GradeBody({ item }: Readonly<{ item: SubmissionDetail }>) {
   if (isActive(item.status)) return <p className="p-4 text-ui text-dim">{statusText(item)}</p>;
   if (item.status === 'error') return <p className="p-4 text-ui text-bad">{item.error ?? '채점하지 못했어요'}</p>;
   if (item.status === 'cancelled') return <p className="p-4 text-ui text-warn">채점을 중지했습니다.</p>;
-  if (item.result) return <ResultPanel state={{ kind: 'graded', result: item.result, score: item.score ?? 0 }} />;
+  if (item.result) return <ResultPanel state={{ kind: 'graded', result: item.result, language: item.language, score: item.score ?? 0 }} />;
   return <p className="p-4 text-ui text-dim">결과가 없어요</p>;
 }
 

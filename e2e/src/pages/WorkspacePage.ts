@@ -58,6 +58,6 @@ export class WorkspacePage {
 
   /** 실행·채점이 끝날 때까지 기다린 뒤 결과 영역 텍스트 */
   async waitResult(timeout = 60_000) {
-    await expect(this.page.getByText(/개 중 \d+개 (성공|통과)|컴파일 에러|정답입니다|실행하지 못했어요/).first()).toBeVisible({ timeout });
+    await expect(this.page.getByText(/개 중 \d+개 (성공|통과)|컴파일 에러|문법 에러|정답입니다|실행하지 못했어요/).first()).toBeVisible({ timeout });
   }
 }
