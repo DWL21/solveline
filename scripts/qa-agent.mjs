@@ -98,10 +98,10 @@ export function title(issue, kind, policy = POLICY) {
 
 const verdict = (v) => (v === 'pass' ? '✓ 통과' : v === 'fail' ? '✗ 실패' : v === 'skip' ? '– 건너뜀' : `– ${safe(v, 40)}`);
 
-/** draft PR 본문: 저장소 PR 형식(변경 사항·검증·Closes) + 에이전트 요약·검증 결과 */
+/** PR 본문: 저장소 PR 형식(변경 사항·검증·Closes) + 에이전트 요약·검증 결과 */
 export function prBody({ issue, report, verify, check, runUrl }) {
   const L = [
-    '> 🤖 QA 에이전트(0011)가 만든 PR입니다. 패치 검사·pahidc 검증·CI를 모두 통과하면 자동으로 머지하고(테스트 종류만), 하나라도 실패하면 draft로 남겨 사람이 확인합니다.',
+    '> 🤖 QA 에이전트(0011)가 만든 PR입니다. 패치 검사·pahidc 검증·CI를 모두 통과하면 자동으로 머지하고(테스트 종류만), 실패하면 머지를 보류합니다.',
     '',
     '## 변경 사항',
     '',
@@ -130,7 +130,7 @@ export function prBody({ issue, report, verify, check, runUrl }) {
 export function issueComment({ state, reason = '', prUrl = '', branch = '', runUrl }) {
   const head = {
     start: '⏳ QA 에이전트가 작업을 시작했습니다.',
-    done: `✓ draft PR을 열었습니다: ${prUrl}`,
+    done: `✓ PR을 열었습니다: ${prUrl}`,
     merged: `✓ 조건을 모두 통과해 자동으로 머지했습니다: ${prUrl}`,
     held: `– PR을 열었지만 자동 머지하지 않았습니다(${safe(reason, 300)}). 사람이 확인해 주세요: ${prUrl}`,
     // PR을 자동으로 못 만들면(저장소 설정 등) 브랜치는 두고 사람이 한 번 눌러 열게 한다
