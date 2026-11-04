@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { CatalogIndex, mergeProblem, mergeSummaries, templateFor, type ProblemInput, type TestCase } from '@solveline/shared';
 import { createApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
-import { UserStore, SignupSettingsStore } from '../src/db.ts';
+import { UserStore, SignupSettingsStore, FolderStore, ProblemStore } from '../src/db.ts';
 import { openDb, stripSourceMentions } from '../src/db-node.ts';
 import { GoogleAuthError, type GoogleClient } from '../src/auth/google.ts';
 import { CaseInputError, normalizeLiteral, validateCases, type RunJob } from '@solveline/judge/runner';
@@ -145,6 +145,33 @@ const problem: ProblemInput = {
   memo: '',
   lastSubmission: null,
 };
+
+describe('임시 계정의 지연 폴더', () => {
+  it.each([false, true])('기본 배치를 읽기만 하면 복사하지 않고 첫 변경과 계정 전환 뒤에도 유지한다 (D1=%s)', async (d1) => {
+    const db = openDb(':memory:');
+    const sql = d1 ? d1Sql(fakeD1(db)) : sqliteSql(db);
+    db.prepare("INSERT INTO folders (id, user_id, name, position, created_at) VALUES ('template', NULL, '기본', 0, '2026-01-01')").run();
+    db.prepare("INSERT INTO problems (id, title, folder_id, mode, language, body, created_at, updated_at) VALUES ('problem', '문제', 'template', 'function', 'python', '{}', '2026-01-01', '2026-01-01')").run();
+    const users = new UserStore(sql);
+    const user = await users.create({ sub: 'temporary:test', email: 'test@temporary.invalid', name: '', picture: '' }, { terms: 'temporary', privacy: 'temporary' });
+    const folders = new FolderStore(sql);
+    const problems = new ProblemStore(sql);
+    const id = `${user.id}:template`;
+    expect((await folders.list(user.id)).map((f) => f.id)).toEqual([id]);
+    expect((await problems.myState('problem', user.id))?.folderId).toBe(id);
+    expect((await problems.mySummaries(user.id))[0]?.folderId).toBe(id);
+    expect((await problems.list(user.id))[0]?.folderId).toBe(id);
+    expect(db.prepare('SELECT COUNT(*) FROM folders WHERE user_id = ?').pluck().get(user.id)).toBe(0);
+    await users.upgradeTemporary(user.id, { sub: 'google', email: 'user@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
+    await Promise.all([folders.rename(id, '변경', user.id), folders.create('새 폴더', user.id)]);
+    expect((await folders.list(user.id)).map((f) => f.name)).toEqual(['변경', '새 폴더']);
+    expect((await problems.myState('problem', user.id))?.folderId).toBe(id);
+    expect(await folders.delete(id, user.id)).toBe(true);
+    expect((await problems.myState('problem', user.id))?.folderId).toBeNull();
+    expect((await folders.list(user.id)).map((f) => f.name)).toEqual(['새 폴더']);
+    db.close();
+  });
+});
 
 describe('임시 로그인', () => {
   it('독립된 일반 계정으로 로그인하고 로그아웃 후에도 계정을 보존한다', async () => {
@@ -680,6 +707,27 @@ describe('풀이 시간', () => {
     expect((await call('GET', '/api/problems/' + p.id)).body.data.timer.paused).toBe(true);
     await call('PUT', `/api/problems/${p.id}/timer`, { elapsedMs: 61_000, solvedMs: null });
     expect((await call('GET', '/api/problems/' + p.id)).body.data.timer).toEqual({ elapsedMs: 61_000, solvedMs: null, paused: false });
+  });
+});
+
+describe('제출 상태 쓰기', () => {
+  it('같은 상태는 다시 쓰지 않고 결과 수신은 한 번만 완료 처리한다', async () => {
+    const db = openDb(':memory:');
+    const sql = sqliteSql(db);
+    const users = new UserStore(sql);
+    const user = await users.create({ sub: 'status', email: 'status@example.com', name: '', picture: '' }, { terms: 'v', privacy: 'v' });
+    const store = new SubmissionStore(sql);
+    await store.insert({ id: 'job', userId: user.id, problemId: null, kind: 'run', language: 'python', mode: 'function', code: 'x', cases: [], testsetHash: null, timeLimitMs: 10000 });
+    const queued = { id: 'job', status: 'queued' as const, ahead: 0, caseIds: [], result: null, score: null, error: null, finishedAt: null };
+    const before = db.prepare('SELECT total_changes()').pluck().get();
+    await store.apply(queued);
+    expect(db.prepare('SELECT total_changes()').pluck().get()).toBe(before);
+    const done = { ...queued, status: 'done' as const, ahead: null, finishedAt: '2026-01-01T00:00:00.000Z' };
+    expect((await store.apply(done))?.finished).toBe(true);
+    const after = db.prepare('SELECT total_changes()').pluck().get();
+    expect((await store.apply(done))?.finished).toBe(false);
+    expect(db.prepare('SELECT total_changes()').pluck().get()).toBe(after);
+    db.close();
   });
 });
 

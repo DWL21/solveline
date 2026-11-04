@@ -60,6 +60,20 @@ type StateRow = { language: string | null; code: string | null; my_cases: string
 
 const parse = <T>(v: string | null | undefined): T | null => (v ? (JSON.parse(v) as T) : null);
 
+// 가상 폴더 ID를 복사 후에도 유지한다. batch는 원자적으로 실행되므로 동시 요청도 한 번만 복사한다.
+async function initializeFolders(sql: Sql, userId: string): Promise<void> {
+  if ((await sql.value<number>('SELECT folders_initialized FROM users WHERE id = ?', userId)) !== 0) return;
+  await sql.batch([
+    stmt(`INSERT INTO folders (id, user_id, name, position, created_at)
+      SELECT ? || ':' || f.id, ?, f.name, f.position, f.created_at FROM folders f
+      WHERE f.user_id IS NULL AND EXISTS (SELECT 1 FROM users WHERE id = ? AND folders_initialized = 0)`, userId, userId, userId),
+    stmt(`INSERT INTO folder_items (user_id, problem_id, folder_id)
+      SELECT ?, p.id, ? || ':' || p.folder_id FROM problems p
+      WHERE p.folder_id IS NOT NULL AND EXISTS (SELECT 1 FROM users WHERE id = ? AND folders_initialized = 0)`, userId, userId, userId),
+    stmt('UPDATE users SET folders_initialized = 1 WHERE id = ? AND folders_initialized = 0', userId),
+  ]);
+}
+
 /**
  * 문제 저장소. 문제 내용은 모두가 같이 보는 공용이고(관리자만 바꾼다), 작성 코드·언어·풀이 시간·마지막 제출은 user_problems에 사용자별로 둔다.
  * 히든 케이스는 body가 아니라 judge(해시 파일·R2)에 두고 body에는 해시·개수만 남긴다.
@@ -76,14 +90,17 @@ export class ProblemStore {
    */
   async mySummaries(userId: string): Promise<MyProblemSummary[]> {
     const rows = await this.sql.all<{ id: string; language: string | null; timer: string | null; last_submission: string | null; bookmarked: number; folder_id: string | null }>(
-      `SELECT k.id, s.language, s.timer, s.last_submission, b.problem_id IS NOT NULL AS bookmarked, f.folder_id
+      `SELECT k.id, s.language, s.timer, s.last_submission, b.problem_id IS NOT NULL AS bookmarked, COALESCE(f.folder_id, CASE WHEN u.folders_initialized = 0 AND p.folder_id IS NOT NULL THEN u.id || ':' || p.folder_id END) AS folder_id
        FROM (SELECT problem_id AS id FROM user_problems WHERE user_id = ?
              UNION SELECT problem_id FROM bookmarks WHERE user_id = ?
-             UNION SELECT problem_id FROM folder_items WHERE user_id = ?) k
+             UNION SELECT problem_id FROM folder_items WHERE user_id = ?
+             UNION SELECT p.id FROM problems p JOIN users u ON u.id = ? AND u.folders_initialized = 0 WHERE p.folder_id IS NOT NULL) k
        LEFT JOIN user_problems s ON s.user_id = ? AND s.problem_id = k.id
        LEFT JOIN bookmarks b ON b.user_id = ? AND b.problem_id = k.id
-       LEFT JOIN folder_items f ON f.user_id = ? AND f.problem_id = k.id`,
-      ...new Array<string>(6).fill(userId),
+       LEFT JOIN folder_items f ON f.user_id = ? AND f.problem_id = k.id
+       LEFT JOIN users u ON u.id = ?
+       LEFT JOIN problems p ON p.id = k.id`,
+      ...new Array<string>(8).fill(userId),
     );
     return rows.map((r) => ({
       id: r.id,
@@ -149,15 +166,16 @@ export class ProblemStore {
   /** userId가 null이면 비회원: 풀이 상태 없이 문제만(폴더는 틀 배치) */
   async list(userId: string | null): Promise<ProblemSummary[]> {
     const rows = await this.sql.all<Row & { my_language: string | null; timer: string | null; last_submission: string | null; bookmark_id: string | null }>(
-      `SELECT p.id, p.title, CASE WHEN ? IS NULL THEN p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
+      `SELECT p.id, p.title, CASE WHEN ? IS NULL THEN p.folder_id WHEN u.folders_initialized = 0 AND p.folder_id IS NOT NULL THEN u.id || ':' || p.folder_id ELSE f.folder_id END AS folder_id, p.mode, p.language, p.updated_at,
               s.language AS my_language, s.timer, s.last_submission, b.problem_id AS bookmark_id
        FROM problems p
        LEFT JOIN user_problems s ON s.problem_id = p.id AND s.user_id = ?
        LEFT JOIN bookmarks b ON b.problem_id = p.id AND b.user_id = ?
        LEFT JOIN folder_items f ON f.problem_id = p.id AND f.user_id = ?
+       LEFT JOIN users u ON u.id = ?
        WHERE ${NOT_DAILY}
        ORDER BY p.title`,
-      ...new Array<string | null>(4).fill(userId),
+      ...new Array<string | null>(5).fill(userId),
     );
     return rows.map((r) => ({
       id: r.id,
@@ -227,11 +245,12 @@ export class ProblemStore {
   /** 이 사용자가 문제를 넣어 둔 개인 폴더 */
   private async folderOf(id: string, userId: string | null): Promise<string | null> {
     if (!userId) return null;
-    return (await this.sql.value<string>('SELECT folder_id FROM folder_items WHERE user_id = ? AND problem_id = ?', userId, id)) ?? null;
+    return (await this.sql.value<string>(`SELECT CASE WHEN u.folders_initialized = 0 AND p.folder_id IS NOT NULL THEN u.id || ':' || p.folder_id ELSE f.folder_id END FROM problems p JOIN users u ON u.id = ? LEFT JOIN folder_items f ON f.user_id = u.id AND f.problem_id = p.id WHERE p.id = ?`, userId, id)) ?? null;
   }
 
   /** 문제를 이 사용자의 개인 폴더에 넣는 문(null이면 폴더 없음). 남의 폴더에는 넣을 수 없다. */
   private async setFolder(id: string, userId: string, folderId: string | null): Promise<Stmt> {
+    await initializeFolders(this.sql, userId);
     if (!folderId) return stmt('DELETE FROM folder_items WHERE user_id = ? AND problem_id = ?', userId, id);
     if ((await this.sql.value('SELECT 1 FROM folders WHERE id = ? AND user_id = ?', folderId, userId)) === undefined) throw new StoreError('folder_not_found', '없는 폴더입니다.');
     return stmt(
@@ -384,12 +403,13 @@ export class FolderStore {
 
   async list(userId: string | null): Promise<Folder[]> {
     const rows = userId
-      ? await this.sql.all<FolderRow>('SELECT * FROM folders WHERE user_id = ? ORDER BY position, name', userId)
+      ? await this.sql.all<FolderRow>(`SELECT f.id, f.name, f.position, f.created_at FROM folders f WHERE f.user_id = ? UNION ALL SELECT u.id || ':' || f.id, f.name, f.position, f.created_at FROM folders f JOIN users u ON u.id = ? AND u.folders_initialized = 0 WHERE f.user_id IS NULL ORDER BY position, name`, userId, userId)
       : await this.sql.all<FolderRow>('SELECT * FROM folders WHERE user_id IS NULL ORDER BY position, name');
     return rows.map((r) => this.toFolder(r));
   }
 
   async create(name: string, userId: string, now = new Date()): Promise<Folder> {
+    await initializeFolders(this.sql, userId);
     const id = crypto.randomUUID();
     const position = (await this.sql.value<number>('SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE user_id = ?', userId)) ?? 0;
     try {
@@ -402,6 +422,7 @@ export class FolderStore {
   }
 
   async rename(id: string, name: string, userId: string): Promise<Folder | null> {
+    await initializeFolders(this.sql, userId);
     try {
       if (!(await this.sql.run('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?', name, id, userId)).changes) return null;
     } catch (e) {
@@ -413,6 +434,7 @@ export class FolderStore {
 
   /** 폴더를 지워도 문제는 남는다(폴더 없음). */
   async delete(id: string, userId: string): Promise<boolean> {
+    await initializeFolders(this.sql, userId);
     return (await this.sql.run('DELETE FROM folders WHERE id = ? AND user_id = ?', id, userId)).changes > 0;
   }
 }
@@ -557,12 +579,11 @@ export class UserStore {
     const ts = now.toISOString();
     await this.sql.batch([
       stmt(
-        `INSERT INTO users (id, google_sub, email, name, picture, role, terms_version, privacy_version, agreed_at, created_at, last_login_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, ts,
+        `INSERT INTO users (id, google_sub, email, name, picture, role, terms_version, privacy_version, agreed_at, created_at, last_login_at, folders_initialized)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, ts, versions.terms === 'temporary' ? 0 : 1,
       ),
-      // 새 사용자도 기본 폴더 구성(틀)으로 시작한다
-      ...(await templateFolderCopies(this.sql, id, now)),
+      ...(versions.terms === 'temporary' ? [] : await templateFolderCopies(this.sql, id, now)),
     ]);
     return (await this.byId(id))!;
   }
