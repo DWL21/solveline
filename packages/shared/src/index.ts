@@ -30,7 +30,13 @@ export const PublicConfig = z.object({
 export type PublicConfig = z.infer<typeof PublicConfig>;
 
 /** 회원가입 대기: Google 인증은 끝났고 약관 동의만 남은 상태 */
-export const SignupPending = z.object({ email: z.string(), name: z.string(), picture: z.string() });
+export const SignupPending = z.object({
+  email: z.string(),
+  name: z.string(),
+  picture: z.string(),
+  /** 임시 계정으로 로그인한 채 가입한다: 임시 계정의 기록을 이 계정으로 이어 쓴다 */
+  fromTemporary: z.boolean(),
+});
 export type SignupPending = z.infer<typeof SignupPending>;
 
 /** 회원가입 동의: 모두 필수 */

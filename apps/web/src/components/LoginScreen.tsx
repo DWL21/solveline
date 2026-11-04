@@ -85,7 +85,7 @@ export function LoginScreen() {
           <button type="button" disabled={pending || closed} onClick={temporaryLogin} className="btn-ghost min-h-12 w-full text-body">
             {pending ? '시작하는 중…' : '임시 계정으로 둘러보기'}
           </button>
-          <p className="mt-3 text-center text-caption text-faint">임시 계정은 로그아웃하거나 24시간이 지나면 사라져요.</p>
+          <p className="mt-3 text-center text-caption text-faint">임시 계정은 로그아웃하거나 24시간이 지나면 사라져요. 그 전에 Google로 가입하면 기록을 그대로 이어 써요.</p>
           {temporaryError && <p role="alert" className="mt-4 text-ui text-bad">{temporaryError}</p>}
         </main>
       </div>

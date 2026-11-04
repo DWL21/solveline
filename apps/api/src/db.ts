@@ -567,6 +567,21 @@ export class UserStore {
     return (await this.byId(id))!;
   }
 
+  /**
+   * 임시 계정을 Google 계정으로 바꾼다. 같은 사용자 행을 그대로 쓰므로 풀이·제출·인박스 등 모든 기록이 이어진다.
+   * 그 사이 같은 Google 계정이 생겼거나 임시 계정이 아니면 바꾸지 않고 null을 돌려준다.
+   */
+  async upgradeTemporary(id: string, p: GoogleProfile, versions: { terms: string; privacy: string }, opts: { editor?: boolean } = {}, now = new Date()) {
+    if (await this.byGoogleSub(p.sub)) return null;
+    const ts = now.toISOString();
+    const { changes } = await this.sql.run(
+      `UPDATE users SET google_sub = ?, email = ?, name = ?, picture = ?, role = ?, terms_version = ?, privacy_version = ?, agreed_at = ?, last_login_at = ?
+       WHERE id = ? AND google_sub LIKE 'temporary:%'`,
+      p.sub, p.email, p.name, p.picture, opts.editor ? 'editor' : 'user', versions.terms, versions.privacy, ts, ts, id,
+    );
+    return changes ? this.byId(id) : null;
+  }
+
   /** 로그인할 때 Google의 최신 이메일·이름·사진으로 갱신 */
   async touch(id: string, p: GoogleProfile, now = new Date()) {
     await this.sql.run('UPDATE users SET email = ?, name = ?, picture = ?, last_login_at = ? WHERE id = ?', p.email, p.name, p.picture, now.toISOString(), id);
