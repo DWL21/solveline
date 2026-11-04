@@ -91,3 +91,9 @@ test('이슈 진행 댓글은 표식으로 시작한다', () => {
   assert.ok(issueComment({ state: 'start', runUrl: 'https://run' }).startsWith(MARKER));
   assert.match(issueComment({ state: 'failed', reason: '바꾼 것이 없습니다', runUrl: 'r' }), /PR을 만들지 못했습니다: 바꾼 것이 없습니다/);
 });
+
+test('PR을 자동으로 못 만들면 브랜치·이유·PR 만들기 링크를 남긴다', () => {
+  const c = issueComment({ state: 'branch', reason: 'GitHub Actions is not permitted to create or approve pull requests', prUrl: 'https://github.com/o/r/compare/main...test%2F7?expand=1', branch: 'test/7', runUrl: 'r' });
+  assert.match(c, /브랜치 `test\/7`에 커밋하고 CI를 시작했지만 PR은 자동으로 만들지 못했습니다\(GitHub Actions is not permitted/);
+  assert.match(c, /\[PR 만들기\]\(https:\/\/github\.com\/o\/r\/compare\/main\.\.\.test%2F7\?expand=1\)/);
+});
