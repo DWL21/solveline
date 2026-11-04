@@ -434,3 +434,48 @@ describe('채점 지표', () => {
     expect(res.body.data.windows['24h'].groups[0]).toMatchObject({ kind: 'run', language: 'python', count: 1, statuses: { done: 1 } });
   });
 });
+
+describe('대기 순서와 받아들이기 제어', () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 10, 4, 3, 0, 0) + s * 1000);
+
+  it('제출이 30초 넘게 기다리면 새 코드 실행보다 먼저 꺼낸다(aging)', () => {
+    const store = new JobStore(openJobsDb(':memory:'));
+    store.insert(job('sub', { kind: 'submit' }), ['1'], at(0));
+    store.insert(job('run1'), ['1'], at(20));
+    // 20초 뒤: 제출(1 - 20/30)보다 방금 온 코드 실행(0 - 0)이 먼저
+    expect(store.claim(at(20))!.id).toBe('run1');
+    store.insert(job('run2'), ['1'], at(40));
+    // 40초 뒤: 제출(1 - 40/30 < 0)이 먼저
+    expect(store.claim(at(40))!.id).toBe('sub');
+    expect(store.claim(at(40))!.id).toBe('run2');
+  });
+
+  it('대기 순번은 꺼내는 순서와 같은 기준으로 센다', () => {
+    const store = new JobStore(openJobsDb(':memory:'));
+    const old = new Date(Date.now() - 60_000);
+    store.insert(job('sub', { kind: 'submit' }), ['1'], old);
+    store.insert(job('run'), ['1']);
+    // 1분 기다린 제출이 앞에 있다
+    expect(store.status('sub')!.ahead).toBe(0);
+    expect(store.status('run')!.ahead).toBe(1);
+  });
+
+  it('예상 대기 시간이 상한을 넘으면 503과 Retry-After로 거절하고, 같은 id를 다시 보내면 받는다', async () => {
+    const { judge, call } = setup();
+    // 실행하지 않은 대기 작업 150개(최근 기록이 없으면 코드 실행 1초·제출 3초 가정, 슬롯 2개)
+    // → 코드 실행 75초 > 60초, 제출 225초 < 300초
+    for (let i = 0; i < 150; i++) judge.jobs.insert(job(`q${i}`), ['1']);
+    const res = await judge.app.request('/jobs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await judgeHeaders(SECRET, 'POST', '/jobs', JSON.stringify(job('new')))) },
+      body: JSON.stringify(job('new')),
+    });
+    expect(res.status).toBe(503);
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('busy');
+    // 이미 받은 작업(API가 다시 보냄)은 거절하지 않는다
+    expect((await call('POST', '/jobs', job('q0'))).status).not.toBe(503);
+    // 제출은 상한이 길다(300초): 아직 받는다
+    expect((await call('POST', '/jobs', job('sub', { kind: 'submit' }))).status).not.toBe(503);
+  });
+});

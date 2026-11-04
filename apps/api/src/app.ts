@@ -136,6 +136,15 @@ const encode = encodeJson;
 const decode = decodeJson;
 
 const fail = (c: Context, status: Status, code: string, message: string) => c.json({ error: { code, message } }, status);
+/** 받아들이지 않은 제출: 503이면 다시 시도할 시각(Retry-After)도 알린다 */
+const refuse = (c: Context, [status, code, message, retryAfter]: [Status, string, string, number?]) => {
+  if (retryAfter) c.header('Retry-After', String(retryAfter));
+  return fail(c, status, code, message);
+};
+/** 사용자당 동시에 대기·실행할 수 있는 수(0011 6장 2번)와, 결과를 못 들은 기록을 무시하는 기간 */
+const RUN_ACTIVE = 2;
+const SUBMIT_ACTIVE = 1;
+const ACTIVE_WINDOW_MS = 10 * 60_000;
 
 /** 응답을 공유 계약 스키마로 검증한 뒤 { data } 봉투로 보낸다. */
 function ok<T extends z.ZodType>(c: Context, schema: T, data: z.input<T>) {
@@ -1009,10 +1018,30 @@ export function createApp(deps: AppDeps) {
     return sub;
   };
 
-  /** 기록을 남기고 judge에 맡긴다. judge가 거절하면(잘못된 케이스 등) 기록을 지우고 오류를 그대로 돌려준다. */
-  const enqueue = async (userId: string, req: SubmissionRequest, wait: number, timeLimitOverride?: number): Promise<Submission | [Status, string, string]> => {
+  /**
+   * 받아들이기 제어(0011 6장). 같은 내용이 이미 대기·실행 중이면 그 제출을 돌려주고, 코드 실행은 사용자당 RUN_ACTIVE건을 넘으면
+   * 가장 오래된 실행을 중지하며(고쳐서 다시 실행하는 흐름), 제출은 SUBMIT_ACTIVE건을 넘으면 거절한다.
+   */
+  const admit = async (userId: string, req: SubmissionRequest, wait: number): Promise<Submission | [Status, string, string] | null> => {
+    const active = await submissions.active(userId, new Date(now() - ACTIVE_WINDOW_MS));
+    const same = active.find((a) => a.kind === req.kind && a.problemId === req.problemId && a.language === req.language && a.mode === req.mode && a.code === req.code);
+    if (same) return refresh(same.id, wait);
+    const mine = active.filter((a) => a.kind === req.kind);
+    if (req.kind === 'submit' && mine.length >= SUBMIT_ACTIVE) return [429, 'submit_in_progress', '이전 제출을 채점하고 있어요. 끝난 뒤 다시 제출해 주세요.'];
+    if (req.kind === 'run')
+      for (const old of mine.slice(0, Math.max(0, mine.length - RUN_ACTIVE + 1))) {
+        const st = await judge.cancel(old.id).catch(() => null);
+        if (st) await record(st);
+      }
+    return null;
+  };
+
+  /** 기록을 남기고 judge에 맡긴다. judge가 거절하면(잘못된 케이스, 요청이 많음 등) 기록을 지우고 오류를 그대로 돌려준다. */
+  const enqueue = async (userId: string, req: SubmissionRequest, wait: number, timeLimitOverride?: number): Promise<Submission | [Status, string, string, number?]> => {
     const problem = req.problemId ? await problems.get(req.problemId, userId) : null;
     if (req.problemId && !problem) return [404, 'not_found', '없는 문제입니다.'];
+    const admitted = await admit(userId, req, wait);
+    if (admitted) return admitted;
     const timeLimitMs = problem?.timeLimitMs ?? timeLimitOverride ?? 10_000;
     // 코드 실행은 보이는 케이스, 제출은 히든 테스트셋(없으면 요청의 케이스)
     const ref = req.kind === 'submit' ? problem?.hiddenTestset : null;
@@ -1023,6 +1052,10 @@ export function createApp(deps: AppDeps) {
       const s = await judge.submit({ id, kind: req.kind, language: req.language, mode: req.mode, code: req.code, cases, testsetHash: ref?.hash ?? null, timeLimitMs }, wait);
       return (await record(s))!;
     } catch (e) {
+      if (e instanceof JudgeError && e.status === 503) {
+        await submissions.remove(id);
+        return [503, e.code, e.message, e.retryAfter ?? 30];
+      }
       if (!(e instanceof JudgeError) || e.status >= 500) throw e;
       await submissions.remove(id);
       return [e.status === 409 ? 500 : 400, e.code, e.message];
@@ -1054,7 +1087,7 @@ export function createApp(deps: AppDeps) {
     if (!body) return fail(c, 400, 'invalid_request', '제출 형식이 올바르지 않습니다.');
     // ?wait=초: 짧은 실행은 이 요청 하나로 결과까지 받는다
     const s = await enqueue(c.get('userId'), body, waitMs(c));
-    if (Array.isArray(s)) return fail(c, s[0], s[1], s[2]);
+    if (Array.isArray(s)) return refuse(c, s);
     if (!isTerminal(s.status)) c.status(202);
     return ok(c, Submission, s);
   });
@@ -1125,7 +1158,7 @@ export function createApp(deps: AppDeps) {
     if (!body) return fail(c, 400, 'invalid_request', '실행 요청 형식이 올바르지 않습니다.');
     const { timeLimitMs, ...rest } = body;
     let s = await enqueue(c.get('userId'), { problemId: null, kind: 'run', ...rest, cases: body.cases.map((x) => ({ ...x, hidden: false })) }, 25_000, timeLimitMs);
-    if (Array.isArray(s)) return fail(c, s[0], s[1], s[2]);
+    if (Array.isArray(s)) return refuse(c, s);
     while (!isTerminal(s.status)) s = (await refresh(s.id, 25_000))!;
     if (s.status === 'cancelled') return fail(c, 409, 'cancelled', '실행이 중지되었습니다.');
     if (s.status === 'error' || !s.result) return fail(c, 502, 'runner_error', s.error ?? '실행하지 못했습니다.');
