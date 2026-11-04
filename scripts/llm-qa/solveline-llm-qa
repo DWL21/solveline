@@ -173,7 +173,7 @@ $(cat "$WORK/input.json")
     (cd "$WORK/src" && pnpm --filter @solveline/e2e exec playwright install chromium >&2) || true
     # shellcheck disable=SC2086 # spec 목록은 단어로 나눈다
     if log=$(cd "$WORK/src/e2e" && CI=true pnpm exec playwright test $specs --project=api --project=desktop-chromium --reporter=line 2>&1); then
-      step "바뀐 e2e 실행(api·desktop-chromium)" pass "$(tail -n 3 <<<"$log")"
+      step "바뀐 e2e 실행(api·desktop-chromium)" pass "$(tail -n 1 <<<"$log")"
     else
       step "바뀐 e2e 실행(api·desktop-chromium)" fail "$(tail -n 25 <<<"$log")"
     fi
