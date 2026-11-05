@@ -12,23 +12,31 @@
 
 ## 배포 구조
 
+2026-10-28부터 운영 API는 Pages Worker 안에서 돕니다(`API_MODE = "worker"`). pahidc에는 채점(judge·runner)과 게이트웨이만 있습니다.
+
 ```
-solveline.simplyimg.com ─ Cloudflare Pages (web 정적 파일)
-                        └─ /api/* → Pages 프록시 → solveline-api.simplyimg.com
-                                                   └─ Cloudflare Tunnel → pahidc 127.0.0.1:8083
-                                                       └─ nginx → api:8787 (Hono, SQLite, 제출 기록)
-                                                                  └─ judge:8790 (대기열·디스패처·테스트셋 캐시, HMAC 서명)
-                                                                     └─ runner (네트워크 없음, unix 소켓)
+solveline.simplyimg.com ─ Cloudflare Pages
+  ├─ web 정적 파일 (React 웹 IDE)
+  └─ _worker.js (Pages Worker)
+       ├─ /api/catalog/*   → R2 solveline-catalog (공용 문제 게시 사본, 캐시)
+       ├─ /api/internal/r2 → R2 catalog/·testsets/ (pahidc가 쓰는 프록시, R2_PROXY_SECRET)
+       ├─ /api/*           → Hono API (D1 solveline: 사용자·제출 기록의 원본)
+       └─ 채점 요청 → JUDGE_URL = solveline-api.simplyimg.com/judge
+                         └─ Cloudflare Tunnel → pahidc 127.0.0.1:8083
+                             └─ nginx 게이트웨이 /judge/ → judge:8790 (대기열·디스패처·테스트셋 캐시, HMAC 서명)
+                                                            └─ runner (네트워크 없음, unix 소켓)
+
+Cloudflare Workers apps/mailer (cron) ─ 일일 메일, 같은 D1을 쓴다
 ```
 
-api는 runner에 직접 닿지 않습니다. runner 컨테이너는 네트워크가 없고 judge와 공유 볼륨의 unix 소켓으로만 통신합니다. 실행은 judge에 맡기고, judge가 끝난 결과를 api의 `/api/internal/judge/results`로 보냅니다([`decisions/0007-serverless-worker-and-judge.md`](decisions/0007-serverless-worker-and-judge.md)).
+Worker API는 runner에 직접 닿지 않습니다. runner 컨테이너는 네트워크가 없고 judge와 공유 볼륨의 unix 소켓으로만 통신합니다. 실행은 judge에 맡기고, judge가 끝난 결과를 `RESULTS_URL`(공개 주소)의 `/api/internal/judge/results`로 Worker에 보냅니다([`decisions/0007-serverless-worker-and-judge.md`](decisions/0007-serverless-worker-and-judge.md)). judge는 테스트셋도 Worker의 `/api/internal/r2`를 거쳐 R2 `testsets/`에 올립니다. pahidc에는 사용자 데이터와 로그인 비밀을 두지 않습니다. 게이트웨이의 `/api/`(예전 pahidc api)는 롤백용이며 평소에는 꺼져 있습니다.
 
 채점 흐름(자세히는 [`decisions/0003-judge-pipeline.md`](decisions/0003-judge-pipeline.md)):
 
 ```
-브라우저 ─POST /api/submissions─▶ api: submissions 표(queued) ─서명 POST /jobs─▶ judge: 대기열 ─디스패처(코드 실행 > 제출)─▶ 빈 runner 슬롯
+브라우저 ─POST /api/submissions─▶ Worker: D1 submissions 표(queued) ─서명 POST /judge/jobs─▶ judge: 대기열 ─디스패처(코드 실행 > 제출)─▶ 빈 runner 슬롯
    └─ GET /api/submissions/:id?wait= 로 결과 조회(judge에 긴 조회 위임)   runner: 테스트셋을 해시로 캐시, 없을 때만 받음 (409 → 업로드)
-judge ─서명 POST /api/internal/judge/results─▶ api: 결과·점수·마지막 제출 기록(같은 결과는 한 번만 반영)
+judge ─서명 POST /api/internal/judge/results─▶ Worker: D1에 결과·점수·마지막 제출 기록(같은 결과는 한 번만 반영)
 ```
 
 `main` 푸시 → `Production deployment` 워크플로(self-hosted runner `solveline-production`) → `/etc/solveline/judge.env` 기록 → web·Worker 빌드 → judge·runner·게이트웨이 `docker compose up --build` → Pages 비밀·D1 마이그레이션 → (롤백 기간 뒤 한 번) 예전 사용자 데이터 정리 → Pages 업로드 → 공개 주소 헬스 체크. PR의 `check`, `docker`, `secret-scan`은 기존처럼 GitHub-hosted에서 실행합니다.
